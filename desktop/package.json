@@ -70,6 +70,10 @@
       {
         "from": "../.release/engine-deps",
         "to": "engine-deps"
+      },
+      {
+        "from": "../.release/codex",
+        "to": "codex"
       }
     ],
     "linux": {

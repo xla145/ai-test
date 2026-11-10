@@ -99,6 +99,8 @@ jobs:
       - run: npm ci
       - name: 准备引擎依赖
         run: PYTHON=python scripts/prepare-engine-deps.sh
+      - name: 准备 Codex
+        run: scripts/fetch-codex.sh
       - name: 构建安装包
         run: |
           npm version "${VERSION}" -w desktop --no-git-tag-version --allow-same-version
@@ -133,7 +135,8 @@ jobs:
           | macOS（Apple 芯片） | `aitest-desktop-*-mac-arm64.dmg` |
           | Linux | `aitest-desktop-*-linux-x86_64.AppImage` |
 
-          桌面端需要本机安装 Python 3.10+（引擎依赖已随安装包附带）和 Codex CLI（或用 `AITEST_CODEX_BIN` 指定路径）。
+          桌面端需要本机安装 Python 3.10+（引擎依赖已随安装包附带）。Codex 已内置（锁定版本），
+          如需使用其他版本，可用 `AITEST_CODEX_BIN` 指定 codex 路径。
           安装包未做代码签名：macOS 首次打开需在「系统设置 → 隐私与安全性」中允许，Windows 可能出现 SmartScreen 提示。
 
           ## 其他发布物
