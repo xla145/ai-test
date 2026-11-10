@@ -7,11 +7,12 @@
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
-    "build": "npm run build:main && npm run build:renderer",
-    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build": "npm run deps && npm run build:main && npm run build:renderer",
+    "typecheck": "npm run deps && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "test": "vitest run",
-    "dev": "npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env AITEST_DEV_SERVER=http://localhost:5173 electron .\"",
-    "start": "electron ."
+    "dev": "npm run deps && npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env AITEST_DEV_SERVER=http://localhost:5173 electron .\"",
+    "start": "electron .",
+    "deps": "npm run build --prefix ../mcp-servers"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
