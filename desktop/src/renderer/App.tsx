@@ -76,6 +76,8 @@ export function App() {
   const [approval, setApproval] = useState<ApprovalRequest>();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityOpen, setActivityOpen] = useState(false);
+  /** 打开活动面板后新到的条数，用于侧栏的提示点 */
+  const [unread, setUnread] = useState(0);
   const [creating, setCreating] = useState(false);
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
@@ -86,7 +88,9 @@ export function App() {
     const offApproval = api().onApprovalRequest(setApproval);
     const offEvent = api().onEvent((e) => {
       const detail = describe(e.method, e.params);
-      if (detail) setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+      if (!detail) return;
+      setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+      setUnread((n) => n + 1);
     });
     const offView = api().onViewChange?.((v) => setViewVisible(v.visible));
     return () => {
@@ -133,16 +137,22 @@ export function App() {
             }}
             items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
           />
-          <div className="sider-section" style={{ paddingBottom: 16 }}>
-            <Button block icon={<SettingOutlined />} type={showSettings ? "primary" : "default"} ghost={showSettings}
-              style={{ marginBottom: 8 }} onClick={() => setShowSettings(true)}>
+          <div className="sider-footer" style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
+            <Button type="text" className="sider-action" icon={<SettingOutlined />}
+              style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
+              onClick={() => setShowSettings(true)}>
               全局设置
             </Button>
-            <Button block icon={<HistoryOutlined />} onClick={() => setActivityOpen(true)}>
-              <Badge count={activity.length} size="small" overflowCount={99} offset={[8, -2]}>
-                <span>agent 活动</span>
-              </Badge>
-            </Button>
+            <Tooltip title={unread ? `${unread} 条新活动` : undefined}>
+              <Button type="text" className="sider-action"
+                icon={<Badge dot={unread > 0} offset={[-1, 2]}><HistoryOutlined /></Badge>}
+                onClick={() => {
+                  setActivityOpen(true);
+                  setUnread(0);
+                }}>
+                agent 活动
+              </Button>
+            </Tooltip>
           </div>
         </Flex>
       </Sider>
@@ -220,7 +230,7 @@ export function App() {
       </Modal>
 
       <Drawer title="agent 活动" open={activityOpen} onClose={() => setActivityOpen(false)} width={420}
-        extra={<Button size="small" onClick={() => setActivity([])}>清空</Button>}>
+        extra={<Button size="small" onClick={() => { setActivity([]); setUnread(0); }}>清空</Button>}>
         {activity.length ? (
           <Timeline items={[...activity].reverse().map((a) => ({ children: <><Typography.Text type="secondary">{a.time}</Typography.Text> {a.detail}</> }))} />
         ) : (
