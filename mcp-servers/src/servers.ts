@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import type { SecretResolver } from "./secrets.js";
 
@@ -10,7 +13,7 @@ export interface ToolDef {
   description: string;
   input: z.ZodRawShape;
   /** 把工具参数转换成引擎 CLI 参数 */
-  toArgs: (input: Record<string, unknown>) => string[];
+  toArgs: (input: Record<string, unknown>) => string[] | Promise<string[]>;
   /** 需要凭据的工具：返回 [projectId, envName]，由凭据代理换取后注入引擎进程 */
   secretScope?: (input: Record<string, unknown>) => [string, string];
 }
@@ -24,6 +27,12 @@ export interface ServerDef {
 const project = z.string().describe("项目 ID");
 const caseId = z.string().describe("用例 ID");
 const json = (v: unknown) => JSON.stringify(v);
+/** 大段内容（脚本、结果）经临时文件传给引擎 */
+const tempFile = (name: string, content: string) => {
+  const file = join(mkdtempSync(join(tmpdir(), "aitest-")), name);
+  writeFileSync(file, content);
+  return file;
+};
 const opt = (flag: string, v: unknown): string[] =>
   v === undefined || v === null || v === "" || v === false ? [] : v === true ? [flag] : [flag, String(v)];
 
@@ -211,6 +220,62 @@ export const SERVERS: ServerDef[] = [
     name: "report",
     description: "执行结果与失败汇总",
     tools: [
+      {
+        name: "save_run",
+        description: "保存一次执行结果（外部执行器的结果数组：case_id、status、duration、message、evidence_paths、reviews）",
+        input: {
+          project_id: project,
+          env: z.string(),
+          mode: z.enum(["regression", "explore", "heal"]).optional(),
+          framework: z.string().optional(),
+          results: z.array(z.record(z.string(), z.unknown())),
+        },
+        toArgs: (i) => [
+          "save-run", "--project", String(i.project_id), "--env", String(i.env), ...opt("--mode", i.mode),
+          ...opt("--framework", i.framework), "--results-file", tempFile("results.json", json(i.results)),
+        ],
+      },
+      {
+        name: "attach_evidence",
+        description: "为用例登记证据（截图、trace、日志），并放入人工复核队列",
+        input: {
+          case_id: caseId,
+          description: z.string(),
+          evidence_paths: z.array(z.string()).min(1),
+          kind: z.string().optional(),
+          ai_verdict: z.enum(["pass", "fail"]).optional(),
+          run_id: z.string().optional(),
+        },
+        toArgs: (i) => [
+          "add-review", "--case", String(i.case_id), "--description", String(i.description),
+          "--evidence", json(i.evidence_paths), ...opt("--kind", i.kind ?? "evidence"),
+          ...opt("--ai-verdict", i.ai_verdict), ...opt("--run", i.run_id),
+        ],
+      },
+      {
+        name: "propose_script_fix",
+        description: "自愈：提交脚本的完整新内容，生成 diff 等待用户确认后合并。产品缺陷不允许改脚本",
+        input: {
+          project_id: project,
+          case_id: caseId,
+          script_path: z.string().describe("workspace 内的相对路径，如 scripts/ui/tc_xxx.spec.ts"),
+          content: z.string().describe("修改后的完整脚本"),
+          reason: z.string(),
+          failure_type: z.enum(["script_error", "environment"]).optional(),
+          run_id: z.string().optional(),
+        },
+        toArgs: (i) => [
+          "propose-fix", "--project", String(i.project_id), "--case", String(i.case_id), "--script", String(i.script_path),
+          "--content-file", tempFile("proposed.txt", String(i.content)), "--reason", String(i.reason),
+          ...opt("--failure-type", i.failure_type), ...opt("--run", i.run_id),
+        ],
+      },
+      {
+        name: "list_proposals",
+        description: "列出脚本修改建议（含 diff）",
+        input: { status: z.enum(["pending", "accepted", "rejected"]).optional() },
+        toArgs: (i) => ["list-proposals", ...opt("--status", i.status)],
+      },
       {
         name: "summarize_failures",
         description: "列出某次执行的失败用例与初步归因（environment / product_bug / unknown 需 agent 判断）",

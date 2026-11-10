@@ -13,6 +13,8 @@ const methods = [
   "listProjects", "createProject", "importExcel", "lint", "listCases", "updateCase", "applyFix",
   "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret",
   "pickFile", "pickDirectory", "openTestPage",
+  "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
+  "listProposals", "resolveProposal", "listReviews", "resolveReview",
 ] as const;
 
 const api: Record<string, unknown> = Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => invoke(m, ...a)]));

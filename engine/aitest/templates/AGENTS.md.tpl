@@ -4,7 +4,7 @@
 
 ## 工作边界
 - 只在当前 workspace 目录内读写；写入 workspace 外、删除文件、访问生产环境都需要用户审批。
-- 只通过客户端注册的 MCP 工具访问测试能力：doc-parser、case-store、case-import、api-runner、report 等。
+- 只通过客户端注册的 MCP 工具访问测试能力：doc-parser、case-store、case-import、api-runner、browser、midscene、env-support、report。
 - 凭据（token、账号密码）永远不进入上下文：工具只接收环境名，由客户端在执行时替换。
 
 ## 用例规范
@@ -23,6 +23,7 @@
 
 ## 失败归因
 - 只处理失败用例；先判断类型：产品缺陷 / 脚本或用例错误（含页面改版）/ 环境问题。
-- 产品缺陷不改脚本；改版类问题输出脚本 diff，由用户确认后合并。
+- 产品缺陷不改脚本；改版类问题用 report.propose_script_fix 提交修改建议，由用户确认 diff 后合并。
+- 视觉类判定只给出 AI 判定，进入人工复核队列，不直接算通过。
 
 详见 `.agents/skills/` 下的技能文件。

@@ -19,6 +19,15 @@ export interface AitestApi {
   runRegression(projectId: string, env: string): Promise<unknown>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
+  setRoleSecret(projectId: string, role: string, username: string, password: string): Promise<void>;
+  listRoles(projectId: string): Promise<{ role_name: string }[]>;
+  setEnvironment(projectId: string, env: string, cfg: Record<string, unknown>): Promise<unknown>;
+  exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
+  runUiRegression(projectId: string, env: string, headed: boolean): Promise<unknown>;
+  listProposals(status?: string): Promise<unknown[]>;
+  resolveProposal(projectId: string, id: string, accept: boolean): Promise<unknown>;
+  listReviews(status?: string): Promise<unknown[]>;
+  resolveReview(id: string, passed: boolean): Promise<unknown>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   openTestPage(url: string): Promise<void>;

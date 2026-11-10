@@ -214,3 +214,40 @@ def dumps(obj: Any) -> str:
         raise TypeError(f"not serializable: {type(o)}")
 
     return json.dumps(obj, ensure_ascii=False, default=default)
+
+
+class ProposalStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+@dataclass
+class HealProposal:
+    """自愈产出的脚本修改建议：只有用户确认后才合并（第 7 节）。"""
+
+    case_id: str
+    script_path: str
+    original: str
+    proposed: str
+    diff: str
+    reason: str = ""
+    failure_type: str = FailureType.SCRIPT_ERROR.value
+    run_id: str = ""
+    status: str = ProposalStatus.PENDING.value
+    commit: str = ""
+    id: str = field(default_factory=lambda: new_id("heal"))
+
+
+@dataclass
+class ReviewItem:
+    """AI 判定结果（视觉判定等）进入人工复核队列，不直接算通过（第 11 节）。"""
+
+    case_id: str
+    kind: str  # visual / ai_assert
+    description: str
+    evidence_paths: list[str] = field(default_factory=list)
+    ai_verdict: str = ""  # pass / fail / ""（未判定）
+    run_id: str = ""
+    status: str = "pending"  # pending / confirmed_pass / confirmed_fail
+    id: str = field(default_factory=lambda: new_id("rev"))

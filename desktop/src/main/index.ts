@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runEngine } from "@ai-test/mcp-servers";
+import { checkData, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
 import { Orchestrator } from "./orchestrator.js";
-import { SecretStore, startSecretBroker, type Broker } from "./secrets.js";
+import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
 import { CHANNELS, type ApprovalRequest } from "../shared/ipc.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +31,9 @@ const paths = {
 };
 
 let mainWindow: BrowserWindow | undefined;
-let testView: WebContentsView | undefined;
+/** 被测页面视图：每个「项目 + 角色」一个独立 session partition，Playwright 经 CDP 连接后按 URL 标记找到它 */
+const testViews = new Map<string, WebContentsView>();
+let visibleView: WebContentsView | undefined;
 let broker: Broker | undefined;
 let codex: CodexAppServer | undefined;
 let secretStore: SecretStore;
@@ -58,8 +60,11 @@ async function getCodex(): Promise<CodexAppServer> {
   if (!broker) throw new Error("凭据代理未启动");
   const codexHome = paths.codexHome();
   mkdirSync(codexHome, { recursive: true });
-  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report"];
-  const mcpEnv = {
+  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support"];
+  const mcpEnv: Record<string, string> = {
+    // browser 服务经 CDP 连接内嵌浏览器；AITEST_MIDSCENE=1 时启用 Midscene 视觉工具
+    AITEST_CDP_ENDPOINT: `http://127.0.0.1:${CDP_PORT}`,
+    ...(process.env.AITEST_MIDSCENE ? { AITEST_MIDSCENE: "1" } : {}),
     ELECTRON_RUN_AS_NODE: "1",
     AITEST_DB: paths.db(),
     AITEST_PYTHON: paths.python(),
@@ -103,20 +108,44 @@ function createWindow(): void {
 
 /** 被测页面放在独立的 WebContentsView 中，用户可实时看到 agent / 脚本的操作 */
 function layoutTestView(): void {
-  if (!mainWindow || !testView) return;
+  if (!mainWindow || !visibleView) return;
   const [w, h] = mainWindow.getContentSize();
-  testView.setBounds({ x: Math.floor(w * 0.5), y: 48, width: Math.ceil(w * 0.5), height: h - 48 });
+  visibleView.setBounds({ x: Math.floor(w * 0.5), y: 0, width: Math.ceil(w * 0.5), height: h });
+}
+
+function showView(view: WebContentsView): void {
+  if (!mainWindow) return;
+  for (const v of testViews.values()) v.setVisible(v === view);
+  if (!mainWindow.contentView.children.includes(view)) mainWindow.contentView.addChildView(view);
+  visibleView = view;
+  layoutTestView();
+}
+
+/** 为角色准备视图（多角色：Electron session partition 隔离登录态），返回初始 URL 中的标记 */
+async function openRoleView(projectId: string, role: string): Promise<string> {
+  if (!mainWindow) throw new Error("主窗口未就绪");
+  const key = `${projectId}:${role}`;
+  let view = testViews.get(key);
+  const marker = `aitest-view=${randomUUID()}`;
+  if (!view) {
+    const partition = `persist:aitest-${projectId}-${Buffer.from(role).toString("hex")}`;
+    view = new WebContentsView({ webPreferences: { partition, sandbox: true } });
+    testViews.set(key, view);
+  }
+  showView(view);
+  await view.webContents.loadURL(`data:text/html,<title>${encodeURIComponent(role)}</title>#${marker}`);
+  return marker;
 }
 
 async function openTestPage(url: string): Promise<void> {
-  if (!mainWindow) return;
-  if (!testView) {
-    // 每个角色 / 项目可使用独立 session partition（二期：多角色）
-    testView = new WebContentsView({ webPreferences: { partition: "persist:aitest-default", sandbox: true } });
-    mainWindow.contentView.addChildView(testView);
-    layoutTestView();
+  const key = "manual:default";
+  let view = testViews.get(key);
+  if (!view) {
+    view = new WebContentsView({ webPreferences: { partition: "persist:aitest-manual", sandbox: true } });
+    testViews.set(key, view);
   }
-  await testView.webContents.loadURL(url);
+  showView(view);
+  await view.webContents.loadURL(url);
 }
 
 function registerIpc(orch: Orchestrator): void {
@@ -143,6 +172,24 @@ function registerIpc(orch: Orchestrator): void {
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
       secretStore.set(SecretStore.ref(p, env), { authToken, authHeader }),
+    setRoleSecret: async (p: string, role: string, username: string, password: string) => {
+      await orch.addRole(p, role);
+      secretStore.set(SecretStore.roleRef(p, role), { username, password });
+    },
+    listRoles: (p: string) => orch.listRoles(p),
+    setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),
+    exploreUiCase: async (p: string, env: string, caseId: string) => {
+      await setApprovalContext(orch, p);
+      return orch.exploreUiCase(p, env, caseId);
+    },
+    runUiRegression: async (p: string, env: string, headed: boolean) => {
+      await setApprovalContext(orch, p);
+      return orch.runUiRegression(p, env, { headed });
+    },
+    listProposals: (status?: string) => orch.listProposals(status),
+    resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
+    listReviews: (status?: string) => orch.listReviews(status),
+    resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
     pickFile: async (filters) => {
       const r = await dialog.showOpenDialog(mainWindow!, { properties: ["openFile"], filters });
       return r.canceled ? null : r.filePaths[0];
@@ -175,14 +222,12 @@ async function setApprovalContext(orch: Orchestrator, projectId: string): Promis
 
 app.whenReady().then(async () => {
   secretStore = new SecretStore(join(paths.data(), "secrets.json"), safeStorage);
-  broker = await startSecretBroker(secretStore);
+  broker = await startSecretBroker(secretStore, { openView: openRoleView });
   const orch = new Orchestrator({
     engine,
     agent: getCodex,
-    secretEnv: (projectId, env) => {
-      const s = secretStore.get(SecretStore.ref(projectId, env));
-      return s ? { AITEST_AUTH_TOKEN: s.authToken, ...(s.authHeader ? { AITEST_AUTH_HEADER: s.authHeader } : {}) } : {};
-    },
+    secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles),
+    ui: { runUiSuite, checkData, seedData },
     tokenLimit: Number(process.env.AITEST_TOKEN_LIMIT || 200_000),
   });
   orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));

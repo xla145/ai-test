@@ -6,7 +6,10 @@
  * 再以环境变量传给引擎子进程。
  */
 export interface SecretResolver {
-  resolve(projectId: string, env: string): Promise<Record<string, string>>;
+  /** 返回注入引擎 / 执行器子进程的环境变量；roles 非空时附带 AITEST_ROLES（各角色账号） */
+  resolve(projectId: string, env: string, opts?: { roles?: string[] }): Promise<Record<string, string>>;
+  /** 桌面端：为角色准备内嵌浏览器视图，返回视图 URL 中的标记 */
+  openView?(projectId: string, role: string): Promise<string>;
 }
 
 export class BrokerSecretResolver implements SecretResolver {
@@ -16,15 +19,24 @@ export class BrokerSecretResolver implements SecretResolver {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async resolve(projectId: string, env: string): Promise<Record<string, string>> {
-    const res = await this.fetchImpl(`${this.url.replace(/\/$/, "")}/secrets`, {
+  private async post<T>(path: string, payload: unknown): Promise<T> {
+    const res = await this.fetchImpl(`${this.url.replace(/\/$/, "")}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
-      body: JSON.stringify({ projectId, env }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`凭据代理拒绝请求：${res.status}`);
-    const body = (await res.json()) as { env?: Record<string, string> };
+    return (await res.json()) as T;
+  }
+
+  async resolve(projectId: string, env: string, opts: { roles?: string[] } = {}): Promise<Record<string, string>> {
+    const body = await this.post<{ env?: Record<string, string> }>("/secrets", { projectId, env, roles: opts.roles });
     return body.env ?? {};
+  }
+
+  async openView(projectId: string, role: string): Promise<string> {
+    const body = await this.post<{ marker: string }>("/views", { projectId, role });
+    return body.marker;
   }
 }
 

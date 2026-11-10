@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApprovalRequest } from "../shared/ipc";
+import { UiPanel } from "./UiPanel";
 import { api, LEVEL_LABEL, MODE_LABEL, STATUS_LABEL, type LintIssue, type Project, type TestCase } from "./api";
 
-type Tab = "import" | "cases" | "api" | "run";
+type Tab = "import" | "cases" | "api" | "run" | "ui";
 
 function useAsync() {
   const [busy, setBusy] = useState(false);
@@ -71,7 +72,8 @@ export function App() {
                   ["import", "用例导入与规范检查"],
                   ["cases", "用例库"],
                   ["api", "接口测试"],
-                  ["run", "回归执行"],
+                  ["run", "接口回归"],
+                  ["ui", "UI 测试"],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
@@ -83,6 +85,7 @@ export function App() {
             {tab === "cases" && <CasesPanel project={current} />}
             {tab === "api" && <ApiPanel project={current} />}
             {tab === "run" && <RunPanel project={current} />}
+            {tab === "ui" && <UiPanel key={current.id} project={current} />}
           </>
         ) : (
           <p className="muted">先在左侧新建项目。</p>

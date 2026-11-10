@@ -1,4 +1,11 @@
 export { EngineError, engineOptionsFromEnv, runEngine, type EngineOptions } from "./engine.js";
 export { BrokerSecretResolver, NoSecretResolver, secretResolverFromEnv, type SecretResolver } from "./secrets.js";
-export { createServer } from "./server.js";
+export { createServer, type CreateOptions } from "./server.js";
 export { SERVERS, getServer, type ServerDef, type ToolDef } from "./servers.js";
+export { ALL_SERVER_NAMES } from "./server.js";
+export { BrowserSession, performLogin, type LoginRecipe } from "./ui/browser.js";
+export { ensureUiScaffold, generateSpec, type Step } from "./ui/codegen.js";
+export { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecord } from "./ui/envSupport.js";
+export { candidates, toCode, type LocatorSpec } from "./ui/locator.js";
+export { midsceneFactory, type VisionAgent, type VisionAgentFactory } from "./ui/midscene.js";
+export { parseReport, runUiSuite, type UiCaseResult, type UiRunOutput } from "./ui/runner.js";

@@ -23,13 +23,13 @@ def init_workspace(path: str | Path, project_name: str) -> Path:
     if not agents.exists():
         agents.write_text(tpl.joinpath("AGENTS.md.tpl").read_text(encoding="utf-8").replace("{{PROJECT}}", project_name),
                           encoding="utf-8")
-    for skill in ("test-design.md", "api-script.md", "failure-triage.md"):
+    for skill in ("test-design.md", "api-script.md", "failure-triage.md", "ui-explore.md", "ui-heal.md"):
         dst = root / ".agents" / "skills" / skill
         if not dst.exists():
             dst.write_text(tpl.joinpath(f"skills/{skill}").read_text(encoding="utf-8"), encoding="utf-8")
     gitignore = root / ".gitignore"
     if not gitignore.exists():
-        gitignore.write_text("reports/\nevidence/\n.auth/\n__pycache__/\n", encoding="utf-8")
+        gitignore.write_text("reports/\nevidence/\n.auth/\n__pycache__/\ntest-results/\nnode_modules/\n", encoding="utf-8")
     if shutil.which("git") and not (root / ".git").exists():
         subprocess.run(["git", "init", "-q"], cwd=root, check=False)
     return root

@@ -27,6 +27,9 @@ engine/        Python 执行引擎（确定性部分，不耗模型）
     workspace.py   项目 workspace（AGENTS.md、技能文件、git 版本管理）
     cli.py         JSON 命令行，供 MCP Server 与编排层调用
 mcp-servers/   注册给 Codex 的本地 MCP Server（TypeScript SDK，stdio）
+  src/ui/         二期 UI 测试：浏览器会话与录制、定位器规范、Playwright 脚本生成、
+                  UI 回归执行器、埋点抓包、造数与时间控制、Midscene 视觉工具
+  templates/ui/   写入项目 workspace 的 Playwright 配置、全局登录与辅助函数
 desktop/       Electron + React 桌面壳
   src/main/codex/   Codex App Server 客户端（stdio JSON-RPC）与协议适配层
   src/main/orchestrator.ts  编排层：回归调度、agent 任务、token 记录
@@ -79,6 +82,19 @@ aitest export-excel --project <项目ID> --out 修复后.xlsx
   带一次性 token 的凭据代理换取凭据，注入到引擎子进程，不出现在工具输出和模型上下文中。
 - workspace 外写入、删除、访问生产环境或白名单外地址，均弹窗由用户审批。
 
+### UI 测试（二期）
+
+1. 在桌面端「UI 测试」页配置角色账号（存入钥匙串）和登录方式。
+2. 对 UI 用例点「探索并生成脚本」：agent 在右侧内嵌浏览器里操作，每步按
+   data-testid → role / label → 文本 → CSS 的优先级录制，生成 `scripts/ui/<用例ID>.spec.ts`。
+3. 「执行 UI 回归」直接跑 Playwright 脚本，不调用模型；缺失测试数据先造数，造不出来的用例降级为手工。
+4. 失败且原因不明的用例进入自愈：agent 读 trace 与截图归因，页面改版时给出脚本 diff，在界面上确认后合并。
+5. 视觉类判定（颜色、遮挡、截断）进入人工复核队列，不直接算通过。
+
+命令行 / CI 下 browser 服务会自行启动 Chromium；桌面端则连接内嵌浏览器（`AITEST_CDP_ENDPOINT`）。
+可选启用 Midscene 视觉定位：`npm i @midscene/web`，设置 `AITEST_MIDSCENE=1` 及其模型环境变量。
+
 ## 当前进度
 
-一期（接口测试主线 + 用例导入规范检查）已实现，详见 [docs/architecture.md](docs/architecture.md#迭代状态)。
+一期（接口测试主线 + 用例导入规范检查）与二期（UI 测试：探索 / 回归 / 自愈、多角色、埋点、时间、视觉复核）
+已实现，详见 [docs/architecture.md](docs/architecture.md#迭代状态)。

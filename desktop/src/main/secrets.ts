@@ -22,6 +22,12 @@ export interface EnvSecret {
   authToken: string;
 }
 
+/** 角色账号（多角色 UI 测试），用例里只写角色名 */
+export interface RoleSecret {
+  username: string;
+  password: string;
+}
+
 export class SecretStore {
   private data: Record<string, string> = {};
 
@@ -33,7 +39,12 @@ export class SecretStore {
     return `aitest:${projectId}:${env}`;
   }
 
-  set(ref: string, secret: EnvSecret): void {
+  /** 与引擎 RoleAccount.credential_ref 一致 */
+  static roleRef(projectId: string, role: string): string {
+    return `aitest:${projectId}:role:${role}`;
+  }
+
+  set(ref: string, secret: EnvSecret | RoleSecret): void {
     if (!this.cipher.isEncryptionAvailable()) throw new Error("系统钥匙串不可用，拒绝明文保存凭据");
     this.data[ref] = this.cipher.encryptString(JSON.stringify(secret)).toString("base64");
     mkdirSync(dirname(this.file), { recursive: true });
@@ -41,8 +52,16 @@ export class SecretStore {
   }
 
   get(ref: string): EnvSecret | undefined {
+    return this.read<EnvSecret>(ref);
+  }
+
+  getRole(projectId: string, role: string): RoleSecret | undefined {
+    return this.read<RoleSecret>(SecretStore.roleRef(projectId, role));
+  }
+
+  private read<T>(ref: string): T | undefined {
     const v = this.data[ref];
-    return v ? (JSON.parse(this.cipher.decryptString(Buffer.from(v, "base64"))) as EnvSecret) : undefined;
+    return v ? (JSON.parse(this.cipher.decryptString(Buffer.from(v, "base64"))) as T) : undefined;
   }
 
   delete(ref: string): void {
@@ -57,30 +76,50 @@ export interface Broker {
   close(): Promise<void>;
 }
 
-export async function startSecretBroker(store: Pick<SecretStore, "get">): Promise<Broker> {
+/** 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES） */
+export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole">, projectId: string, env: string,
+  roles: string[] = []): Record<string, string> {
+  const out: Record<string, string> = {};
+  const secret = store.get(SecretStore.ref(projectId, env));
+  if (secret) {
+    out.AITEST_AUTH_TOKEN = secret.authToken;
+    if (secret.authHeader) out.AITEST_AUTH_HEADER = secret.authHeader;
+  }
+  const creds = roles
+    .map((role) => ({ role, cred: store.getRole(projectId, role) }))
+    .filter((r) => r.cred)
+    .map((r) => ({ role: r.role, username: r.cred!.username, password: r.cred!.password }));
+  if (creds.length) out.AITEST_ROLES = JSON.stringify(creds);
+  return out;
+}
+
+export interface BrokerHandlers {
+  /** 桌面端为角色准备内嵌浏览器视图，返回视图初始 URL 中的标记 */
+  openView?: (projectId: string, role: string) => Promise<string>;
+}
+
+export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole">, handlers: BrokerHandlers = {}): Promise<Broker> {
   const token = randomBytes(24).toString("hex");
   const expected = Buffer.from(`Bearer ${token}`);
   const server: Server = createServer((req, res) => {
     const auth = Buffer.from(req.headers.authorization ?? "");
     const authorized = auth.length === expected.length && timingSafeEqual(auth, expected);
-    if (req.method !== "POST" || req.url !== "/secrets" || !authorized) {
+    const route = req.url === "/secrets" || (req.url === "/views" && handlers.openView);
+    if (req.method !== "POST" || !route || !authorized) {
       res.writeHead(authorized ? 404 : 401).end();
       return;
     }
     let body = "";
     req.on("data", (c) => (body += c));
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
-        const { projectId, env } = JSON.parse(body) as { projectId: string; env: string };
-        const secret = store.get(SecretStore.ref(projectId, env));
-        const out: Record<string, string> = {};
-        if (secret) {
-          out.AITEST_AUTH_TOKEN = secret.authToken;
-          if (secret.authHeader) out.AITEST_AUTH_HEADER = secret.authHeader;
-        }
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ env: out }));
-      } catch {
-        res.writeHead(400).end();
+        const payload = JSON.parse(body) as { projectId: string; env?: string; role?: string; roles?: string[] };
+        const result = req.url === "/views"
+          ? { marker: await handlers.openView!(payload.projectId, String(payload.role)) }
+          : { env: secretEnvFor(store, payload.projectId, String(payload.env), payload.roles ?? []) };
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
+      } catch (e) {
+        res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: (e as Error).message }));
       }
     });
   });

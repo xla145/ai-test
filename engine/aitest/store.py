@@ -13,6 +13,8 @@ from typing import Any, Iterable
 
 from .models import (
     AgentSession,
+    HealProposal,
+    ReviewItem,
     LintIssue,
     Project,
     Requirement,
@@ -61,6 +63,14 @@ CREATE TABLE IF NOT EXISTS run (
 CREATE TABLE IF NOT EXISTS run_result (
   run_id TEXT NOT NULL, case_id TEXT NOT NULL, status TEXT, duration REAL, message TEXT,
   evidence_paths TEXT, failure_type TEXT, PRIMARY KEY (run_id, case_id)
+);
+CREATE TABLE IF NOT EXISTS heal_proposal (
+  id TEXT PRIMARY KEY, case_id TEXT NOT NULL, script_path TEXT NOT NULL, original TEXT, proposed TEXT,
+  diff TEXT, reason TEXT, failure_type TEXT, run_id TEXT, status TEXT NOT NULL, commit_hash TEXT
+);
+CREATE TABLE IF NOT EXISTS review_item (
+  id TEXT PRIMARY KEY, case_id TEXT NOT NULL, kind TEXT, description TEXT, evidence_paths TEXT,
+  ai_verdict TEXT, run_id TEXT, status TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_session (
   id TEXT PRIMARY KEY, project_id TEXT, codex_thread_id TEXT, purpose TEXT, token_usage INTEGER DEFAULT 0
@@ -192,6 +202,70 @@ class Store:
         self.conn.execute("INSERT OR REPLACE INTO script VALUES (?,?,?,?,?)",
                           (s.id, s.case_id, s.path, s.framework, s.version))
         self.conn.commit()
+
+    def list_scripts(self, case_id: str | None = None) -> list[Script]:
+        if case_id:
+            rows = self.conn.execute("SELECT * FROM script WHERE case_id=?", (case_id,)).fetchall()
+        else:
+            rows = self.conn.execute("SELECT * FROM script").fetchall()
+        return [Script(**dict(r)) for r in rows]
+
+    def upsert_script(self, s: Script) -> Script:
+        """同一用例同一框架只保留一条脚本记录，版本随 git commit 更新。"""
+        r = self.conn.execute("SELECT id FROM script WHERE case_id=? AND framework=?", (s.case_id, s.framework)).fetchone()
+        if r:
+            s.id = r["id"]
+        self.add_script(s)
+        return s
+
+    def list_test_data(self, project_id: str) -> list[TestData]:
+        rows = self.conn.execute("SELECT * FROM test_data WHERE project_id=?", (project_id,)).fetchall()
+        return [TestData(**dict(r)) for r in rows]
+
+    def list_role_accounts(self, project_id: str) -> list[RoleAccount]:
+        rows = self.conn.execute("SELECT * FROM role_account WHERE project_id=? ORDER BY role_name", (project_id,)).fetchall()
+        return [RoleAccount(**dict(r)) for r in rows]
+
+    # ---- 自愈建议 ----
+    def save_proposal(self, p: HealProposal) -> HealProposal:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO heal_proposal VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (p.id, p.case_id, p.script_path, p.original, p.proposed, p.diff, p.reason, p.failure_type,
+             p.run_id, p.status, p.commit),
+        )
+        self.conn.commit()
+        return p
+
+    def get_proposal(self, proposal_id: str) -> HealProposal | None:
+        r = self.conn.execute("SELECT * FROM heal_proposal WHERE id=?", (proposal_id,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        d["commit"] = d.pop("commit_hash") or ""
+        return HealProposal(**d)
+
+    def list_proposals(self, status: str | None = None) -> list[HealProposal]:
+        sql, args = "SELECT id FROM heal_proposal", []
+        if status:
+            sql, args = sql + " WHERE status=?", [status]
+        return [p for p in (self.get_proposal(r["id"]) for r in self.conn.execute(sql + " ORDER BY rowid", args)) if p]
+
+    # ---- 人工复核队列 ----
+    def save_review(self, item: ReviewItem) -> ReviewItem:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO review_item VALUES (?,?,?,?,?,?,?,?)",
+            (item.id, item.case_id, item.kind, item.description, json.dumps(item.evidence_paths, ensure_ascii=False),
+             item.ai_verdict, item.run_id, item.status),
+        )
+        self.conn.commit()
+        return item
+
+    def list_reviews(self, status: str | None = None) -> list[ReviewItem]:
+        sql, args = "SELECT * FROM review_item", []
+        if status:
+            sql, args = sql + " WHERE status=?", [status]
+        rows = self.conn.execute(sql + " ORDER BY rowid", args).fetchall()
+        return [ReviewItem(**{**dict(r), "evidence_paths": json.loads(r["evidence_paths"] or "[]")}) for r in rows]
 
     def save_run(self, run: Run, results: Iterable[RunResult]) -> None:
         self.conn.execute("INSERT OR REPLACE INTO run VALUES (?,?,?,?,?,?)",

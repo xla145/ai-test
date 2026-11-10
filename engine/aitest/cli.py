@@ -14,8 +14,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
-from . import apigen, docparser, importer, linter, openapi, router, runner, workspace
-from .models import AgentSession, Project, TestCase, dumps
+from datetime import datetime, timezone
+
+from . import apigen, docparser, heal, importer, linter, openapi, router, runner, workspace
+from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .store import Store
 
 DEFAULT_DB = os.environ.get("AITEST_DB", str(Path.home() / ".aitest" / "aitest.db"))
@@ -211,6 +213,138 @@ def cmd_token_usage(store: Store, a: argparse.Namespace) -> Any:
     return {"project": a.project, "tokens": store.project_token_usage(a.project)}
 
 
+def cmd_get_project(store: Store, a: argparse.Namespace) -> Any:
+    return asdict(_project(store, a.project))
+
+
+def cmd_get_case(store: Store, a: argparse.Namespace) -> Any:
+    case = store.get_case(a.case)
+    if case is None:
+        raise KeyError(f"用例不存在：{a.case}")
+    return case.to_dict()
+
+
+def cmd_set_environment(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    p.environments[a.env] = json.loads(a.json)
+    return asdict(store.add_project(p))
+
+
+def cmd_add_role(store: Store, a: argparse.Namespace) -> Any:
+    _project(store, a.project)
+    existing = {r.role_name: r for r in store.list_role_accounts(a.project)}
+    role = existing.get(a.role) or RoleAccount(project_id=a.project, role_name=a.role, credential_ref="")
+    # 账号密码存钥匙串，这里只存引用
+    role.credential_ref = a.credential_ref or f"aitest:{a.project}:role:{a.role}"
+    role.storage_state_path = f"scripts/ui/.auth/{a.role}.json"
+    store.add_role_account(role)
+    return asdict(role)
+
+
+def cmd_list_roles(store: Store, a: argparse.Namespace) -> Any:
+    return [asdict(r) for r in store.list_role_accounts(a.project)]
+
+
+def cmd_add_test_data(store: Store, a: argparse.Namespace) -> Any:
+    _project(store, a.project)
+    d = store.get_test_data(a.project, a.key) or TestData(project_id=a.project, key=a.key)
+    d.check_script = a.check_script or d.check_script
+    d.seed_script = a.seed_script or d.seed_script
+    store.add_test_data(d)
+    return asdict(d)
+
+
+def cmd_list_test_data(store: Store, a: argparse.Namespace) -> Any:
+    return [asdict(d) for d in store.list_test_data(a.project)]
+
+
+def cmd_register_script(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    case = store.get_case(a.case)
+    if case is None:
+        raise KeyError(a.case)
+    issues = store.list_lint_issues(a.case)
+    if not linter.can_generate_script(case, issues):
+        raise ValueError("用例存在未修复的阻断级问题，不能生成脚本")
+    version = workspace.commit(p.workspace_path, f"生成脚本：{case.id} {case.title}") or ""
+    s = store.upsert_script(Script(case_id=a.case, path=a.path, framework=a.framework, version=version))
+    return asdict(s)
+
+
+def cmd_list_scripts(store: Store, a: argparse.Namespace) -> Any:
+    return [asdict(s) for s in store.list_scripts(a.case)]
+
+
+def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
+    """保存外部执行器（Playwright 等）的结果。results 文件为 RunResult 字段组成的 JSON 数组。"""
+    _project(store, a.project)
+    items = json.loads(Path(a.results_file).read_text(encoding="utf-8"))
+    run = Run(project_id=a.project, env=a.env, mode=a.mode, started_at=datetime.now(timezone.utc).isoformat())
+    results = [RunResult(run_id=run.id, **{k: v for k, v in r.items() if k in RunResult.__dataclass_fields__ and k != "run_id"})
+               for r in items]
+    for r in results:
+        if r.status in ("failed", "error") and not r.failure_type:
+            r.failure_type = runner.classify_failure(r.message)
+    run.result = runner.summarize(results)
+    run.result["framework"] = a.framework
+    store.save_run(run, results)
+    reviews = []
+    for r in items:
+        for v in r.get("reviews", []):
+            reviews.append(asdict(store.save_review(ReviewItem(
+                case_id=r["case_id"], run_id=run.id, kind=v.get("kind", "visual"), description=v.get("description", ""),
+                evidence_paths=v.get("evidence_paths", []), ai_verdict=v.get("ai_verdict", "")))))
+    return {"run_id": run.id, **run.result, "reviews": len(reviews)}
+
+
+def cmd_list_run_results(store: Store, a: argparse.Namespace) -> Any:
+    return [asdict(r) for r in store.list_run_results(a.run)]
+
+
+def cmd_propose_fix(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    proposed = Path(a.content_file).read_text(encoding="utf-8")
+    return asdict(heal.propose(store, p.workspace_path, a.case, a.script, proposed, reason=a.reason or "",
+                               failure_type=a.failure_type, run_id=a.run or ""))
+
+
+def cmd_list_proposals(store: Store, a: argparse.Namespace) -> Any:
+    out = []
+    for prop in store.list_proposals(a.status):
+        d = asdict(prop)
+        if not a.full:
+            d.pop("original"), d.pop("proposed")
+        out.append(d)
+    return out
+
+
+def cmd_resolve_proposal(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    d = asdict(heal.resolve(store, p.workspace_path, a.id, a.accept))
+    d.pop("original"), d.pop("proposed")
+    return d
+
+
+def cmd_add_review(store: Store, a: argparse.Namespace) -> Any:
+    item = ReviewItem(case_id=a.case, kind=a.kind, description=a.description,
+                      evidence_paths=json.loads(a.evidence) if a.evidence else [], ai_verdict=a.ai_verdict or "",
+                      run_id=a.run or "")
+    return asdict(store.save_review(item))
+
+
+def cmd_list_reviews(store: Store, a: argparse.Namespace) -> Any:
+    return [asdict(r) for r in store.list_reviews(a.status)]
+
+
+def cmd_resolve_review(store: Store, a: argparse.Namespace) -> Any:
+    items = [r for r in store.list_reviews() if r.id == a.id]
+    if not items:
+        raise KeyError(a.id)
+    item = items[0]
+    item.status = "confirmed_pass" if a.passed else "confirmed_fail"
+    return asdict(store.save_review(item))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="aitest", description="AI 测试客户端引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
@@ -251,6 +385,31 @@ def build_parser() -> argparse.ArgumentParser:
     add("agent-session", cmd_agent_session, (("--project",), req), (("--thread",), req), (("--purpose",), req))
     add("add-tokens", cmd_add_tokens, (("--session",), req), (("--tokens",), {"type": int, "required": True}))
     add("token-usage", cmd_token_usage, (("--project",), req))
+    # ---- 二期：UI 测试 ----
+    flag = {"action": "store_true"}
+    add("get-project", cmd_get_project, (("--project",), req))
+    add("get-case", cmd_get_case, (("--case",), req))
+    add("set-environment", cmd_set_environment, (("--project",), req), (("--env",), req), (("--json",), req))
+    add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))
+    add("list-roles", cmd_list_roles, (("--project",), req))
+    add("add-test-data", cmd_add_test_data, (("--project",), req), (("--key",), req), (("--check-script",), {}),
+        (("--seed-script",), {}))
+    add("list-test-data", cmd_list_test_data, (("--project",), req))
+    add("register-script", cmd_register_script, (("--project",), req), (("--case",), req), (("--path",), req),
+        (("--framework",), {"default": "playwright"}))
+    add("list-scripts", cmd_list_scripts, (("--case",), {}))
+    add("save-run", cmd_save_run, (("--project",), req), (("--env",), req), (("--results-file",), req),
+        (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}))
+    add("list-run-results", cmd_list_run_results, (("--run",), req))
+    add("propose-fix", cmd_propose_fix, (("--project",), req), (("--case",), req), (("--script",), req),
+        (("--content-file",), req), (("--reason",), {}), (("--failure-type",), {"default": "script_error"}),
+        (("--run",), {}))
+    add("list-proposals", cmd_list_proposals, (("--status",), {}), (("--full",), flag))
+    add("resolve-proposal", cmd_resolve_proposal, (("--project",), req), (("--id",), req), (("--accept",), flag))
+    add("add-review", cmd_add_review, (("--case",), req), (("--kind",), {"default": "visual"}),
+        (("--description",), req), (("--evidence",), {}), (("--ai-verdict",), {}), (("--run",), {}))
+    add("list-reviews", cmd_list_reviews, (("--status",), {}))
+    add("resolve-review", cmd_resolve_review, (("--id",), req), (("--passed",), flag))
     return ap
 
 

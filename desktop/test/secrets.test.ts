@@ -30,6 +30,22 @@ describe("secrets", () => {
     }
   });
 
+  it("injects role accounts and opens role views through the broker", async () => {
+    const store = new SecretStore(join(mkdtempSync(join(tmpdir(), "sec-")), "s.json"), cipher);
+    store.set(SecretStore.roleRef("p1", "admin"), { username: "alice", password: "pw" });
+    const opened: string[] = [];
+    const broker = await startSecretBroker(store, { openView: async (p, role) => { opened.push(`${p}/${role}`); return "aitest-view=1"; } });
+    try {
+      const r = new BrokerSecretResolver(broker.url, broker.token);
+      const env = await r.resolve("p1", "test", { roles: ["admin", "viewer"] });
+      expect(JSON.parse(env.AITEST_ROLES)).toEqual([{ role: "admin", username: "alice", password: "pw" }]);
+      expect(await r.openView("p1", "admin")).toBe("aitest-view=1");
+      expect(opened).toEqual(["p1/admin"]);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("refuses to store secrets in plain text", () => {
     const store = new SecretStore(join(mkdtempSync(join(tmpdir(), "sec-")), "s.json"), { ...cipher, isEncryptionAvailable: () => false });
     expect(() => store.set("r", { authToken: "x" })).toThrow("钥匙串");

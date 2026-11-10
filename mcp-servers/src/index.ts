@@ -1,23 +1,32 @@
 #!/usr/bin/env node
 /**
  * 用法：aitest-mcp <server>
- *   server: doc-parser | case-store | case-import | api-runner | report
- * 环境变量：AITEST_PYTHON、AITEST_DB、AITEST_BROKER_URL、AITEST_BROKER_TOKEN
+ *   server: doc-parser | case-store | case-import | api-runner | report | browser | env-support
+ * 环境变量：AITEST_PYTHON、AITEST_DB、AITEST_BROKER_URL、AITEST_BROKER_TOKEN、
+ *          AITEST_CDP_ENDPOINT（连接内嵌浏览器）、AITEST_MIDSCENE=1（启用视觉工具）
  */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { engineOptionsFromEnv } from "./engine.js";
 import { secretResolverFromEnv } from "./secrets.js";
-import { createServer } from "./server.js";
+import { ALL_SERVER_NAMES, createServer } from "./server.js";
 import { SERVERS } from "./servers.js";
-
+import { midsceneFactory } from "./ui/midscene.js";
+import { UI_SERVERS } from "./ui/tools.js";
 
 async function main() {
   const name = process.argv[2];
-  if (!name || name === "--list") {
+  if (!name || name === "--list" || !ALL_SERVER_NAMES.includes(name)) {
     for (const s of SERVERS) console.log(`${s.name}\t${s.description}\t${s.tools.map((t) => t.name).join(", ")}`);
-    process.exit(name ? 0 : 1);
+    for (const s of UI_SERVERS) console.log(`${s.name}\t${s.description}`);
+    process.exit(name === "--list" ? 0 : 1);
   }
-  const server = createServer(name, { engine: engineOptionsFromEnv(), secrets: secretResolverFromEnv() });
+  const server = createServer(name, {
+    engine: engineOptionsFromEnv(),
+    secrets: secretResolverFromEnv(),
+    cdpEndpoint: process.env.AITEST_CDP_ENDPOINT || undefined,
+    vision: process.env.AITEST_MIDSCENE ? midsceneFactory() : undefined,
+    headless: !process.env.AITEST_HEADED,
+  });
   await server.connect(new StdioServerTransport());
 }
 
