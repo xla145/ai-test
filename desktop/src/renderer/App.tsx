@@ -1,340 +1,261 @@
+import {
+  ApiOutlined,
+  AppstoreOutlined,
+  BarChartOutlined,
+  BugOutlined,
+  ChromeOutlined,
+  CloseOutlined,
+  FileExcelOutlined,
+  FolderOpenOutlined,
+  HistoryOutlined,
+  PlayCircleOutlined,
+  PlusOutlined,
+  SafetyCertificateOutlined,
+} from "@ant-design/icons";
+import {
+  Badge,
+  Button,
+  Descriptions,
+  Drawer,
+  Empty,
+  Flex,
+  Form,
+  Input,
+  Layout,
+  Menu,
+  Modal,
+  Space,
+  Tabs,
+  Tag,
+  Timeline,
+  Tooltip,
+  Typography,
+  theme,
+} from "antd";
 import { useCallback, useEffect, useState } from "react";
 import type { ApprovalRequest } from "../shared/ipc";
-import { OpsPanel } from "./OpsPanel";
-import { UiPanel } from "./UiPanel";
-import { api, LEVEL_LABEL, MODE_LABEL, STATUS_LABEL, type LintIssue, type Project, type TestCase } from "./api";
+import { api, type Project } from "./api";
+import { useAction, useLoad } from "./hooks";
+import { ApiPage } from "./pages/ApiPage";
+import { CasesPage } from "./pages/CasesPage";
+import { ImportPage } from "./pages/ImportPage";
+import { OpsPage } from "./pages/OpsPage";
+import { RunPage } from "./pages/RunPage";
+import { UiPage } from "./pages/UiPage";
 
-type Tab = "import" | "cases" | "api" | "run" | "ui" | "ops";
+const { Sider, Header, Content } = Layout;
 
-function useAsync() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const run = useCallback(async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
-    setBusy(true);
-    setError("");
-    try {
-      return await fn();
-    } catch (e) {
-      setError((e as Error).message);
+interface ActivityItem {
+  time: string;
+  method: string;
+  detail: string;
+}
+
+/** Codex 事件 → 可读的活动记录 */
+function describe(method: string, params: any): string | undefined {
+  switch (method) {
+    case "aitest/progress":
+      return { run: "开始接口回归", "ui-run": "开始 UI 回归", case_gen: "agent：生成用例", api_script: "agent：补充接口脚本",
+        triage: "agent：失败归因", explore: "agent：探索 UI 用例", heal: "agent：自愈" }[params?.stage as string] ?? params?.stage;
+    case "item/started":
+      return params?.item?.type === "mcpToolCall" ? `调用工具 ${params.item.server ?? ""}.${params.item.tool ?? ""}` : undefined;
+    case "turn/completed":
+      return "agent 完成本轮任务";
+    default:
       return undefined;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-  return { busy, error, run };
+  }
 }
 
 export function App() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [current, setCurrent] = useState<Project>();
-  const [tab, setTab] = useState<Tab>("import");
+  const { token } = theme.useToken();
+  const { data: projects = [], reload } = useLoad(() => api().listProjects() as Promise<Project[]>, []);
+  const [currentId, setCurrentId] = useState<string>();
+  const [tab, setTab] = useState("import");
   const [approval, setApproval] = useState<ApprovalRequest>();
-  const [events, setEvents] = useState<string[]>([]);
-
-  const reload = useCallback(async () => {
-    const list = (await api().listProjects()) as Project[];
-    setProjects(list);
-    setCurrent((c) => list.find((p) => p.id === c?.id) ?? list[0]);
-  }, []);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [viewVisible, setViewVisible] = useState(false);
+  const current = projects.find((p) => p.id === currentId) ?? projects[0];
 
   useEffect(() => {
-    void reload();
-    const offA = api().onApprovalRequest(setApproval);
-    const offE = api().onEvent((e) => setEvents((xs) => [...xs.slice(-199), e.method]));
+    const offApproval = api().onApprovalRequest(setApproval);
+    const offEvent = api().onEvent((e) => {
+      const detail = describe(e.method, e.params);
+      if (detail) setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+    });
+    const offView = api().onViewChange?.((v) => setViewVisible(v.visible));
     return () => {
-      offA();
-      offE();
+      offApproval();
+      offEvent();
+      offView?.();
     };
-  }, [reload]);
+  }, []);
+
+  const respond = useCallback((accept: boolean) => {
+    if (approval) api().respondApproval(approval.id, accept);
+    setApproval(undefined);
+  }, [approval]);
+
+  const tabs = current
+    ? [
+        { key: "import", label: "用例导入与检查", icon: <FileExcelOutlined />, children: <ImportPage project={current} /> },
+        { key: "cases", label: "用例库", icon: <AppstoreOutlined />, children: <CasesPage project={current} /> },
+        { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
+        { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
+        { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
+      ]
+    : [];
 
   return (
-    <div className="layout">
-      <aside>
-        <h1>AI 测试客户端</h1>
-        {projects.map((p) => (
-          <button key={p.id} className={`project ${p.id === current?.id ? "active" : ""}`} onClick={() => setCurrent(p)}>
-            {p.name}
-          </button>
-        ))}
-        <NewProject onCreated={reload} />
-        <h2>Agent 事件</h2>
-        <div className="muted" style={{ fontSize: 12 }}>
-          {events.slice(-8).map((e, i) => (
-            <div key={i}>{e}</div>
-          ))}
-        </div>
-      </aside>
-      <main>
-        {current ? (
-          <>
-            <div className="tabs">
-              {(
-                [
-                  ["import", "用例导入与规范检查"],
-                  ["cases", "用例库"],
-                  ["api", "接口测试"],
-                  ["run", "接口回归"],
-                  ["ui", "UI 测试"],
-                  ["ops", "工程化"],
-                ] as [Tab, string][]
-              ).map(([k, label]) => (
-                <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {tab === "import" && <ImportPanel project={current} />}
-            {tab === "cases" && <CasesPanel project={current} />}
-            {tab === "api" && <ApiPanel project={current} />}
-            {tab === "run" && <RunPanel project={current} />}
-            {tab === "ui" && <UiPanel key={current.id} project={current} />}
-            {tab === "ops" && <OpsPanel key={current.id} project={current} />}
-          </>
-        ) : (
-          <p className="muted">先在左侧新建项目。</p>
-        )}
-      </main>
-      {approval && (
-        <div className="modal">
-          <div>
-            <h2>需要你的审批</h2>
-            <p>{approval.reason}</p>
-            <pre>{JSON.stringify(approval.detail, null, 2)}</pre>
-            <div className="row">
-              <button className="primary" onClick={() => { api().respondApproval(approval.id, true); setApproval(undefined); }}>允许</button>
-              <button onClick={() => { api().respondApproval(approval.id, false); setApproval(undefined); }}>拒绝</button>
-            </div>
+    <Layout className={`app-shell ${viewVisible ? "with-view" : ""}`}>
+      <Sider width={232} theme="light" style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}>
+        <Flex vertical style={{ height: "100%" }}>
+          <div className="brand">
+            <div className="brand-logo"><BugOutlined /></div>
+            AI 测试客户端
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NewProject({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const { busy, error, run } = useAsync();
-  return (
-    <div style={{ marginTop: 12 }}>
-      <h2>新建项目</h2>
-      <input placeholder="项目名" value={name} onChange={(e) => setName(e.target.value)} style={{ width: "100%", marginBottom: 4 }} />
-      <input placeholder="测试环境地址" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} style={{ width: "100%", marginBottom: 4 }} />
-      <button
-        disabled={!name || busy}
-        onClick={() =>
-          run(async () => {
-            const dir = await api().pickDirectory();
-            if (!dir) return;
-            await api().createProject(name, dir, baseUrl ? { test: { base_url: baseUrl } } : {});
-            setName("");
-            onCreated();
-          })
-        }
-      >
-        选择 workspace 并创建
-      </button>
-      {error && <div className="error">{error}</div>}
-    </div>
-  );
-}
-
-function ImportPanel({ project }: { project: Project }) {
-  const [report, setReport] = useState<any>();
-  const { busy, error, run } = useAsync();
-  const issues: LintIssue[] = report?.issues ?? [];
-  return (
-    <section>
-      <div className="row">
-        <button
-          className="primary"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const file = await api().pickFile([{ name: "Excel", extensions: ["xlsx"] }]);
-              if (!file) return;
-              await api().importExcel(project.id, file);
-              setReport(await api().lint(project.id));
-            })
-          }
-        >
-          导入 Excel 用例
-        </button>
-        <button disabled={busy} onClick={() => run(async () => setReport(await api().lint(project.id)))}>
-          重新检查
-        </button>
-        {busy && <span className="muted">处理中…</span>}
-      </div>
-      {error && <div className="error">{error}</div>}
-      {report && (
-        <>
-          <div className="stats">
-            <div className="stat"><b>{report.total}</b>用例</div>
-            <div className="stat"><b>{report.blocked_case_ids.length}</b>阻断</div>
-            <div className="stat"><b>{((report.stats?.p0_ratio ?? 0) * 100).toFixed(1)}%</b>P0 占比</div>
+          <div className="sider-section">
+            <Button block type="dashed" icon={<PlusOutlined />} onClick={() => setCreating(true)}>新建项目</Button>
           </div>
-          <h2>规则命中</h2>
-          <table>
-            <thead><tr><th>规则</th><th>命中用例数</th></tr></thead>
-            <tbody>
-              {Object.entries(report.rule_hits as Record<string, number>).map(([rule, n]) => (
-                <tr key={rule}><td>{rule}</td><td>{n}</td></tr>
-              ))}
-            </tbody>
-          </table>
-          <h2>问题明细（前 200 条）</h2>
-          <table>
-            <thead><tr><th>级别</th><th>问题</th><th>建议</th></tr></thead>
-            <tbody>
-              {issues.slice(0, 200).map((i) => (
-                <tr key={i.id}>
-                  <td><span className={`tag ${i.level}`}>{LEVEL_LABEL[i.level] ?? i.level}</span></td>
-                  <td>{i.message}<div className="muted">{i.case_id}</div></td>
-                  <td>{i.suggestion}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </section>
-  );
-}
+          <Menu
+            mode="inline"
+            style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 8 }}
+            selectedKeys={current ? [current.id] : []}
+            onClick={(e) => setCurrentId(e.key)}
+            items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
+          />
+          <div className="sider-section" style={{ paddingBottom: 16 }}>
+            <Button block icon={<HistoryOutlined />} onClick={() => setActivityOpen(true)}>
+              <Badge count={activity.length} size="small" overflowCount={99} offset={[8, -2]}>
+                <span>agent 活动</span>
+              </Badge>
+            </Button>
+          </div>
+        </Flex>
+      </Sider>
 
-function CasesPanel({ project }: { project: Project }) {
-  const [cases, setCases] = useState<TestCase[]>([]);
-  const [mode, setMode] = useState("");
-  const { busy, error, run } = useAsync();
-  const load = useCallback(
-    () => run(async () => setCases((await api().listCases(project.id, mode ? { execution_mode: mode } : {})) as TestCase[])),
-    [project.id, mode, run],
-  );
-  useEffect(() => void load(), [load]);
-  return (
-    <section>
-      <div className="row">
-        <select value={mode} onChange={(e) => setMode(e.target.value)}>
-          <option value="">全部执行方式</option>
-          {Object.entries(MODE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <span className="muted">{cases.length} 条</span>
-      </div>
-      {error && <div className="error">{error}</div>}
-      <table>
-        <thead><tr><th>标题</th><th>等级</th><th>执行方式</th><th>规范</th><th>状态</th><th /></tr></thead>
-        <tbody>
-          {cases.map((c) => (
-            <tr key={c.id}>
-              <td>{c.title}<div className="muted">{c.module_path.join(" / ")}</div></td>
-              <td>{c.priority}</td>
-              <td>{MODE_LABEL[c.execution_mode] ?? c.execution_mode}</td>
-              <td><span className={`tag ${c.lint_status}`}>{c.lint_status}</span></td>
-              <td>{STATUS_LABEL[c.status] ?? c.status}</td>
-              <td>
-                {c.status === "draft" && (
-                  <button disabled={busy} onClick={() => run(async () => { await api().updateCase(c.id, { status: "reviewed" }, "human"); await load(); })}>
-                    审核通过
-                  </button>
+      <Layout>
+        {current && (
+          <Header style={{ padding: "0 24px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+            <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
+              <Flex align="baseline" gap={12} style={{ minWidth: 0 }}>
+                <Typography.Text strong style={{ fontSize: 16, whiteSpace: "nowrap" }}>{current.name}</Typography.Text>
+                <Tooltip title={current.workspace_path}>
+                  <Typography.Text type="secondary" className="mono" ellipsis style={{ minWidth: 0 }}>
+                    {current.workspace_path}
+                  </Typography.Text>
+                </Tooltip>
+              </Flex>
+              <Space size={4} style={{ flexShrink: 0 }}>
+                {Object.entries(current.environments).map(([name, env]) => (
+                  <Tooltip key={name} title={env.base_url}>
+                    <Tag color={env.production ? "red" : "blue"} bordered={false}>{env.production ? `${name}（生产）` : name}</Tag>
+                  </Tooltip>
+                ))}
+                {viewVisible && (
+                  <Button size="small" icon={<CloseOutlined />} onClick={() => api().hideTestView?.()}>收起浏览器</Button>
                 )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-function ApiPanel({ project }: { project: Project }) {
-  const [result, setResult] = useState<unknown>();
-  const [enrich, setEnrich] = useState(false);
-  const { busy, error, run } = useAsync();
-  return (
-    <section>
-      <p className="muted">接口测试是一期主线：从 OpenAPI 生成基线用例（正向、必填缺失、边界值、类型错误、鉴权、幂等）和数据驱动的 pytest 脚本。</p>
-      <div className="row">
-        <label><input type="checkbox" checked={enrich} onChange={(e) => setEnrich(e.target.checked)} /> 让 agent 补充业务场景（消耗模型）</label>
-        <button
-          className="primary"
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const file = await api().pickFile([{ name: "OpenAPI", extensions: ["json", "yaml", "yml"] }]);
-              if (file) setResult(await api().generateApiSuite(project.id, file, enrich));
-            })
-          }
-        >
-          选择 OpenAPI 并生成
-        </button>
-        <button
-          disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const file = await api().pickFile([{ name: "需求文档", extensions: ["md", "docx", "pdf", "txt"] }]);
-              if (file) setResult(await api().generateCases(project.id, file));
-            })
-          }
-        >
-          从需求文档生成用例（agent）
-        </button>
-        {busy && <span className="muted">处理中…</span>}
-      </div>
-      {error && <div className="error">{error}</div>}
-      {result !== undefined && <pre>{JSON.stringify(result, null, 2)}</pre>}
-    </section>
-  );
-}
-
-function RunPanel({ project }: { project: Project }) {
-  const envs = Object.keys(project.environments);
-  const [env, setEnv] = useState(envs[0] ?? "");
-  const [token, setToken] = useState("");
-  const [result, setResult] = useState<any>();
-  const [usage, setUsage] = useState<number>();
-  const { busy, error, run } = useAsync();
-  useEffect(() => void api().tokenUsage(project.id).then((u) => setUsage(u.tokens)), [project.id, result]);
-  return (
-    <section>
-      <div className="row">
-        <select value={env} onChange={(e) => setEnv(e.target.value)}>
-          {envs.map((e) => <option key={e} value={e}>{e}（{project.environments[e].base_url}）</option>)}
-        </select>
-        <input type="password" placeholder="鉴权 token（存入系统钥匙串）" value={token} onChange={(e) => setToken(e.target.value)} />
-        <button disabled={!token || !env} onClick={() => run(async () => { await api().setEnvSecret(project.id, env, token); setToken(""); })}>
-          保存凭据
-        </button>
-      </div>
-      <div className="row">
-        <button className="primary" disabled={!env || busy} onClick={() => run(async () => setResult(await api().runRegression(project.id, env)))}>
-          执行回归
-        </button>
-        <button disabled={!env} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</button>
-        <span className="muted">项目累计模型消耗：{usage ?? "-"} tokens</span>
-      </div>
-      {error && <div className="error">{error}</div>}
-      {result && (
-        <>
-          <div className="stats">
-            <div className="stat"><b>{result.run.total}</b>总数</div>
-            <div className="stat"><b>{result.run.passed}</b>通过</div>
-            <div className="stat"><b>{result.run.failed + result.run.error}</b>失败</div>
-            <div className="stat"><b>{(result.run.pass_rate * 100).toFixed(1)}%</b>通过率</div>
-          </div>
-          {result.triage && (
-            <>
-              <h2>失败归因</h2>
-              <table>
-                <thead><tr><th>用例</th><th>类型</th><th>原因</th><th>建议</th></tr></thead>
-                <tbody>
-                  {result.triage.map((t: any) => (
-                    <tr key={t.case_id}><td>{t.case_id}</td><td><span className="tag failed">{t.failure_type}</span></td><td>{t.reason}</td><td>{t.suggestion}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
+              </Space>
+            </Flex>
+          </Header>
+        )}
+        <Content style={{ overflow: "hidden" }}>
+          {current ? (
+            <Tabs
+              activeKey={tab}
+              onChange={setTab}
+              items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: <div className="page">{t.children}</div> }))}
+              tabBarStyle={{ padding: "0 24px", marginBottom: 0 }}
+              style={{ height: "100%" }}
+              destroyInactiveTabPane
+            />
+          ) : (
+            <Flex align="center" justify="center" style={{ height: "100%" }}>
+              <Empty description="还没有项目">
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>新建项目</Button>
+              </Empty>
+            </Flex>
           )}
-        </>
-      )}
-    </section>
+        </Content>
+      </Layout>
+
+      <NewProjectModal open={creating} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); }} />
+
+      <Modal
+        open={!!approval}
+        title={<Space><SafetyCertificateOutlined style={{ color: token.colorWarning }} />需要你的审批</Space>}
+        okText="允许"
+        cancelText="拒绝"
+        onOk={() => respond(true)}
+        onCancel={() => respond(false)}
+        maskClosable={false}
+        width={560}
+      >
+        {approval && (
+          <>
+            <Typography.Paragraph strong>{approval.reason}</Typography.Paragraph>
+            <Descriptions size="small" column={1} bordered items={[
+              { key: "kind", label: "类型", children: approval.kind === "command" ? "执行命令" : "修改文件" },
+              ...Object.entries((approval.detail ?? {}) as Record<string, unknown>)
+                .filter(([k]) => ["command", "cwd", "reason", "grantRoot", "changes"].includes(k))
+                .map(([k, v]) => ({ key: k, label: k, children: <span className="mono">{typeof v === "string" ? v : JSON.stringify(v)}</span> })),
+            ]} />
+          </>
+        )}
+      </Modal>
+
+      <Drawer title="agent 活动" open={activityOpen} onClose={() => setActivityOpen(false)} width={420}
+        extra={<Button size="small" onClick={() => setActivity([])}>清空</Button>}>
+        {activity.length ? (
+          <Timeline items={[...activity].reverse().map((a) => ({ children: <><Typography.Text type="secondary">{a.time}</Typography.Text> {a.detail}</> }))} />
+        ) : (
+          <Empty description="暂无活动" />
+        )}
+      </Drawer>
+    </Layout>
+  );
+}
+
+function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (p: Project) => void }) {
+  const [form] = Form.useForm<{ name: string; workspace: string; env: string; baseUrl?: string }>();
+  const { busy, run } = useAction();
+  const pick = async () => {
+    const dir = await api().pickDirectory();
+    if (dir) form.setFieldValue("workspace", dir);
+  };
+  const submit = async () => {
+    const v = await form.validateFields();
+    const p = await run(() => api().createProject(v.name, v.workspace, v.baseUrl ? { [v.env || "test"]: { base_url: v.baseUrl } } : {}) as Promise<Project>, "项目已创建");
+    if (p) {
+      form.resetFields();
+      onClose();
+      onCreated(p);
+    }
+  };
+  return (
+    <Modal open={open} title="新建项目" onCancel={onClose} onOk={submit} okText="创建" confirmLoading={busy} destroyOnClose>
+      <Form form={form} layout="vertical" initialValues={{ env: "test" }} preserve={false}>
+        <Form.Item name="name" label="项目名" rules={[{ required: true, message: "请输入项目名" }]}>
+          <Input placeholder="如：特征中心 v4.4" />
+        </Form.Item>
+        <Form.Item label="workspace 目录" required extra="用例、脚本与报告都放在这里，并用 git 管理">
+          <Space.Compact style={{ width: "100%" }}>
+            <Form.Item name="workspace" noStyle rules={[{ required: true, message: "请选择目录" }]}>
+              <Input placeholder="选择或输入目录" />
+            </Form.Item>
+            <Button onClick={pick}>选择…</Button>
+          </Space.Compact>
+        </Form.Item>
+        <Flex gap={8}>
+          <Form.Item name="env" label="环境名" style={{ width: 120 }}><Input /></Form.Item>
+          <Form.Item name="baseUrl" label="被测地址（可稍后配置）" style={{ flex: 1 }}
+            rules={[{ type: "url", message: "请输入完整地址，如 https://test.example.com" }]}>
+            <Input placeholder="https://test.example.com" />
+          </Form.Item>
+        </Flex>
+      </Form>
+    </Modal>
   );
 }
