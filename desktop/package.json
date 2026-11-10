@@ -1,0 +1,35 @@
+{
+  "name": "@ai-test/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI 测试客户端桌面壳：Electron + React，内嵌浏览器，驱动 Codex App Server",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "test": "vitest run",
+    "dev": "npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env AITEST_DEV_SERVER=http://localhost:5173 electron .\"",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^10.0.7",
+    "cross-env": "^10.1.0",
+    "electron": "^38.8.6",
+    "typescript": "5.9",
+    "vite": "^6.4.6",
+    "vitest": "^5.1.0",
+    "wait-on": "^9.5.1"
+  },
+  "type": "module",
+  "dependencies": {
+    "@ai-test/mcp-servers": "0.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

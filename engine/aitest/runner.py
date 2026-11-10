@@ -1,0 +1,108 @@
+"""回归执行与报告（第 6、8 节）。
+
+回归由编排层直接调度 pytest，不经过 Codex、不消耗模型；只有失败用例才交给 agent 归因。
+这里先做确定性的初步归因（环境问题 / 疑似产品缺陷 / 待 agent 判定）。
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from .models import FailureType, Run, RunMode, RunResult
+
+_ID_RE = re.compile(r"\[(.+)\]$")
+_ENV_PATTERNS = re.compile(
+    r"(ConnectError|ConnectTimeout|ReadTimeout|Name or service not known|Connection refused|未设置 AITEST_BASE_URL)")
+_SERVER_ERROR = re.compile(r"状态码 5\d\d")
+
+
+@dataclass
+class EnvConfig:
+    base_url: str
+    auth_header: str = "Authorization"
+    auth_token: str = ""  # 由客户端从钥匙串取出后传入，不落库
+    timeout: float = 30
+
+    def to_env(self) -> dict[str, str]:
+        return {
+            "AITEST_BASE_URL": self.base_url,
+            "AITEST_AUTH_HEADER": self.auth_header,
+            "AITEST_AUTH_TOKEN": self.auth_token,
+            "AITEST_TIMEOUT": str(self.timeout),
+        }
+
+
+def classify_failure(message: str) -> str:
+    if _ENV_PATTERNS.search(message):
+        return FailureType.ENVIRONMENT.value
+    if _SERVER_ERROR.search(message):
+        return FailureType.PRODUCT_BUG.value
+    return FailureType.UNKNOWN.value  # 交给 agent 判断是接口 bug 还是用例错误
+
+
+def parse_junit(xml_path: str | Path, run_id: str) -> list[RunResult]:
+    root = ET.parse(str(xml_path)).getroot()
+    results: list[RunResult] = []
+    for tc in root.iter("testcase"):
+        name = tc.get("name", "")
+        m = _ID_RE.search(name)
+        case_id = m.group(1) if m else f"{tc.get('classname', '')}::{name}"
+        status, message = "passed", ""
+        for tag in ("failure", "error", "skipped"):
+            el = tc.find(tag)
+            if el is not None:
+                status = {"failure": "failed", "error": "error", "skipped": "skipped"}[tag]
+                message = (el.get("message") or "") + "\n" + (el.text or "")
+                break
+        results.append(RunResult(
+            run_id=run_id, case_id=case_id, status=status, duration=float(tc.get("time") or 0),
+            message=message.strip()[:4000],
+            failure_type=classify_failure(message) if status in ("failed", "error") else None,
+        ))
+    return results
+
+
+def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_name: str = "default",
+               report_dir: str | Path | None = None, extra_args: list[str] | None = None,
+               timeout: float | None = None) -> tuple[Run, list[RunResult]]:
+    suite_dir = Path(suite_dir)
+    run = Run(project_id=project_id, env=env_name, mode=RunMode.REGRESSION.value,
+              started_at=datetime.now(timezone.utc).isoformat())
+    report_dir = Path(report_dir or suite_dir / "reports")
+    report_dir.mkdir(parents=True, exist_ok=True)
+    junit = report_dir / f"{run.id}.xml"
+    cmd = [sys.executable, "-m", "pytest", str(suite_dir), f"--junitxml={junit}", "-q", "-p", "no:cacheprovider",
+           "--rootdir", str(suite_dir), *(extra_args or [])]
+    proc_env = {**os.environ, **env.to_env()}
+    proc = subprocess.run(cmd, cwd=str(suite_dir), env=proc_env, capture_output=True, text=True, timeout=timeout)
+    results = parse_junit(junit, run.id) if junit.exists() else []
+    run.result = summarize(results)
+    run.result.update({"exit_code": proc.returncode, "junit": str(junit),
+                       "stdout_tail": proc.stdout[-2000:], "stderr_tail": proc.stderr[-2000:]})
+    return run, results
+
+
+def summarize(results: list[RunResult]) -> dict[str, Any]:
+    counts: dict[str, int] = {"passed": 0, "failed": 0, "error": 0, "skipped": 0}
+    failure_types: dict[str, int] = {}
+    for r in results:
+        counts[r.status] = counts.get(r.status, 0) + 1
+        if r.failure_type:
+            failure_types[r.failure_type] = failure_types.get(r.failure_type, 0) + 1
+    total = len(results)
+    return {
+        "total": total,
+        **counts,
+        "pass_rate": round(counts["passed"] / total, 4) if total else 0.0,
+        "failure_types": failure_types,
+        # 只有这些需要调 agent 做归因
+        "needs_agent": [r.case_id for r in results if r.failure_type == FailureType.UNKNOWN.value],
+    }
