@@ -1,0 +1,35 @@
+{
+  "name": "@ai-test/mcp-servers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "注册给 Codex 的本地 MCP Server：doc-parser / case-store / case-import / api-runner / report",
+  "bin": {
+    "aitest-mcp": "dist/index.js"
+  },
+  "main": "dist/lib.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@playwright/test": "^1.63.0",
+    "playwright-core": "^1.63.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "5.9",
+    "vitest": "^5.1.0"
+  },
+  "types": "dist/lib.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib.d.ts",
+      "default": "./dist/lib.js"
+    }
+  }
+}

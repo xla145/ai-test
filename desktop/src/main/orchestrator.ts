@@ -1,0 +1,313 @@
+import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { checkData as CheckData, runUiSuite as RunUiSuite, seedData as SeedData, UiCaseResult } from "@ai-test/mcp-servers";
+import {
+  apiScriptPrompt,
+  caseGenerationPrompt,
+  explorePrompt,
+  healPrompt,
+  triagePrompt,
+  type FailureBrief,
+  type UiFailureBrief,
+} from "./prompts.js";
+import type { TurnResult } from "./codex/appServer.js";
+import type { ThreadStartParams } from "./codex/protocol.js";
+
+/**
+ * 编排层（架构文档第 3 节）：界面只和编排层通信；编排层驱动 Codex，凭据、审批和调度都留在这里。
+ * 回归执行由编排层直接调度 pytest，不经过 Codex；只有失败用例才回到 agent。
+ */
+export type EngineCall = <T = unknown>(args: string[], env?: Record<string, string>) => Promise<T>;
+
+export interface AgentEngine {
+  startThread(params: ThreadStartParams): Promise<string>;
+  runTurn(threadId: string, text: string, opts?: { tokenLimit?: number }): Promise<TurnResult>;
+}
+
+export interface EnvironmentInfo {
+  base_url: string;
+  auth_header?: string;
+  production?: boolean;
+  login?: Record<string, string>;
+  data_api?: { check?: string; seed?: string };
+  clock_api?: { set?: string };
+}
+
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  workspace_path: string;
+  environments: Record<string, EnvironmentInfo>;
+}
+
+/** UI 执行相关依赖（来自 @ai-test/mcp-servers，测试时可替换） */
+export interface UiDeps {
+  runUiSuite: typeof RunUiSuite;
+  checkData: typeof CheckData;
+  seedData: typeof SeedData;
+}
+
+interface CaseRow {
+  id: string;
+  title: string;
+  execution_mode: string;
+  status: string;
+  data_refs: string[];
+}
+
+export interface RunSummary {
+  run_id: string;
+  total: number;
+  passed: number;
+  failed: number;
+  error: number;
+  skipped: number;
+  pass_rate: number;
+  failure_types: Record<string, number>;
+  needs_agent: string[];
+}
+
+export interface TriageItem {
+  case_id: string;
+  failure_type: string;
+  reason?: string;
+  suggestion?: string;
+}
+
+export interface OrchestratorDeps {
+  engine: EngineCall;
+  agent: () => Promise<AgentEngine>;
+  /** 取环境凭据与角色账号（来自钥匙串），只注入子进程 */
+  secretEnv: (projectId: string, env: string, roles?: string[]) => Record<string, string>;
+  ui?: UiDeps;
+  /** 单次 agent 任务的 token 上限 */
+  tokenLimit?: number;
+}
+
+export class Orchestrator extends EventEmitter {
+  constructor(private readonly deps: OrchestratorDeps) {
+    super();
+  }
+
+  listProjects(): Promise<ProjectInfo[]> {
+    return this.deps.engine<ProjectInfo[]>(["list-projects"]);
+  }
+
+  async project(projectId: string): Promise<ProjectInfo> {
+    const p = (await this.listProjects()).find((x) => x.id === projectId);
+    if (!p) throw new Error(`项目不存在：${projectId}`);
+    return p;
+  }
+
+  createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {}) {
+    return this.deps.engine<ProjectInfo>([
+      "init-project", "--name", name, "--workspace", workspace, "--environments", JSON.stringify(environments),
+    ]);
+  }
+
+  importExcel(projectId: string, file: string) {
+    return this.deps.engine(["import-excel", "--project", projectId, "--file", file]);
+  }
+
+  lint(projectId: string) {
+    return this.deps.engine(["lint", "--project", projectId, "--with-issues"]);
+  }
+
+  listCases(projectId: string, filters: Record<string, string> = {}) {
+    const args = ["list-cases", "--project", projectId];
+    for (const [k, v] of Object.entries(filters)) if (v) args.push(`--${k.replace(/_/g, "-")}`, v);
+    return this.deps.engine<unknown[]>(args);
+  }
+
+  updateCase(caseId: string, patch: Record<string, unknown>) {
+    return this.deps.engine(["update-case", "--case", caseId, "--json", JSON.stringify(patch)]);
+  }
+
+  applyFix(caseId: string, field: string, value: unknown) {
+    return this.deps.engine(["apply-fix", "--case", caseId, "--field", field, "--value", JSON.stringify(value)]);
+  }
+
+  tokenUsage(projectId: string) {
+    return this.deps.engine<{ tokens: number }>(["token-usage", "--project", projectId]);
+  }
+
+  /** 接口测试主线：OpenAPI → 基线用例 → 脚本（确定性，不耗模型）；enrich=true 时让 agent 补充业务场景 */
+  async generateApiSuite(projectId: string, openapiFile: string, enrich = false) {
+    const generated = await this.deps.engine(["generate-api-cases", "--project", projectId, "--openapi", openapiFile]);
+    let agent: TurnResult | undefined;
+    if (enrich) agent = await this.agentTask(projectId, "api_script", apiScriptPrompt(projectId, openapiFile));
+    const suite = await this.deps.engine(["write-api-suite", "--project", projectId]);
+    return { generated, suite, agent };
+  }
+
+  /** 需求文档 → 用例（agent 任务） */
+  generateCases(projectId: string, requirementFile: string) {
+    return this.agentTask(projectId, "case_gen", caseGenerationPrompt(projectId, requirementFile));
+  }
+
+  /** 回归：直接跑脚本，不消耗大模型；失败且无法确定类型时才调 agent 归因 */
+  async runRegression(projectId: string, env: string, opts: { autoTriage?: boolean } = {}) {
+    const project = await this.project(projectId);
+    const envCfg = project.environments[env];
+    if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    this.emit("progress", { projectId, stage: "run", env });
+    const run = await this.deps.engine<RunSummary>(
+      ["run-api-suite", "--project", projectId, "--env", env],
+      this.deps.secretEnv(projectId, env),
+    );
+    let triage: TriageItem[] | undefined;
+    if (opts.autoTriage !== false && run.needs_agent.length) {
+      triage = await this.triage(projectId, run.run_id);
+    }
+    return { run, triage };
+  }
+
+  async triage(projectId: string, runId: string): Promise<TriageItem[]> {
+    const failures = await this.deps.engine<FailureBrief[]>(["summarize-failures", "--run", runId]);
+    const unknown = failures.filter((f) => f.failure_type === "unknown");
+    const settled: TriageItem[] = failures
+      .filter((f) => f.failure_type !== "unknown")
+      .map((f) => ({ case_id: f.case_id, failure_type: f.failure_type ?? "unknown", reason: "确定性规则判定" }));
+    if (!unknown.length) return settled;
+    const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown));
+    return [...settled, ...parseTriage(turn.message)];
+  }
+
+  // ------------------------------------------------------------------ UI 测试（二期）
+
+  /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
+  exploreUiCase(projectId: string, env: string, caseId: string) {
+    return this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId));
+  }
+
+  /** 执行前检查用例依赖的测试数据；缺失则造数，仍缺失的用例降级为手工（本次不执行） */
+  async prepareData(projectId: string, env: string, cases: CaseRow[]) {
+    const ui = this.requireUi();
+    const project = await this.project(projectId);
+    const envCfg = project.environments[env];
+    const keys = [...new Set(cases.flatMap((c) => c.data_refs ?? []))];
+    if (!keys.length) return { missing: [] as string[], degraded: [] as string[] };
+    const records = await this.deps.engine<{ key: string; check_script?: string; seed_script?: string }[]>(["list-test-data", "--project", projectId]);
+    const auth = this.deps.secretEnv(projectId, env).AITEST_AUTH_TOKEN;
+    const status = await ui.checkData(envCfg, keys, records, project.workspace_path, { authToken: auth });
+    const absent = status.filter((s) => s.exists === false).map((s) => s.key);
+    const seeded = absent.length ? await ui.seedData(envCfg, absent, records, project.workspace_path, { authToken: auth }) : [];
+    const missing = seeded.filter((s) => !s.seeded).map((s) => s.key);
+    const degraded = cases.filter((c) => (c.data_refs ?? []).some((k) => missing.includes(k))).map((c) => c.id);
+    return { missing, degraded };
+  }
+
+  /** UI 回归：直接跑 Playwright 脚本，不调用模型；失败且无法确定原因时进入自愈 */
+  async runUiRegression(projectId: string, env: string, opts: { autoHeal?: boolean; headed?: boolean } = {}) {
+    const ui = this.requireUi();
+    const project = await this.project(projectId);
+    const envCfg = project.environments[env];
+    if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
+    const uiScripts = new Map(scripts.filter((s) => s.framework === "playwright").map((s) => [s.case_id, s.path]));
+    const cases = (await this.listCases(projectId)) as CaseRow[];
+    const runnable = cases.filter((c) => uiScripts.has(c.id) && c.status !== "deprecated");
+    if (!runnable.length) throw new Error("没有可执行的 UI 脚本，请先在探索模式生成");
+    const { missing, degraded } = await this.prepareData(projectId, env, runnable);
+    const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
+
+    const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
+    const out = await ui.runUiSuite({
+      workspace: project.workspace_path,
+      baseUrl: envCfg.base_url,
+      caseIds,
+      headed: opts.headed,
+      env: { ...this.deps.secretEnv(projectId, env, roles), ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
+    });
+    const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
+    writeFileSync(file, JSON.stringify(out.results));
+    const run = await this.deps.engine<RunSummary & { reviews: number }>([
+      "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "playwright",
+    ]);
+    let heal: TriageItem[] | undefined;
+    if (opts.autoHeal !== false && run.needs_agent.length) {
+      heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts);
+    }
+    return { run, heal, degraded, missingData: missing, htmlReport: out.htmlReport };
+  }
+
+  async healUi(projectId: string, env: string, runId: string, results?: UiCaseResult[], scripts?: Map<string, string>) {
+    const rows = results ?? (await this.deps.engine<UiCaseResult[]>(["list-run-results", "--run", runId]));
+    const pending = rows.filter((r) => (r.status === "failed" || r.status === "error") && (!r.failure_type || r.failure_type === "unknown"));
+    if (!pending.length) return [];
+    const scriptMap = scripts ?? new Map(
+      (await this.deps.engine<{ case_id: string; path: string }[]>(["list-scripts"])).map((s) => [s.case_id, s.path]),
+    );
+    const briefs: UiFailureBrief[] = pending.map((r) => ({
+      case_id: r.case_id, message: r.message, script: scriptMap.get(r.case_id), evidence_paths: r.evidence_paths ?? [],
+    }));
+    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs));
+    return parseTriage(turn.message);
+  }
+
+  listProposals(status?: string) {
+    return this.deps.engine(["list-proposals", ...(status ? ["--status", status] : [])]);
+  }
+
+  resolveProposal(projectId: string, id: string, accept: boolean) {
+    return this.deps.engine(["resolve-proposal", "--project", projectId, "--id", id, ...(accept ? ["--accept"] : [])]);
+  }
+
+  listReviews(status?: string) {
+    return this.deps.engine(["list-reviews", ...(status ? ["--status", status] : [])]);
+  }
+
+  resolveReview(id: string, passed: boolean) {
+    return this.deps.engine(["resolve-review", "--id", id, ...(passed ? ["--passed"] : [])]);
+  }
+
+  listRoles(projectId: string) {
+    return this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId]);
+  }
+
+  addRole(projectId: string, role: string) {
+    return this.deps.engine(["add-role", "--project", projectId, "--role", role]);
+  }
+
+  setEnvironment(projectId: string, env: string, cfg: EnvironmentInfo) {
+    return this.deps.engine(["set-environment", "--project", projectId, "--env", env, "--json", JSON.stringify(cfg)]);
+  }
+
+  private requireUi(): UiDeps {
+    if (!this.deps.ui) throw new Error("未启用 UI 执行器");
+    return this.deps.ui;
+  }
+
+  /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
+  private async agentTask(projectId: string, purpose: string, prompt: string): Promise<TurnResult> {
+    const project = await this.project(projectId);
+    const agent = await this.deps.agent();
+    const threadId = await agent.startThread({
+      cwd: project.workspace_path,
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+    });
+    const session = await this.deps.engine<{ id: string }>([
+      "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
+    ]);
+    this.emit("progress", { projectId, stage: purpose, threadId });
+    const result = await agent.runTurn(threadId, prompt, { tokenLimit: this.deps.tokenLimit });
+    await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
+    return result;
+  }
+}
+
+/** 从 agent 最终回复中取出 JSON 数组 */
+export function parseTriage(message: string): TriageItem[] {
+  const fenced = message.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+  const raw = fenced?.[1] ?? message.slice(message.indexOf("["), message.lastIndexOf("]") + 1);
+  try {
+    const items = JSON.parse(raw) as TriageItem[];
+    return Array.isArray(items) ? items.filter((i) => i && typeof i.case_id === "string") : [];
+  } catch {
+    return [];
+  }
+}
