@@ -41,13 +41,16 @@ export interface UiRunOutput {
   stderr: string;
 }
 
+/** 打包进 Electron 时，依赖位于 app.asar.unpacked（子进程需要真实文件路径） */
+const unpacked = (p: string) => p.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
+
 function playwrightCli(): string {
-  return join(dirname(require.resolve("@playwright/test/package.json")), "cli.js");
+  return unpacked(join(dirname(require.resolve("@playwright/test/package.json")), "cli.js"));
 }
 
 /** 让工作区里的脚本能解析到客户端自带的 @playwright/test */
 function nodePath(): string {
-  const pkgDir = dirname(require.resolve("@playwright/test/package.json"));
+  const pkgDir = unpacked(dirname(require.resolve("@playwright/test/package.json")));
   return [join(pkgDir, "..", ".."), process.env.NODE_PATH].filter(Boolean).join(process.platform === "win32" ? ";" : ":");
 }
 
@@ -71,6 +74,8 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
     AITEST_REPORT_JSON: reportJson,
     AITEST_HTML_REPORT: htmlReport,
     AITEST_OUTPUT_DIR: join(outDir, "artifacts"),
+    // 在 Electron 主进程中调用时，process.execPath 是 Electron 本身，需以 Node 模式运行
+    ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     ...(opts.headed ? { AITEST_HEADED: "1" } : {}),
   };
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {

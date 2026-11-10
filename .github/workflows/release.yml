@@ -1,0 +1,149 @@
+name: Release
+
+# 推送到 main 后：先跑完整测试，再构建各平台安装包与发布包，打 tag 并创建 GitHub Release。
+# 版本号 = 根 package.json 的「主版本.次版本」+ 本工作流的运行序号，例如 v0.3.57。
+# 要发布新的主 / 次版本，修改根 package.json 的 version 即可。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          version="${base}.${{ github.run_number }}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "发布版本：v${version}"
+
+  packages:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 引擎 wheel / sdist
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" engine/pyproject.toml
+          pip install build
+          python -m build engine -o dist-release
+      - name: mcp-servers 与 CI 执行器（npm 包）
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci
+          npm version "${VERSION}" -w mcp-servers --no-git-tag-version --allow-same-version
+          npm run build -w mcp-servers
+          npm pack -w mcp-servers --pack-destination dist-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dist-release/*
+          if-no-files-found: error
+
+  desktop:
+    needs: [test, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            files: desktop/release/*.AppImage
+          - os: windows-latest
+            files: desktop/release/*.exe
+          - os: macos-latest
+            files: desktop/release/*.dmg
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # 未配置代码签名证书：macOS / Windows 安装包为未签名版本
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 准备引擎依赖
+        run: PYTHON=python scripts/prepare-engine-deps.sh
+      - name: 构建安装包
+        run: |
+          npm version "${VERSION}" -w desktop --no-git-tag-version --allow-same-version
+          npm run build -w desktop
+          cd desktop && npx electron-builder --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: [version, packages, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: 创建 tag 与 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          ls -la assets
+          cat > notes.md <<'NOTES'
+          ## 安装包
+
+          | 平台 | 文件 |
+          | --- | --- |
+          | Windows | `aitest-desktop-*-win-x64.exe` |
+          | macOS（Apple 芯片） | `aitest-desktop-*-mac-arm64.dmg` |
+          | Linux | `aitest-desktop-*-linux-x86_64.AppImage` |
+
+          桌面端需要本机安装 Python 3.10+（引擎依赖已随安装包附带）和 Codex CLI（或用 `AITEST_CODEX_BIN` 指定路径）。
+          安装包未做代码签名：macOS 首次打开需在「系统设置 → 隐私与安全性」中允许，Windows 可能出现 SmartScreen 提示。
+
+          ## 其他发布物
+
+          - `aitest_engine-*.whl`：执行引擎（`pip install` 后提供 `aitest` 命令）
+          - `ai-test-mcp-servers-*.tgz`：MCP Server 与 CI 执行器 `aitest-ci`
+          NOTES
+          gh release create "$TAG" assets/* \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "AI 测试客户端 $TAG" \
+            --notes-file notes.md \
+            --generate-notes

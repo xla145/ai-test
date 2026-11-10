@@ -1,13 +1,17 @@
 {
   "name": "ai-test",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "AI 测试客户端：需求文档 → 结构化用例 → 接口 / UI 自动化测试",
-  "workspaces": ["mcp-servers", "desktop"],
+  "workspaces": [
+    "mcp-servers",
+    "desktop"
+  ],
   "scripts": {
     "build": "npm run build -w mcp-servers && npm run build -w desktop",
     "test": "npm test -w mcp-servers && npm test -w desktop",
     "typecheck": "npm run typecheck -w mcp-servers && npm run typecheck -w desktop",
-    "dev": "npm run dev -w desktop"
+    "dev": "npm run dev -w desktop",
+    "dist": "scripts/prepare-engine-deps.sh && npm run dist -w desktop"
   }
 }
