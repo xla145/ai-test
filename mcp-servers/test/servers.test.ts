@@ -38,6 +38,19 @@ describe("tool definitions", () => {
       "list-cases", "--project", "p1", "--execution-mode", "api",
     ]);
   });
+
+  it("passes optional paging to list tools", () => {
+    const list = getServer("case-store").tools.find((t) => t.name === "list_cases")!;
+    expect(list.toArgs({ project_id: "p1", query: "标签", page: 2, page_size: 50 })).toEqual([
+      "list-cases", "--project", "p1", "--query", "标签", "--page", "2", "--page-size", "50",
+    ]);
+    // 只传 page 不分页：仍返回完整列表，保持旧格式
+    expect(list.toArgs({ project_id: "p1", page: 3 })).toEqual(["list-cases", "--project", "p1"]);
+    const issues = getServer("case-import").tools.find((t) => t.name === "list_issues")!;
+    expect(issues.toArgs({ project_id: "p1", level: "warn", page_size: 20 })).toEqual([
+      "list-issues", "--project", "p1", "--level", "warn", "--page-size", "20",
+    ]);
+  });
 });
 
 describe("mcp server", () => {

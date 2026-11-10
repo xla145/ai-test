@@ -6,12 +6,37 @@ export interface ApprovalRequest {
   detail: unknown;
 }
 
+/** 分页查询：page 从 1 开始 */
+export interface PageQuery {
+  page: number;
+  pageSize: number;
+}
+
+/** 引擎分页返回 */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  /** 规范问题分页附带：按级别统计（不受级别筛选影响） */
+  levels?: Record<string, number>;
+}
+
+export interface CaseQuery extends PageQuery {
+  /** 匹配标题、用例 ID、模块路径 */
+  query?: string;
+  /** execution_mode / priority / status / lint_status / type；值可用逗号分隔多个 */
+  filters?: Record<string, string | undefined>;
+}
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
   createProject(name: string, workspace: string, environments: Record<string, unknown>): Promise<unknown>;
   importExcel(projectId: string, file: string): Promise<unknown>;
   lint(projectId: string): Promise<unknown>;
   listCases(projectId: string, filters?: Record<string, string>): Promise<unknown[]>;
+  pageCases(projectId: string, q: CaseQuery): Promise<Page<unknown>>;
+  pageIssues(projectId: string, q: PageQuery & { level?: string }): Promise<Page<unknown>>;
   updateCase(caseId: string, patch: Record<string, unknown>, actor?: "human" | "agent"): Promise<unknown>;
   applyFix(caseId: string, field: string, value: unknown): Promise<unknown>;
   generateApiSuite(projectId: string, openapiFile: string, enrich: boolean): Promise<unknown>;
@@ -25,8 +50,10 @@ export interface AitestApi {
   exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean): Promise<unknown>;
   listProposals(status?: string): Promise<unknown[]>;
+  pageProposals(projectId: string, q: PageQuery & { status?: string }): Promise<Page<unknown>>;
   resolveProposal(projectId: string, id: string, accept: boolean): Promise<unknown>;
   listReviews(status?: string): Promise<unknown[]>;
+  pageReviews(projectId: string, q: PageQuery & { status?: string }): Promise<Page<unknown>>;
   resolveReview(id: string, passed: boolean): Promise<unknown>;
   usageReport(projectId: string, days?: number): Promise<any>;
   checkBudget(projectId: string): Promise<any>;
@@ -35,6 +62,7 @@ export interface AitestApi {
   metrics(projectId: string): Promise<any>;
   stability(projectId: string): Promise<any>;
   listAttributions(projectId: string, pendingOnly?: boolean): Promise<any[]>;
+  pageAttributions(projectId: string, q: PageQuery & { pending?: boolean }): Promise<Page<any>>;
   confirmAttribution(runId: string, caseId: string, type: string): Promise<unknown>;
   exportWorkspace(projectId: string): Promise<any>;
   importWorkspace(dir: string): Promise<any>;

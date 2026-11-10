@@ -193,11 +193,22 @@ def get_attribution(store: Store, run_id: str, case_id: str) -> dict[str, Any]:
     return dict(r) if r else {}
 
 
-def list_attributions(store: Store, project_id: str, pending_only: bool = False) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM attribution WHERE project_id=?"
-    if pending_only:
-        sql += " AND human_type IS NULL"
-    return [dict(r) for r in store.conn.execute(sql + " ORDER BY updated_at DESC", (project_id,)).fetchall()]
+def _attribution_where(pending_only: bool) -> str:
+    return " WHERE project_id=?" + (" AND human_type IS NULL" if pending_only else "")
+
+
+def list_attributions(store: Store, project_id: str, pending_only: bool = False, *,
+                      limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM attribution" + _attribution_where(pending_only) + " ORDER BY updated_at DESC, rowid DESC"
+    args: list[Any] = [project_id]
+    if limit:
+        sql, args = sql + " LIMIT ? OFFSET ?", args + [limit, max(offset, 0)]
+    return [dict(r) for r in store.conn.execute(sql, args).fetchall()]
+
+
+def count_attributions(store: Store, project_id: str, pending_only: bool = False) -> int:
+    return store.conn.execute("SELECT COUNT(*) FROM attribution" + _attribution_where(pending_only),
+                              (project_id,)).fetchone()[0]
 
 
 def _run_project(store: Store, run_id: str) -> str:

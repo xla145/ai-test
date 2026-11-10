@@ -1,10 +1,10 @@
 import { CheckCircleOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Col, Empty, Row, Segmented, Statistic, Table, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { api, type LintIssue, type Project } from "../api";
 import { LabelTag, LEVEL } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction } from "../hooks";
+import { useAction, usePaged } from "../hooks";
 
 const RULE_LABEL: Record<string, string> = {
   required_fields: "必填字段完整",
@@ -24,27 +24,33 @@ interface LintReport {
   rule_hits: Record<string, number>;
   blocked_case_ids: string[];
   stats: { p0_ratio?: number };
-  issues: LintIssue[];
+  /** 本次检查时间：结果与上次相同时也触发问题明细重新读取 */
+  checkedAt: number;
 }
+
+const checked = (r: unknown): LintReport => ({ ...(r as LintReport), checkedAt: Date.now() });
 
 export function ImportPage({ project }: { project: Project }) {
   const [report, setReport] = useState<LintReport>();
   const [level, setLevel] = useState<string>("all");
   const { busy, run } = useAction();
+  // 问题明细按页从引擎读取；每次检查后 report 变化，回到第 1 页重新读取
+  const issues = usePaged<LintIssue>(
+    (q) => report
+      ? api().pageIssues(project.id, { ...q, level: level === "all" ? undefined : level }) as Promise<{ items: LintIssue[]; total: number; levels?: Record<string, number> }>
+      : Promise.resolve({ items: [], total: 0 }),
+    [project.id, report, level], 10);
+  // 各级别问题数（引擎随每页返回，不受级别筛选影响）
+  const counts = issues.levels ?? {};
 
   const importExcel = () => run(async () => {
     const file = await api().pickFile([{ name: "Excel", extensions: ["xlsx"] }]);
     if (!file) return;
     await api().importExcel(project.id, file);
-    setReport((await api().lint(project.id)) as LintReport);
+    setReport(checked(await api().lint(project.id)));
   }, "导入完成，已完成规范检查");
 
-  const issues = useMemo(() => (report?.issues ?? []).filter((i) => level === "all" || i.level === level), [report, level]);
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const i of report?.issues ?? []) c[i.level] = (c[i.level] ?? 0) + 1;
-    return c;
-  }, [report]);
+  const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <>
@@ -52,7 +58,7 @@ export function ImportPage({ project }: { project: Project }) {
         title="用例导入与规范检查"
         description="导入团队已有的 Excel 用例。结构类规则由代码检查、不耗模型；阻断级问题修复前不会生成脚本。"
         extra={<>
-          <Button icon={<ReloadOutlined />} loading={busy} onClick={() => run(async () => setReport((await api().lint(project.id)) as LintReport))}>重新检查</Button>
+          <Button icon={<ReloadOutlined />} loading={busy} onClick={() => run(async () => setReport(checked(await api().lint(project.id))))}>重新检查</Button>
           <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={importExcel}>导入 Excel</Button>
         </>}
       />
@@ -89,15 +95,16 @@ export function ImportPage({ project }: { project: Project }) {
                 title="问题明细"
                 size="small"
                 extra={<Segmented size="small" value={level} onChange={(v) => setLevel(String(v))} options={[
-                  { label: `全部 ${report.issues.length}`, value: "all" },
+                  { label: `全部 ${totalIssues}`, value: "all" },
                   ...["block", "block_script", "warn", "info"].filter((k) => counts[k]).map((k) => ({ label: `${LEVEL[k].text} ${counts[k]}`, value: k })),
                 ]} />}
               >
                 <Table
                   size="small"
                   rowKey="id"
-                  dataSource={issues}
-                  pagination={{ pageSize: 10, size: "small", showSizeChanger: false }}
+                  loading={issues.loading}
+                  dataSource={issues.items}
+                  pagination={{ ...issues.pagination, size: "small" }}
                   columns={[
                     { title: "级别", dataIndex: "level", width: 110, render: (v: string) => <LabelTag map={LEVEL} value={v} /> },
                     { title: "问题", dataIndex: "message", render: (m: string, r: LintIssue) => (

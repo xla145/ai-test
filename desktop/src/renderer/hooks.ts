@@ -42,3 +42,80 @@ export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   useEffect(() => void reload(), [reload]);
   return { data, loading, reload, setData };
 }
+
+export interface PageData<T> {
+  items: T[];
+  total: number;
+  levels?: Record<string, number>;
+}
+
+/**
+ * 服务端分页：按页向引擎取数，返回可直接传给 antd Table / List 的 pagination。
+ * - deps（项目、筛选条件等）变化时回到第 1 页；
+ * - 处理完当前页最后一条（如审核、合并后）自动退回上一页。
+ */
+export function usePaged<T>(
+  fetch: (q: { page: number; pageSize: number }) => Promise<PageData<T>>,
+  deps: unknown[],
+  defaultPageSize = 20,
+) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [data, setData] = useState<PageData<T>>({ items: [], total: 0 });
+  const [loading, setLoading] = useState(true);
+  const fetchRef = useRef(fetch);
+  fetchRef.current = fetch;
+  const seq = useRef(0);
+  const key = JSON.stringify(deps);
+  const [lastKey, setLastKey] = useState(key);
+  // 条件变化：同步回到第 1 页，避免先用旧页码请求一次
+  const current = key === lastKey ? page : 1;
+  if (key !== lastKey) {
+    setLastKey(key);
+    setPage(1);
+  }
+
+  const load = useCallback(async () => {
+    const id = ++seq.current;
+    setLoading(true);
+    try {
+      const out = await fetchRef.current({ page: current, pageSize });
+      if (id !== seq.current) return; // 已有更新的请求
+      if (!out.items.length && out.total > 0 && current > 1) {
+        setPage(Math.max(1, Math.ceil(out.total / pageSize)));
+        return;
+      }
+      setData(out);
+    } finally {
+      if (id === seq.current) setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, pageSize, key]);
+  useEffect(() => void load(), [load]);
+
+  const pagination = {
+    current,
+    pageSize,
+    total: data.total,
+    showSizeChanger: true,
+    pageSizeOptions: [10, 20, 50, 100],
+    showTotal: (t: number) => `共 ${t} 条`,
+    onChange: (p: number, size: number) => {
+      if (size !== pageSize) {
+        setPageSize(size);
+        setPage(1);
+      } else setPage(p);
+    },
+  };
+  return { ...data, loading, reload: load, pagination };
+}
+
+/** 输入框防抖：用于搜索条件，避免每次按键都请求引擎 */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}

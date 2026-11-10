@@ -14,6 +14,13 @@ import {
 } from "./prompts.js";
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
+import type { CaseQuery, Page, PageQuery } from "../shared/ipc.js";
+
+const opt = (flag: string, v: string | undefined): string[] => (v ? [flag, v] : []);
+const pageArgs = (q: PageQuery) => ["--page", String(q.page), "--page-size", String(q.pageSize)];
+/** { execution_mode: "ui,capture" } → ["--execution-mode", "ui,capture"] */
+const filterArgs = (filters: Record<string, string | undefined>) =>
+  Object.entries(filters).flatMap(([k, v]) => opt(`--${k.replace(/_/g, "-")}`, v));
 
 /**
  * 编排层（架构文档第 3 节）：界面只和编排层通信；编排层驱动 Codex，凭据、审批和调度都留在这里。
@@ -111,14 +118,23 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["import-excel", "--project", projectId, "--file", file]);
   }
 
+  /** 规范检查只返回统计；问题明细用 pageIssues 分页读取 */
   lint(projectId: string) {
-    return this.deps.engine(["lint", "--project", projectId, "--with-issues"]);
+    return this.deps.engine(["lint", "--project", projectId]);
   }
 
   listCases(projectId: string, filters: Record<string, string> = {}) {
-    const args = ["list-cases", "--project", projectId];
-    for (const [k, v] of Object.entries(filters)) if (v) args.push(`--${k.replace(/_/g, "-")}`, v);
-    return this.deps.engine<unknown[]>(args);
+    return this.deps.engine<unknown[]>(["list-cases", "--project", projectId, ...filterArgs(filters)]);
+  }
+
+  pageCases(projectId: string, q: CaseQuery) {
+    return this.deps.engine<Page<unknown>>([
+      "list-cases", "--project", projectId, ...opt("--query", q.query), ...filterArgs(q.filters ?? {}), ...pageArgs(q),
+    ]);
+  }
+
+  pageIssues(projectId: string, q: PageQuery & { level?: string }) {
+    return this.deps.engine<Page<unknown>>(["list-issues", "--project", projectId, ...opt("--level", q.level), ...pageArgs(q)]);
   }
 
   /** 界面上的修改记为人工介入（计入「人工介入次数」） */
@@ -254,6 +270,14 @@ export class Orchestrator extends EventEmitter {
     return judged;
   }
 
+  pageProposals(projectId: string, q: PageQuery & { status?: string }) {
+    return this.deps.engine<Page<unknown>>(["list-proposals", "--project", projectId, ...opt("--status", q.status), ...pageArgs(q)]);
+  }
+
+  pageReviews(projectId: string, q: PageQuery & { status?: string }) {
+    return this.deps.engine<Page<unknown>>(["list-reviews", "--project", projectId, ...opt("--status", q.status), ...pageArgs(q)]);
+  }
+
   listProposals(status?: string) {
     return this.deps.engine(["list-proposals", ...(status ? ["--status", status] : [])]);
   }
@@ -293,6 +317,12 @@ export class Orchestrator extends EventEmitter {
         ...(it.reason ? ["--reason", it.reason] : []),
       ]);
     }
+  }
+
+  pageAttributions(projectId: string, q: PageQuery & { pending?: boolean }) {
+    return this.deps.engine<Page<unknown>>([
+      "list-attributions", "--project", projectId, ...(q.pending ? ["--pending"] : []), ...pageArgs(q),
+    ]);
   }
 
   listAttributions(projectId: string, pendingOnly = true) {

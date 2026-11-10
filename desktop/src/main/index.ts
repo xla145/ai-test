@@ -221,6 +221,11 @@ function registerIpc(orch: Orchestrator): void {
     importExcel: (p: string, f: string) => orch.importExcel(p, f),
     lint: (p: string) => orch.lint(p),
     listCases: (p: string, filters) => orch.listCases(p, filters),
+    pageCases: (p: string, q) => orch.pageCases(p, q),
+    pageIssues: (p: string, q) => orch.pageIssues(p, q),
+    pageProposals: (p: string, q) => orch.pageProposals(p, q),
+    pageReviews: (p: string, q) => orch.pageReviews(p, q),
+    pageAttributions: (p: string, q) => orch.pageAttributions(p, q),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
     generateApiSuite: async (p: string, f: string, enrich: boolean) => {

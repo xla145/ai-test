@@ -82,6 +82,27 @@ class CaseValidationError(ValueError):
     pass
 
 
+def _limit(limit: int | None, offset: int) -> tuple[str, list[Any]]:
+    """分页子句；limit 为 None 时不分页。"""
+    return (" LIMIT ? OFFSET ?", [limit, max(offset, 0)]) if limit else ("", [])
+
+
+def _match(col: str, value: Any) -> tuple[str, list[Any]]:
+    """等值过滤；逗号分隔的多个值按 IN 处理（如 execution_mode=ui,capture）。"""
+    vals = [v for v in str(value).split(",") if v]
+    if len(vals) == 1:
+        return f" AND {col}=?", vals
+    return f" AND {col} IN ({','.join('?' * len(vals))})", vals
+
+
+def _like(text: str) -> str:
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+# 按项目过滤只挂在用例上的实体（建议、复核、规范问题）
+_OF_PROJECT = " AND case_id IN (SELECT id FROM testcase WHERE project_id=?)"
+
+
 class Store:
     def __init__(self, path: str | Path = ":memory:"):
         if path != ":memory:":
@@ -148,15 +169,31 @@ class Store:
         r = self.conn.execute("SELECT data FROM testcase WHERE id=?", (case_id,)).fetchone()
         return TestCase.from_dict(json.loads(r["data"])) if r else None
 
-    def list_cases(self, project_id: str, **filters: Any) -> list[TestCase]:
-        sql = "SELECT data FROM testcase WHERE project_id=?"
-        args: list[Any] = [project_id]
+    @staticmethod
+    def _case_where(project_id: str, query: str | None, filters: dict[str, Any]) -> tuple[str, list[Any]]:
+        sql, args = " WHERE project_id=?", [project_id]
         for col in ("type", "priority", "execution_mode", "status", "lint_status"):
             if filters.get(col):
-                sql += f" AND {col}=?"
-                args.append(filters[col])
-        rows = self.conn.execute(sql + " ORDER BY rowid", args).fetchall()
+                s, a = _match(col, filters[col])
+                sql, args = sql + s, args + a
+        if query:
+            sql += (" AND (title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\'"
+                    " OR json_extract(data, '$.module_path') LIKE ? ESCAPE '\\')")
+            args += [_like(query)] * 3
+        return sql, args
+
+    def list_cases(self, project_id: str, *, query: str | None = None, limit: int | None = None, offset: int = 0,
+                   **filters: Any) -> list[TestCase]:
+        """filters：type / priority / execution_mode / status / lint_status，值可用逗号分隔多个；
+        query 匹配标题、用例 ID 与模块路径。"""
+        where, args = self._case_where(project_id, query, filters)
+        page, page_args = _limit(limit, offset)
+        rows = self.conn.execute("SELECT data FROM testcase" + where + " ORDER BY rowid" + page, args + page_args).fetchall()
         return [TestCase.from_dict(json.loads(r["data"])) for r in rows]
+
+    def count_cases(self, project_id: str, *, query: str | None = None, **filters: Any) -> int:
+        where, args = self._case_where(project_id, query, filters)
+        return self.conn.execute("SELECT COUNT(*) FROM testcase" + where, args).fetchone()[0]
 
     def link_requirement(self, case_id: str, requirement_id: str) -> TestCase:
         case = self.get_case(case_id)
@@ -176,12 +213,34 @@ class Store:
         )
         self.conn.commit()
 
-    def list_lint_issues(self, case_id: str | None = None) -> list[LintIssue]:
+    @staticmethod
+    def _issue_where(case_id: str | None, project_id: str | None, level: str | None) -> tuple[str, list[Any]]:
+        sql, args = " WHERE 1=1", []
         if case_id:
-            rows = self.conn.execute("SELECT * FROM lint_issue WHERE case_id=?", (case_id,)).fetchall()
-        else:
-            rows = self.conn.execute("SELECT * FROM lint_issue").fetchall()
+            sql, args = sql + " AND case_id=?", args + [case_id]
+        if project_id:
+            sql, args = sql + _OF_PROJECT, args + [project_id]
+        if level:
+            s, a = _match("level", level)
+            sql, args = sql + s, args + a
+        return sql, args
+
+    def list_lint_issues(self, case_id: str | None = None, *, project_id: str | None = None, level: str | None = None,
+                         limit: int | None = None, offset: int = 0) -> list[LintIssue]:
+        where, args = self._issue_where(case_id, project_id, level)
+        page, page_args = _limit(limit, offset)
+        rows = self.conn.execute("SELECT * FROM lint_issue" + where + " ORDER BY rowid" + page, args + page_args).fetchall()
         return [LintIssue(**{**dict(r), "resolved": bool(r["resolved"])}) for r in rows]
+
+    def count_lint_issues(self, case_id: str | None = None, *, project_id: str | None = None,
+                          level: str | None = None) -> int:
+        where, args = self._issue_where(case_id, project_id, level)
+        return self.conn.execute("SELECT COUNT(*) FROM lint_issue" + where, args).fetchone()[0]
+
+    def lint_level_counts(self, case_id: str | None = None, *, project_id: str | None = None) -> dict[str, int]:
+        where, args = self._issue_where(case_id, project_id, None)
+        rows = self.conn.execute("SELECT level, COUNT(*) AS n FROM lint_issue" + where + " GROUP BY level", args)
+        return {r["level"]: r["n"] for r in rows}
 
     # ---- 其它实体 ----
     def add_test_data(self, d: TestData) -> None:
@@ -236,19 +295,35 @@ class Store:
         self.conn.commit()
         return p
 
-    def get_proposal(self, proposal_id: str) -> HealProposal | None:
-        r = self.conn.execute("SELECT * FROM heal_proposal WHERE id=?", (proposal_id,)).fetchone()
-        if not r:
-            return None
+    @staticmethod
+    def _proposal(r: sqlite3.Row) -> HealProposal:
         d = dict(r)
         d["commit"] = d.pop("commit_hash") or ""
         return HealProposal(**d)
 
-    def list_proposals(self, status: str | None = None) -> list[HealProposal]:
-        sql, args = "SELECT id FROM heal_proposal", []
+    def get_proposal(self, proposal_id: str) -> HealProposal | None:
+        r = self.conn.execute("SELECT * FROM heal_proposal WHERE id=?", (proposal_id,)).fetchone()
+        return self._proposal(r) if r else None
+
+    @staticmethod
+    def _status_where(status: str | None, project_id: str | None) -> tuple[str, list[Any]]:
+        sql, args = " WHERE 1=1", []
         if status:
-            sql, args = sql + " WHERE status=?", [status]
-        return [p for p in (self.get_proposal(r["id"]) for r in self.conn.execute(sql + " ORDER BY rowid", args)) if p]
+            sql, args = sql + " AND status=?", args + [status]
+        if project_id:
+            sql, args = sql + _OF_PROJECT, args + [project_id]
+        return sql, args
+
+    def list_proposals(self, status: str | None = None, *, project_id: str | None = None,
+                       limit: int | None = None, offset: int = 0) -> list[HealProposal]:
+        where, args = self._status_where(status, project_id)
+        page, page_args = _limit(limit, offset)
+        rows = self.conn.execute("SELECT * FROM heal_proposal" + where + " ORDER BY rowid" + page, args + page_args)
+        return [self._proposal(r) for r in rows]
+
+    def count_proposals(self, status: str | None = None, *, project_id: str | None = None) -> int:
+        where, args = self._status_where(status, project_id)
+        return self.conn.execute("SELECT COUNT(*) FROM heal_proposal" + where, args).fetchone()[0]
 
     # ---- 人工复核队列 ----
     def save_review(self, item: ReviewItem) -> ReviewItem:
@@ -260,12 +335,16 @@ class Store:
         self.conn.commit()
         return item
 
-    def list_reviews(self, status: str | None = None) -> list[ReviewItem]:
-        sql, args = "SELECT * FROM review_item", []
-        if status:
-            sql, args = sql + " WHERE status=?", [status]
-        rows = self.conn.execute(sql + " ORDER BY rowid", args).fetchall()
+    def list_reviews(self, status: str | None = None, *, project_id: str | None = None,
+                     limit: int | None = None, offset: int = 0) -> list[ReviewItem]:
+        where, args = self._status_where(status, project_id)
+        page, page_args = _limit(limit, offset)
+        rows = self.conn.execute("SELECT * FROM review_item" + where + " ORDER BY rowid" + page, args + page_args).fetchall()
         return [ReviewItem(**{**dict(r), "evidence_paths": json.loads(r["evidence_paths"] or "[]")}) for r in rows]
+
+    def count_reviews(self, status: str | None = None, *, project_id: str | None = None) -> int:
+        where, args = self._status_where(status, project_id)
+        return self.conn.execute("SELECT COUNT(*) FROM review_item" + where, args).fetchone()[0]
 
     def save_run(self, run: Run, results: Iterable[RunResult]) -> None:
         self.conn.execute("INSERT OR REPLACE INTO run VALUES (?,?,?,?,?,?)",
@@ -278,9 +357,14 @@ class Store:
         )
         self.conn.commit()
 
-    def list_run_results(self, run_id: str) -> list[RunResult]:
-        rows = self.conn.execute("SELECT * FROM run_result WHERE run_id=?", (run_id,)).fetchall()
+    def list_run_results(self, run_id: str, *, limit: int | None = None, offset: int = 0) -> list[RunResult]:
+        page, page_args = _limit(limit, offset)
+        rows = self.conn.execute("SELECT * FROM run_result WHERE run_id=? ORDER BY rowid" + page,
+                                 [run_id, *page_args]).fetchall()
         return [RunResult(**{**dict(r), "evidence_paths": json.loads(r["evidence_paths"] or "[]")}) for r in rows]
+
+    def count_run_results(self, run_id: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM run_result WHERE run_id=?", (run_id,)).fetchone()[0]
 
     def add_agent_session(self, s: AgentSession) -> None:
         self.conn.execute("INSERT OR REPLACE INTO agent_session VALUES (?,?,?,?,?)",

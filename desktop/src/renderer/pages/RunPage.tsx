@@ -64,7 +64,9 @@ export function RunPage({ project }: { project: Project }) {
           {failed === 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
           {result.triage && result.triage.length > 0 && (
             <Card title="失败归因" size="small" style={{ marginTop: 16 }} extra={<Typography.Text type="secondary">在「工程化」页确认归因</Typography.Text>}>
-              <Table size="small" rowKey="case_id" pagination={false} dataSource={result.triage} columns={[
+              <Table size="small" rowKey="case_id" dataSource={result.triage}
+                pagination={{ defaultPageSize: 10, size: "small", hideOnSinglePage: true, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+                columns={[
                 { title: "用例", dataIndex: "case_id", className: "mono", width: 160 },
                 { title: "归因", dataIndex: "failure_type", width: 140, render: (v: string) => <LabelTag map={FAILURE} value={v} /> },
                 { title: "原因", dataIndex: "reason" },

@@ -33,7 +33,7 @@ import { useEffect, useState } from "react";
 import { api, type Project } from "../api";
 import { FAILURE, LabelTag, PURPOSE } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad } from "../hooks";
+import { useAction, useLoad, usePaged } from "../hooks";
 
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
@@ -103,7 +103,8 @@ function Metrics({ project }: { project: Project }) {
 }
 
 function Attributions({ project }: { project: Project }) {
-  const { data = [], loading, reload } = useLoad(() => api().listAttributions(project.id, true), [project.id]);
+  const { items: data, loading, reload, pagination } = usePaged<any>(
+    (q) => api().pageAttributions(project.id, { ...q, pending: true }), [project.id], 10);
   const { busy, run } = useAction();
   return (
     <Card title="待确认的失败归因" extra={<Typography.Text type="secondary">确认后以人工结论为准，并计入归因准确率</Typography.Text>}>
@@ -113,7 +114,7 @@ function Attributions({ project }: { project: Project }) {
         loading={loading}
         dataSource={data}
         locale={{ emptyText: <Empty description="没有待确认的归因" /> }}
-        pagination={{ pageSize: 10, size: "small" }}
+        pagination={{ ...pagination, size: "small" }}
         columns={[
           { title: "用例", dataIndex: "case_id", render: (c: string, r: any) => <><span className="mono">{c}</span><div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.run_id}</Typography.Text></div></> },
           { title: "自动归因", dataIndex: "auto_type", width: 160, render: (v: string, r: any) => <Space size={4}><LabelTag map={FAILURE} value={v} /><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.source === "rule" ? "规则" : "agent"}</Typography.Text></Space> },
