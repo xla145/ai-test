@@ -28,6 +28,7 @@ export interface TestCase {
   expected: string[];
   lint_status: string;
   status: string;
+  data_refs?: string[];
 }
 
 export interface LintIssue {

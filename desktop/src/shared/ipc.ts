@@ -49,6 +49,9 @@ export interface AitestApi {
   onApprovalRequest(cb: (req: ApprovalRequest) => void): () => void;
   respondApproval(id: string, accept: boolean): void;
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;
+  /** 内嵌浏览器视图显示 / 隐藏（界面据此收窄到左半屏） */
+  onViewChange?(cb: (v: { visible: boolean }) => void): () => void;
+  hideTestView?(): Promise<void>;
 }
 
 export const CHANNELS = {
@@ -56,4 +59,5 @@ export const CHANNELS = {
   approvalRequest: "aitest:approval-request",
   approvalResponse: "aitest:approval-response",
   event: "aitest:event",
+  view: "aitest:view",
 } as const;

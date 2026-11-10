@@ -1,57 +1,23 @@
-:root {
-  --bg: #f7f7f5;
-  --panel: #ffffff;
-  --text: #1f2328;
-  --muted: #6a737d;
-  --border: #e3e3df;
-  --accent: #2f6feb;
-  --danger: #cf222e;
-  --warn: #9a6700;
-  --ok: #1a7f37;
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16181c;
-    --panel: #1e2126;
-    --text: #e6e6e6;
-    --muted: #9aa0a6;
-    --border: #30343a;
-    --accent: #5b8def;
-  }
-}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); }
-.layout { display: grid; grid-template-columns: 220px 1fr; height: 100vh; width: 50vw; min-width: 720px; }
-aside { border-right: 1px solid var(--border); padding: 12px; overflow: auto; background: var(--panel); }
-main { overflow: auto; padding: 16px; }
-h1 { font-size: 15px; margin: 0 0 12px; }
-h2 { font-size: 14px; margin: 16px 0 8px; }
-button { font: inherit; padding: 4px 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 6px; cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button:disabled { opacity: .5; cursor: default; }
-input, select { font: inherit; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
-.project { display: block; width: 100%; text-align: left; margin-bottom: 4px; border: none; }
-.project.active { background: var(--accent); color: #fff; }
-.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
-.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; }
-.tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-table { width: 100%; border-collapse: collapse; background: var(--panel); }
-th, td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
-th { color: var(--muted); font-weight: 500; }
-.tag { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 12px; border: 1px solid var(--border); }
-.tag.block, .tag.block_script, .tag.blocked, .tag.failed { color: var(--danger); border-color: var(--danger); }
-.tag.warn, .tag.warned { color: var(--warn); border-color: var(--warn); }
-.tag.passed { color: var(--ok); border-color: var(--ok); }
-.stats { display: flex; gap: 16px; }
-.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
-.stat b { display: block; font-size: 20px; }
-.muted { color: var(--muted); }
-.error { color: var(--danger); white-space: pre-wrap; }
-.modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; }
-.modal > div { background: var(--panel); padding: 16px; border-radius: 8px; width: 480px; max-width: 90vw; }
-pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); padding: 8px; border-radius: 6px; max-height: 240px; overflow: auto; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+.app-shell { height: 100vh; transition: width .2s ease; }
+.app-shell.with-view { width: 50vw; min-width: 760px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 20px 14px; font-weight: 600; font-size: 15px; }
+.brand-logo {
+  width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #3b6ef5, #7a5af8); color: #fff; font-size: 16px;
+}
+.sider-section { padding: 0 12px; }
+.page { padding: 20px 24px 32px; overflow: auto; height: 100%; }
+.page-title { margin-bottom: 4px !important; }
+.diff { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6;
+  border-radius: 8px; overflow: auto; max-height: 320px; border: 1px solid rgba(128,128,128,.25); }
+.diff-line { padding: 0 12px; white-space: pre; }
+.diff-add { background: rgba(46,160,67,.15); }
+.diff-del { background: rgba(248,81,73,.15); }
+.diff-hunk { color: #8c8c8c; background: rgba(128,128,128,.08); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.case-steps li { margin-bottom: 4px; }

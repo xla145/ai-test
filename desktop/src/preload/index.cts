@@ -17,12 +17,13 @@ const methods = [
   "listProposals", "resolveProposal", "listReviews", "resolveReview",
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getModelSettings",
-  "setModelSettings", "checkModel",
+  "setModelSettings", "checkModel", "hideTestView",
 ] as const;
 
 const api: Record<string, unknown> = Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => invoke(m, ...a)]));
 api.onApprovalRequest = (cb: (v: unknown) => void) => subscribe("aitest:approval-request", cb);
 api.respondApproval = (id: string, accept: boolean) => ipcRenderer.send("aitest:approval-response", id, accept);
 api.onEvent = (cb: (v: unknown) => void) => subscribe("aitest:event", cb);
+api.onViewChange = (cb: (v: unknown) => void) => subscribe("aitest:view", cb);
 
 contextBridge.exposeInMainWorld("aitest", api);

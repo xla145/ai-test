@@ -53,6 +53,9 @@ npm test
 
 # 启动桌面端（需要 codex 二进制：AITEST_CODEX_BIN=/path/to/codex）
 npm run dev
+
+# 只看界面：在普通浏览器中用演示数据预览（不需要 Electron 与后端）
+npm run preview:web -w desktop   # 打开 http://localhost:5173
 ```
 
 ### 只用命令行跑通接口测试主线

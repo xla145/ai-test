@@ -176,6 +176,13 @@ function showView(view: WebContentsView): void {
   if (!mainWindow.contentView.children.includes(view)) mainWindow.contentView.addChildView(view);
   visibleView = view;
   layoutTestView();
+  mainWindow.webContents.send(CHANNELS.view, { visible: true });
+}
+
+function hideTestView(): void {
+  for (const v of testViews.values()) v.setVisible(false);
+  visibleView = undefined;
+  mainWindow?.webContents.send(CHANNELS.view, { visible: false });
 }
 
 /** 为角色准备视图（多角色：Electron session partition 隔离登录态），返回初始 URL 中的标记 */
@@ -285,6 +292,7 @@ function registerIpc(orch: Orchestrator): void {
       return r.canceled ? null : r.filePaths[0];
     },
     openTestPage: (url: string) => openTestPage(url),
+    hideTestView: () => hideTestView(),
   };
   ipcMain.handle(CHANNELS.invoke, async (_e, method: string, ...args: unknown[]) => {
     const fn = handlers[method];
