@@ -12,7 +12,8 @@
     "test": "vitest run",
     "dev": "npm run deps && npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env AITEST_DEV_SERVER=http://localhost:5173 electron .\"",
     "start": "electron .",
-    "deps": "npm run build --prefix ../mcp-servers"
+    "deps": "npm run build --prefix ../mcp-servers",
+    "dist": "npm run build && electron-builder --publish never"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
@@ -21,16 +22,77 @@
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^10.0.7",
     "cross-env": "^10.1.0",
-    "electron": "^38.8.6",
+    "electron": "38.8.6",
+    "electron-builder": "^26.18.0",
     "typescript": "5.9",
     "vite": "^6.4.6",
     "vitest": "^5.1.0",
-    "wait-on": "^9.5.1"
+    "wait-on": "^9.5.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "type": "module",
   "dependencies": {
-    "@ai-test/mcp-servers": "0.1.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@ai-test/mcp-servers": "*"
+  },
+  "productName": "AI 测试客户端",
+  "author": "ai-test",
+  "build": {
+    "appId": "dev.aitest.desktop",
+    "productName": "AI 测试客户端",
+    "artifactName": "aitest-desktop-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/@ai-test/**",
+      "node_modules/playwright-core/**",
+      "node_modules/@playwright/**",
+      "node_modules/playwright/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../engine/aitest",
+        "to": "engine/aitest",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../.release/engine-deps",
+        "to": "engine-deps"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "executableName": "aitest-desktop"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    },
+    "publish": null,
+    "executableName": "aitest-desktop"
   }
 }

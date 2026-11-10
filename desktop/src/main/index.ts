@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, WebContentsView } from "electron";
@@ -23,8 +24,14 @@ import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./sec
 import { CHANNELS, type ApprovalRequest } from "../shared/ipc.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const unpacked = (p: string) => p.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const repoRoot = resolve(here, "../../..");
 const CDP_PORT = Number(process.env.AITEST_CDP_PORT || 9333);
+
+// 固定数据目录：包名 @ai-test/desktop 不能直接作为目录名，打包后会落到 ~/.config 根目录
+app.setName("aitest-desktop");
+app.setPath("userData", join(app.getPath("appData"), "aitest-desktop"));
 
 // 内嵌浏览器：开启远程调试端口，Playwright 通过 connectOverCDP 连接（二期 UI 测试）
 app.commandLine.appendSwitch("remote-debugging-port", String(CDP_PORT));
@@ -34,9 +41,18 @@ const paths = {
   data: () => app.getPath("userData"),
   db: () => process.env.AITEST_DB || join(app.getPath("userData"), "aitest.db"),
   codexHome: () => join(app.getPath("userData"), "codex"),
-  codexBin: () => process.env.AITEST_CODEX_BIN || join(process.resourcesPath, "bin", process.platform === "win32" ? "codex.exe" : "codex"),
+  // 优先使用随安装包附带的 codex 二进制，其次 AITEST_CODEX_BIN，最后 PATH 上的 codex
+  codexBin: () => {
+    if (process.env.AITEST_CODEX_BIN) return process.env.AITEST_CODEX_BIN;
+    const bundled = join(process.resourcesPath, "bin", process.platform === "win32" ? "codex.exe" : "codex");
+    return app.isPackaged && existsSync(bundled) ? bundled : "codex";
+  },
   engineDir: () => (app.isPackaged ? join(process.resourcesPath, "engine") : join(repoRoot, "engine")),
-  mcpEntry: () => (app.isPackaged ? join(process.resourcesPath, "mcp-servers", "index.js") : join(repoRoot, "mcp-servers", "dist", "index.js")),
+  // 安装包内附带引擎的纯 Python 依赖（openpyxl、httpx、pytest 等），用户只需要 Python 3.10+
+  enginePythonPath: () =>
+    app.isPackaged ? [join(process.resourcesPath, "engine"), join(process.resourcesPath, "engine-deps")].join(delimiter) : join(repoRoot, "engine"),
+  // MCP Server 由 Codex 以独立进程启动，必须是 asar 之外的真实文件
+  mcpEntry: () => unpacked(join(dirname(require.resolve("@ai-test/mcp-servers/package.json")), "dist", "index.js")),
   python: () => process.env.AITEST_PYTHON || "python3",
 };
 
@@ -50,7 +66,7 @@ let secretStore: SecretStore;
 let approvalContext: ApprovalContext = { workspace: "", allowedHosts: [], productionHosts: [] };
 const pendingApprovals = new Map<string, (accept: boolean) => void>();
 
-const engineEnv = () => ({ PYTHONPATH: paths.engineDir() });
+const engineEnv = () => ({ PYTHONPATH: paths.enginePythonPath() });
 
 // ---- 模型设置（国内模型 / 私有化部署）：配置存 userData/settings.json，API key 存钥匙串 ----
 const MODEL_KEY_REF = { agent: "aitest:model:agent", vision: "aitest:model:vision" } as const;
@@ -103,7 +119,7 @@ async function getCodex(): Promise<CodexAppServer> {
     ELECTRON_RUN_AS_NODE: "1",
     AITEST_DB: paths.db(),
     AITEST_PYTHON: paths.python(),
-    PYTHONPATH: paths.engineDir(),
+    PYTHONPATH: paths.enginePythonPath(),
     AITEST_BROKER_URL: broker.url,
     AITEST_BROKER_TOKEN: broker.token,
   };

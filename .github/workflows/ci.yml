@@ -2,8 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: ["claude/**"]
   pull_request:
+  # main 上的推送由 release.yml 调用本工作流，测试通过后才打包发布
+  workflow_call:
 
 jobs:
   engine:

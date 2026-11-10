@@ -8,3 +8,5 @@ __pycache__/
 *.sqlite
 *.db
 .DS_Store
+.release/
+desktop/release/
