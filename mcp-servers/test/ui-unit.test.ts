@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { generateSpec } from "../src/ui/codegen.js";
 import { checkData, seedData, setServerClock } from "../src/ui/envSupport.js";
 import { candidates, toCode } from "../src/ui/locator.js";
-import { caseIdFromTitle, classifyUiFailure, parseReport } from "../src/ui/runner.js";
+import { caseIdFromTitle, classifyUiFailure, parseReport, reportErrors } from "../src/ui/runner.js";
 
 describe("locator priority", () => {
   it("prefers testid, then role, label, text, css; never xpath", () => {
@@ -71,6 +71,8 @@ describe("runner report parsing", () => {
     expect(b.failure_type).toBeUndefined();
     expect(classifyUiFailure("page.goto: net::ERR_CONNECTION_REFUSED")).toBe("environment");
     expect(caseIdFromTitle("随便", "dir/tc_zz.spec.ts")).toBe("tc_zz");
+    expect(reportErrors(JSON.stringify({ suites: [], errors: [{ message: "\u001b[31mError: locator.fill: selector\u001b[39m" }] })))
+      .toEqual(["Error: locator.fill: selector"]);
   });
 });
 

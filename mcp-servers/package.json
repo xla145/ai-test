@@ -5,7 +5,8 @@
   "type": "module",
   "description": "注册给 Codex 的本地 MCP Server：doc-parser / case-store / case-import / api-runner / report",
   "bin": {
-    "aitest-mcp": "dist/index.js"
+    "aitest-mcp": "dist/index.js",
+    "aitest-ci": "dist/ci.js"
   },
   "main": "dist/lib.js",
   "scripts": {

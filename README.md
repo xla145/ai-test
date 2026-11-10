@@ -94,7 +94,26 @@ aitest export-excel --project <项目ID> --out 修复后.xlsx
 命令行 / CI 下 browser 服务会自行启动 Chromium；桌面端则连接内嵌浏览器（`AITEST_CDP_ENDPOINT`）。
 可选启用 Midscene 视觉定位：`npm i @midscene/web`，设置 `AITEST_MIDSCENE=1` 及其模型环境变量。
 
+### 工程化（三期）
+
+```bash
+# 团队共享：导出到 workspace（随 git 提交），其他成员 clone 后导入
+aitest export-workspace --project <项目ID> --commit
+aitest import-workspace --workspace ./demo-ws
+
+# CI：不调用模型，直接回归；凭据来自 CI 密钥变量 AITEST_AUTH_TOKEN / AITEST_ROLES
+node mcp-servers/dist/ci.js run  --workspace ./demo-ws --env test
+node mcp-servers/dist/ci.js init --workspace ./demo-ws --tool-repo <本仓库 git 地址> --provider github
+
+# 用量、预算与验证指标
+aitest usage-report --project <项目ID> --days 30
+aitest set-setting  --project <项目ID> --key monthly_token_budget --value 2000000
+aitest metrics      --project <项目ID>
+```
+
+桌面端「工程化」页集中展示这些内容，并可配置国内模型（百炼、DeepSeek、方舟）或私有化部署的 OpenAI 兼容服务。
+
 ## 当前进度
 
-一期（接口测试主线 + 用例导入规范检查）与二期（UI 测试：探索 / 回归 / 自愈、多角色、埋点、时间、视觉复核）
-已实现，详见 [docs/architecture.md](docs/architecture.md#迭代状态)。
+一期（接口测试主线 + 用例导入规范检查）、二期（UI 测试：探索 / 回归 / 自愈、多角色、埋点、时间、视觉复核）
+与三期（失败归因闭环、验证指标与门禁、用量与预算、团队共享与 CI、国内模型与私有化部署）已实现，详见 [docs/architecture.md](docs/architecture.md#迭代状态)。

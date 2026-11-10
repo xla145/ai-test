@@ -36,6 +36,8 @@ export interface UiRunOutput {
   reportJson: string;
   htmlReport: string;
   results: UiCaseResult[];
+  /** 不属于某条用例的错误（全局登录失败、配置错误等），此时可能一条结果都没有 */
+  errors: string[];
   stderr: string;
 }
 
@@ -58,7 +60,7 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
   const htmlReport = join(outDir, "html");
   const files = (opts.caseIds ?? []).map((id) => `${id}.spec.ts`).filter((f) => existsSync(join(dir, f)));
   if (opts.caseIds?.length && !files.length) {
-    return { exitCode: 0, reportJson, htmlReport, results: [], stderr: "没有可执行的 UI 脚本" };
+    return { exitCode: 0, reportJson, htmlReport, results: [], errors: [], stderr: "没有可执行的 UI 脚本" };
   }
   const args = [playwrightCli(), "test", "-c", join(dir, "playwright.config.ts"), ...files];
   const env = {
@@ -83,8 +85,17 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
       resolve({ code: c, stderr: err });
     });
   });
-  const results = existsSync(reportJson) ? parseReport(readFileSync(reportJson, "utf8"), opts.workspace) : [];
-  return { exitCode: code, reportJson, htmlReport, results, stderr: stderr.slice(-4000) };
+  const raw = existsSync(reportJson) ? readFileSync(reportJson, "utf8") : "";
+  const results = raw ? parseReport(raw, opts.workspace) : [];
+  const errors = raw ? reportErrors(raw) : [];
+  if (!raw && code !== 0) errors.push(`Playwright 未生成报告（退出码 ${code}）`);
+  return { exitCode: code, reportJson, htmlReport, results, errors, stderr: stderr.slice(-4000) };
+}
+
+/** 报告顶层错误（global-setup 失败等） */
+export function reportErrors(json: string): string[] {
+  const report = JSON.parse(json) as { errors?: { message?: string }[] };
+  return (report.errors ?? []).map((e) => (e.message ?? "").replace(ANSI, "")).filter(Boolean);
 }
 
 // ---- Playwright JSON 报告解析 ----

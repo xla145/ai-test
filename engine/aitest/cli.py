@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from datetime import datetime, timezone
 
-from . import apigen, docparser, heal, importer, linter, openapi, router, runner, workspace
+from . import apigen, docparser, heal, importer, linter, openapi, ops, router, runner, workspace
 from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .store import Store
 
@@ -107,6 +107,7 @@ def cmd_apply_fix(store: Store, a: argparse.Namespace) -> Any:
     keep = [i for i in store.list_lint_issues(case.id) if i.rule in ("group_not_subdivided", "p0_ratio")]
     store.upsert_case(case, validate=False)
     store.replace_lint_issues([case.id], [*report.issues, *keep])
+    ops.log_event(store, "fix_applied", case.project_id, case.id, actor="human", data={"field": a.field})
     return {"case": case.to_dict(), "issues": [asdict(i) for i in report.issues]}
 
 
@@ -128,8 +129,12 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
     case = store.get_case(a.case)
     if case is None:
         raise KeyError(a.case)
-    merged = {**case.to_dict(), **json.loads(a.json), "id": case.id, "project_id": case.project_id}
-    return store.upsert_case(TestCase.from_dict(merged)).to_dict()
+    patch = json.loads(a.json)
+    merged = {**case.to_dict(), **patch, "id": case.id, "project_id": case.project_id}
+    out = store.upsert_case(TestCase.from_dict(merged)).to_dict()
+    if a.actor == "human":
+        ops.log_event(store, "case_edited", case.project_id, case.id, actor="human", data={"fields": sorted(patch)})
+    return out
 
 
 def cmd_list_cases(store: Store, a: argparse.Namespace) -> Any:
@@ -172,6 +177,12 @@ def cmd_write_api_suite(store: Store, a: argparse.Namespace) -> Any:
     files = apigen.write_pytest_suite(eligible, out, a.suite)
     files["version"] = workspace.commit(p.workspace_path, f"生成接口脚本 {a.suite}（{len(eligible)} 条）")
     files["skipped"] = len(cases) - len(eligible)
+    rel = str(Path(files["test"]).relative_to(Path(p.workspace_path)))
+    for c in eligible:
+        is_new = not store.list_scripts(c.id)
+        store.upsert_script(Script(case_id=c.id, path=rel, framework="pytest", version=files["version"] or ""))
+        if is_new:
+            ops.log_event(store, "script_registered", p.id, c.id, data={"framework": "pytest"})
     return files
 
 
@@ -201,11 +212,12 @@ def cmd_summarize_failures(store: Store, a: argparse.Namespace) -> Any:
 def cmd_agent_session(store: Store, a: argparse.Namespace) -> Any:
     s = AgentSession(codex_thread_id=a.thread, purpose=a.purpose, project_id=a.project)
     store.add_agent_session(s)
+    ops.log_event(store, "agent_session", a.project, ref_id=s.id, actor="agent", data={"purpose": a.purpose})
     return asdict(s)
 
 
 def cmd_add_tokens(store: Store, a: argparse.Namespace) -> Any:
-    store.add_token_usage(a.session, a.tokens)
+    ops.record_tokens(store, a.session, a.tokens)
     return {"session": a.session, "added": a.tokens}
 
 
@@ -267,7 +279,10 @@ def cmd_register_script(store: Store, a: argparse.Namespace) -> Any:
     if not linter.can_generate_script(case, issues):
         raise ValueError("用例存在未修复的阻断级问题，不能生成脚本")
     version = workspace.commit(p.workspace_path, f"生成脚本：{case.id} {case.title}") or ""
+    is_new = not store.list_scripts(a.case)
     s = store.upsert_script(Script(case_id=a.case, path=a.path, framework=a.framework, version=version))
+    if is_new:
+        ops.log_event(store, "script_registered", p.id, a.case, data={"framework": a.framework})
     return asdict(s)
 
 
@@ -322,6 +337,7 @@ def cmd_resolve_proposal(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
     d = asdict(heal.resolve(store, p.workspace_path, a.id, a.accept))
     d.pop("original"), d.pop("proposed")
+    ops.log_event(store, "proposal_resolved", p.id, d["case_id"], a.id, actor="human", data={"status": d["status"]})
     return d
 
 
@@ -342,11 +358,75 @@ def cmd_resolve_review(store: Store, a: argparse.Namespace) -> Any:
         raise KeyError(a.id)
     item = items[0]
     item.status = "confirmed_pass" if a.passed else "confirmed_fail"
+    ops.log_event(store, "review_resolved", ops.project_of_case(store, item.case_id), item.case_id, item.id,
+                  actor="human", data={"status": item.status})
     return asdict(store.save_review(item))
 
 
+# ---- 三期：自愈与工程化 ----
+
+
+def cmd_set_setting(store: Store, a: argparse.Namespace) -> Any:
+    _project(store, a.project)
+    return ops.set_setting(store, a.project, a.key, a.value)
+
+
+def cmd_get_settings(store: Store, a: argparse.Namespace) -> Any:
+    return ops.get_settings(store, a.project)
+
+
+def cmd_usage_report(store: Store, a: argparse.Namespace) -> Any:
+    return ops.usage_report(store, a.project, a.days)
+
+
+def cmd_check_budget(store: Store, a: argparse.Namespace) -> Any:
+    return ops.check_budget(store, a.project)
+
+
+def cmd_set_attribution(store: Store, a: argparse.Namespace) -> Any:
+    return ops.set_attribution(store, a.run, a.case, a.type, a.source, a.reason or "")
+
+
+def cmd_confirm_attribution(store: Store, a: argparse.Namespace) -> Any:
+    return ops.confirm_attribution(store, a.run, a.case, a.type)
+
+
+def cmd_list_attributions(store: Store, a: argparse.Namespace) -> Any:
+    return ops.list_attributions(store, a.project, a.pending)
+
+
+def cmd_metrics(store: Store, a: argparse.Namespace) -> Any:
+    return ops.metrics(store, a.project)
+
+
+def cmd_stability(store: Store, a: argparse.Namespace) -> Any:
+    return ops.stability(store, a.project, a.window)
+
+
+def cmd_export_workspace(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    out = ops.export_workspace(store, a.project)
+    out["version"] = workspace.commit(p.workspace_path, "导出项目元数据与用例（团队共享）") if a.commit else None
+    return out
+
+
+def cmd_import_workspace(store: Store, a: argparse.Namespace) -> Any:
+    return ops.import_workspace(store, a.workspace, a.name)
+
+
+class CliArgumentError(ValueError):
+    pass
+
+
+class _Parser(argparse.ArgumentParser):
+    """参数错误也按 JSON 协议返回，而不是打印用法后退出。"""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise CliArgumentError(f"{self.prog}: {message}")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="aitest", description="AI 测试客户端引擎")
+    ap = _Parser(prog="aitest", description="AI 测试客户端引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
     sub = ap.add_subparsers(dest="command", required=True)
 
@@ -371,7 +451,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("apply-fix", cmd_apply_fix, (("--case",), req), (("--field",), req), (("--value",), req))
     add("export-excel", cmd_export_excel, (("--project",), req), (("--out",), req))
     add("create-case", cmd_create_case, (("--project",), req), (("--json",), req))
-    add("update-case", cmd_update_case, (("--case",), req), (("--json",), req))
+    add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
+        (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))
     add("list-cases", cmd_list_cases, (("--project",), req), *[((f"--{k}",), {}) for k in
                                                                ("type", "priority", "execution-mode", "status", "lint-status")])
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
@@ -410,12 +491,31 @@ def build_parser() -> argparse.ArgumentParser:
         (("--description",), req), (("--evidence",), {}), (("--ai-verdict",), {}), (("--run",), {}))
     add("list-reviews", cmd_list_reviews, (("--status",), {}))
     add("resolve-review", cmd_resolve_review, (("--id",), req), (("--passed",), flag))
+    # ---- 三期 ----
+    failure_types = {"choices": sorted(ops.FAILURE_TYPES), "required": True}
+    add("set-setting", cmd_set_setting, (("--project",), req), (("--key",), {"choices": sorted(ops.SETTING_KEYS), "required": True}),
+        (("--value",), req))
+    add("get-settings", cmd_get_settings, (("--project",), req))
+    add("usage-report", cmd_usage_report, (("--project",), req), (("--days",), {"type": int, "default": 30}))
+    add("check-budget", cmd_check_budget, (("--project",), req))
+    add("set-attribution", cmd_set_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types),
+        (("--source",), {"choices": ["rule", "agent"], "default": "agent"}), (("--reason",), {}))
+    add("confirm-attribution", cmd_confirm_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types))
+    add("list-attributions", cmd_list_attributions, (("--project",), req), (("--pending",), flag))
+    add("metrics", cmd_metrics, (("--project",), req))
+    add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
+    add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))
+    add("import-workspace", cmd_import_workspace, (("--workspace",), req), (("--name",), {}))
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    store = Store(args.db)
+    try:
+        args = build_parser().parse_args(argv)
+    except CliArgumentError as e:
+        print(json.dumps({"ok": False, "error": f"参数错误：{e}"}, ensure_ascii=False))
+        return 2
+    store = ops.ensure_schema(Store(args.db))
     try:
         data = args.fn(store, args)
         print(dumps({"ok": True, "data": data}))
