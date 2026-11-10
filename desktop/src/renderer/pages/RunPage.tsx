@@ -62,6 +62,13 @@ export function RunPage({ project }: { project: Project }) {
             <Col span={6}><Card><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card></Col>
           </Row>
           {failed === 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
+          <Space style={{ marginTop: 16 }}>
+            <Button size="small" loading={busy} onClick={() => run(async () => {
+              const out = await api().exportReport([result.run.run_id], "html");
+              if (out) await api().showInFolder(out.path).catch(() => undefined);
+            })}>导出 HTML 报告</Button>
+            <Typography.Text type="secondary">完整执行记录见「测试报告」页</Typography.Text>
+          </Space>
           {result.triage && result.triage.length > 0 && (
             <Card title="失败归因" size="small" style={{ marginTop: 16 }} extra={<Typography.Text type="secondary">在「工程化」页确认归因</Typography.Text>}>
               <Table size="small" rowKey="case_id" pagination={false} dataSource={result.triage} columns={[

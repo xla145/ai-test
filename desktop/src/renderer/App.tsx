@@ -6,6 +6,7 @@ import {
   ChromeOutlined,
   CloseOutlined,
   FileExcelOutlined,
+  FileSearchOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
   PlayCircleOutlined,
@@ -40,6 +41,7 @@ import { ApiPage } from "./pages/ApiPage";
 import { CasesPage } from "./pages/CasesPage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { RunPage } from "./pages/RunPage";
 import { UiPage } from "./pages/UiPage";
 
@@ -104,6 +106,7 @@ export function App() {
         { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
         { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "reports", label: "测试报告", icon: <FileSearchOutlined />, children: <ReportsPage project={current} /> },
         { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
       ]
     : [];

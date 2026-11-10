@@ -230,6 +230,7 @@ export class Orchestrator extends EventEmitter {
     writeFileSync(file, JSON.stringify(out.results));
     const run = await this.deps.engine<RunSummary & { reviews: number }>([
       "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "playwright",
+      "--html-report", out.htmlReport,
     ]);
     let heal: TriageItem[] | undefined;
     if (opts.autoHeal !== false && run.needs_agent.length) {
@@ -338,6 +339,28 @@ export class Orchestrator extends EventEmitter {
 
   importWorkspace(workspace: string) {
     return this.deps.engine(["import-workspace", "--workspace", workspace]);
+  }
+
+  // ------------------------------------------------------------------ 测试报告
+
+  listRuns(projectId: string, framework?: "pytest" | "playwright", limit = 100) {
+    return this.deps.engine(["list-runs", "--project", projectId, "--limit", String(limit), ...(framework ? ["--framework", framework] : [])]);
+  }
+
+  runDetail(runId: string) {
+    return this.deps.engine(["run-detail", "--run", runId]);
+  }
+
+  /** 导出单文件 HTML 汇总报告或 Excel 明细；可合并多次执行 */
+  exportReport(runIds: string[], format: "html" | "xlsx", out?: string) {
+    if (!runIds.length) throw new Error("请选择要导出的执行记录");
+    return this.deps.engine<{ path: string }>([
+      "export-report", ...runIds.flatMap((id) => ["--run", id]), "--format", format, ...(out ? ["--out", out] : []),
+    ]);
+  }
+
+  exportCasesExcel(projectId: string, out: string) {
+    return this.deps.engine<{ path: string; cases: number }>(["export-excel", "--project", projectId, "--out", out]);
   }
 
   private requireUi(): UiDeps {

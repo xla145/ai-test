@@ -93,3 +93,32 @@ describe("UI regression orchestration", () => {
     expect(startThread).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/ws" }));
   });
 });
+
+describe("reports", () => {
+  it("passes run ids, formats and output paths to the engine", async () => {
+    const calls: string[][] = [];
+    const engine = vi.fn(async (args: string[]) => { calls.push(args); return { path: "/out" }; }) as unknown as EngineCall;
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({}) });
+    await orch.listRuns("p1", "playwright", 20);
+    await orch.runDetail("run_1");
+    await orch.exportReport(["run_1", "run_2"], "html", "/tmp/r.html");
+    await orch.exportReport(["run_1"], "xlsx");
+    await orch.exportCasesExcel("p1", "/tmp/c.xlsx");
+    expect(calls).toEqual([
+      ["list-runs", "--project", "p1", "--limit", "20", "--framework", "playwright"],
+      ["run-detail", "--run", "run_1"],
+      ["export-report", "--run", "run_1", "--run", "run_2", "--format", "html", "--out", "/tmp/r.html"],
+      ["export-report", "--run", "run_1", "--format", "xlsx"],
+      ["export-excel", "--project", "p1", "--out", "/tmp/c.xlsx"],
+    ]);
+    expect(() => orch.exportReport([], "html")).toThrow("请选择");
+  });
+
+  it("records the Playwright HTML report location on UI runs", async () => {
+    const { engine, calls, ui, secretEnv } = setup([{ case_id: "tc_a", status: "passed", duration: 1, message: "", evidence_paths: [], reviews: [] }]);
+    const orch = new Orchestrator({ engine, ui, secretEnv, agent: vi.fn() });
+    await orch.runUiRegression("p1", "test");
+    const save = calls.find((a) => a[0] === "save-run")!;
+    expect(save.slice(-2)).toEqual(["--html-report", "/ws/reports/x/html"]);
+  });
+});

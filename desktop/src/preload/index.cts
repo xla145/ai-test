@@ -18,6 +18,7 @@ const methods = [
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getModelSettings",
   "setModelSettings", "checkModel", "hideTestView",
+  "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
 ] as const;
 
 const api: Record<string, unknown> = Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => invoke(m, ...a)]));

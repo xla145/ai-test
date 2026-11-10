@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from datetime import datetime, timezone
 
-from . import apigen, docparser, heal, importer, linter, openapi, ops, router, runner, workspace
+from . import apigen, docparser, heal, importer, linter, openapi, ops, reports, router, runner, workspace
 from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .store import Store
 
@@ -302,6 +302,8 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
             r.failure_type = runner.classify_failure(r.message)
     run.result = runner.summarize(results)
     run.result["framework"] = a.framework
+    if a.html_report:
+        run.result["html_report"] = a.html_report  # Playwright HTML 报告目录，界面可直接打开
     store.save_run(run, results)
     reviews = []
     for r in items:
@@ -425,6 +427,21 @@ class _Parser(argparse.ArgumentParser):
         raise CliArgumentError(f"{self.prog}: {message}")
 
 
+# ---- 测试报告 ----
+
+
+def cmd_list_runs(store: Store, a: argparse.Namespace) -> Any:
+    return reports.list_runs(store, a.project, a.limit, a.framework)
+
+
+def cmd_run_detail(store: Store, a: argparse.Namespace) -> Any:
+    return reports.run_detail(store, a.run)
+
+
+def cmd_export_report(store: Store, a: argparse.Namespace) -> Any:
+    return reports.export_report(store, a.run, a.format, a.out)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = _Parser(prog="aitest", description="AI 测试客户端引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
@@ -480,7 +497,8 @@ def build_parser() -> argparse.ArgumentParser:
         (("--framework",), {"default": "playwright"}))
     add("list-scripts", cmd_list_scripts, (("--case",), {}))
     add("save-run", cmd_save_run, (("--project",), req), (("--env",), req), (("--results-file",), req),
-        (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}))
+        (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}),
+        (("--html-report",), {}))
     add("list-run-results", cmd_list_run_results, (("--run",), req))
     add("propose-fix", cmd_propose_fix, (("--project",), req), (("--case",), req), (("--script",), req),
         (("--content-file",), req), (("--reason",), {}), (("--failure-type",), {"default": "script_error"}),
@@ -506,6 +524,12 @@ def build_parser() -> argparse.ArgumentParser:
     add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
     add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))
     add("import-workspace", cmd_import_workspace, (("--workspace",), req), (("--name",), {}))
+    # ---- 测试报告 ----
+    add("list-runs", cmd_list_runs, (("--project",), req), (("--limit",), {"type": int, "default": 50}),
+        (("--framework",), {"choices": ["pytest", "playwright"]}))
+    add("run-detail", cmd_run_detail, (("--run",), req))
+    add("export-report", cmd_export_report, (("--run",), {"action": "append", "required": True}),
+        (("--format",), {"choices": ["html", "xlsx"], "default": "html"}), (("--out",), {}))
     return ap
 
 

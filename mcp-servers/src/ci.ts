@@ -47,6 +47,8 @@ export interface CiReport {
   junit: string;
   summary: string;
   runs: Record<string, string>;
+  /** 单文件 HTML 汇总报告 */
+  htmlReport?: string;
 }
 
 interface Project {
@@ -117,6 +119,7 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
       writeFileSync(file, JSON.stringify(out.results));
       const run = await engine<{ run_id: string; total: number; passed: number }>([
         "save-run", "--project", project.id, "--env", opts.env, "--results-file", file, "--framework", "playwright",
+        "--html-report", out.htmlReport,
       ]);
       runs.ui = run.run_id;
       const rows = await engine<CiCaseResult[]>(["list-run-results", "--run", run.run_id]);
@@ -131,10 +134,18 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
   const summary = toSummary(project.name, opts.env, baseUrl, results);
   writeFileSync(join(outDir, "junit.xml"), junit);
   writeFileSync(join(outDir, "summary.md"), summary);
+  // 单文件 HTML 汇总报告（截图内嵌），作为构建产物上传后可直接打开
+  const runIds = Object.values(runs);
+  let htmlReport: string | undefined;
+  if (runIds.length) {
+    htmlReport = (await engine<{ path: string }>([
+      "export-report", ...runIds.flatMap((id) => ["--run", id]), "--out", join(outDir, "report.html"),
+    ])).path;
+  }
   if (secrets.GITHUB_STEP_SUMMARY) appendFileSync(secrets.GITHUB_STEP_SUMMARY, summary + "\n");
   const exitCode = results.some((r) => FAILED.has(r.status)) ? 1 : 0;
-  log(`结果写入 ${outDir}（junit.xml、summary.md），退出码 ${exitCode}`);
-  return { exitCode, project: project.name, env: opts.env, baseUrl, results, junit, summary, runs };
+  log(`结果写入 ${outDir}（junit.xml、summary.md${htmlReport ? "、report.html" : ""}），退出码 ${exitCode}`);
+  return { exitCode, project: project.name, env: opts.env, baseUrl, results, junit, summary, runs, htmlReport };
 }
 
 function pick(env: NodeJS.ProcessEnv, keys: string[]): Record<string, string> {

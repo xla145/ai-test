@@ -31,6 +31,7 @@ MCP Server（mcp-servers）──────┘
 | 13 | 成本控制 | `appServer.ts`（单次任务上限中断）、`engine/aitest/ops.py`（用量、预算）、`orchestrator.ts` | ✅ 回归零模型调用；按用途 / 按天统计用量与成本估算；项目月度预算，超出即拒绝 agent 任务 |
 | 4、15 | 国内模型与私有化部署 | `desktop/src/main/models.ts` | ✅ 百炼、DeepSeek、方舟、私有化 OpenAI 兼容预设；agent / 视觉模型分级；连通性检查；key 存钥匙串 |
 | 16 | 三期：CI 集成、团队共享 | `engine/aitest/ops.py`（导出 / 导入）、`mcp-servers/src/ci.ts` | ✅ workspace 随 git 共享；`aitest-ci` 无界面回归，输出 JUnit 与摘要；生成 GitHub / GitLab 工作流 |
+| 14 | 报告（JUnit XML + Playwright HTML report + 自研汇总页） | `engine/aitest/reports.py`、`desktop/src/renderer/pages/ReportsPage.tsx` | ✅ 执行历史与明细；单文件 HTML 汇总报告（截图内嵌，可合并多次执行）与 Excel 明细；CI 同时产出 |
 | 17 | 首期验证指标 | `engine/aitest/ops.py`（metrics、stability、ui_gate） | ✅ 一次生成通过率、失败归因准确率、人工介入次数；门禁「UI 回归稳定」 |
 | 15 | 风险对策 | 协议适配层、凭据代理、审批白名单、规范检查阻断 | ✅ |
 

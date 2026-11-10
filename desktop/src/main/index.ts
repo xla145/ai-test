@@ -4,8 +4,8 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, WebContentsView } from "electron";
-import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
+import { evaluateCommand, evaluateFileChange, isInside, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
@@ -212,6 +212,23 @@ async function openTestPage(url: string): Promise<void> {
   await view.webContents.loadURL(url);
 }
 
+/** 只允许打开项目 workspace 内的文件，或用户刚通过保存对话框导出的文件 */
+const exportedFiles = new Set<string>();
+async function assertOpenable(orch: Orchestrator, target: string): Promise<string> {
+  const p = resolve(target);
+  if (exportedFiles.has(p)) return p;
+  const projects = await orch.listProjects();
+  if (projects.some((x) => isInside(x.workspace_path, p))) return p;
+  throw new Error("只能打开项目 workspace 内的文件");
+}
+
+async function saveAs(defaultName: string, filters: { name: string; extensions: string[] }[]): Promise<string | null> {
+  const r = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath("documents"), defaultName), filters });
+  if (r.canceled || !r.filePath) return null;
+  exportedFiles.add(resolve(r.filePath));
+  return r.filePath;
+}
+
 function registerIpc(orch: Orchestrator): void {
   const handlers: Record<string, (...a: any[]) => unknown> = {
     listProjects: () => orch.listProjects(),
@@ -293,6 +310,27 @@ function registerIpc(orch: Orchestrator): void {
     },
     openTestPage: (url: string) => openTestPage(url),
     hideTestView: () => hideTestView(),
+    // ---- 测试报告 ----
+    listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
+    runDetail: (runId: string) => orch.runDetail(runId),
+    exportReport: async (runIds: string[], format: "html" | "xlsx") => {
+      const ext = format === "html" ? "html" : "xlsx";
+      const out = await saveAs(`测试报告-${runIds[0]}.${ext}`, [{ name: format === "html" ? "HTML 报告" : "Excel", extensions: [ext] }]);
+      return out ? orch.exportReport(runIds, format, out) : null;
+    },
+    exportCasesExcel: async (p: string, name: string) => {
+      const out = await saveAs(`${name}-用例.xlsx`, [{ name: "Excel", extensions: ["xlsx"] }]);
+      return out ? orch.exportCasesExcel(p, out) : null;
+    },
+    openPath: async (target: string) => {
+      const p = await assertOpenable(orch, target);
+      // Playwright 报告是目录，打开其中的 index.html
+      const file = existsSync(join(p, "index.html")) ? join(p, "index.html") : p;
+      if (!existsSync(file)) throw new Error(`文件不存在：${file}`);
+      const err = await shell.openPath(file);
+      if (err) throw new Error(err);
+    },
+    showInFolder: async (target: string) => shell.showItemInFolder(await assertOpenable(orch, target)),
   };
   ipcMain.handle(CHANNELS.invoke, async (_e, method: string, ...args: unknown[]) => {
     const fn = handlers[method];

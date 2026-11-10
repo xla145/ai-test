@@ -1,4 +1,4 @@
-import { CheckOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
+import { CheckOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
 import { Button, Card, Descriptions, Drawer, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { api, type Project, type TestCase } from "../api";
@@ -33,7 +33,12 @@ export function CasesPage({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHeader title="用例库" description={`共 ${cases.length} 条。用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。`} />
+      <PageHeader title="用例库" description={`共 ${cases.length} 条。用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。`}
+        extra={<Button icon={<FileExcelOutlined />} loading={busy}
+          onClick={() => run(async () => {
+            const out = await api().exportCasesExcel(project.id, project.name);
+            if (out) await api().showInFolder(out.path).catch(() => undefined);
+          })}>导出 Excel</Button>} />
       <Card size="small" style={{ marginBottom: 12 }}>
         <Flex gap={8} wrap align="center">
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID" style={{ width: 260 }}

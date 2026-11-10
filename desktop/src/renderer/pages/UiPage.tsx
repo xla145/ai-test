@@ -75,6 +75,10 @@ export function UiPage({ project }: { project: Project }) {
             <Col span={5}><Card size="small"><Statistic title="待人工复核" value={result.run.reviews} /></Card></Col>
             <Col span={4}><Card size="small"><Statistic title="降级手工" value={result.degraded.length} /></Card></Col>
           </Row>
+          <Space style={{ marginBottom: 16 }}>
+            <Button size="small" onClick={() => run(() => api().openPath(result.htmlReport))}>打开 Playwright 报告</Button>
+            <Typography.Text type="secondary">完整执行记录与导出见「测试报告」页</Typography.Text>
+          </Space>
           {result.missingData.length > 0 && (
             <Alert style={{ marginBottom: 16 }} type="warning" showIcon
               message={`缺少测试数据且无法造数：${result.missingData.join("、")}`} description="依赖这些数据的用例本次未执行，已降级为手工。" />

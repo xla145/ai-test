@@ -97,6 +97,19 @@ aitest export-excel --project <项目ID> --out 修复后.xlsx
 命令行 / CI 下 browser 服务会自行启动 Chromium；桌面端则连接内嵌浏览器（`AITEST_CDP_ENDPOINT`）。
 可选启用 Midscene 视觉定位：`npm i @midscene/web`，设置 `AITEST_MIDSCENE=1` 及其模型环境变量。
 
+### 测试报告与导出
+
+```bash
+aitest list-runs     --project <项目ID>                       # 执行历史（接口 / UI）
+aitest run-detail    --run <执行ID>                           # 单次执行明细：结果、归因、证据、AI 判定
+aitest export-report --run <接口执行ID> --run <UI执行ID>      # 合并导出单文件 HTML 汇总报告（截图内嵌）
+aitest export-report --run <执行ID> --format xlsx --out 结果.xlsx
+aitest export-excel  --project <项目ID> --out 用例.xlsx       # 导出用例（原 Excel 格式）
+```
+
+桌面端「测试报告」页可查看执行历史与明细、打开 Playwright HTML 报告（含 trace）、导出 HTML / Excel；
+用例库页可导出 Excel。`aitest-ci` 在 `reports/ci/` 下同时生成 `junit.xml`、`summary.md` 与 `report.html`。
+
 ### 工程化（三期）
 
 ```bash

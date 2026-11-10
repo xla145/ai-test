@@ -43,6 +43,13 @@ export interface AitestApi {
   getModelSettings(): Promise<any>;
   setModelSettings(models: unknown, keys?: { agent?: string; vision?: string }): Promise<any>;
   checkModel(slot: "agent" | "vision"): Promise<any>;
+  listRuns(projectId: string, framework?: "pytest" | "playwright"): Promise<any[]>;
+  runDetail(runId: string): Promise<any>;
+  /** 弹出保存对话框；用户取消返回 null */
+  exportReport(runIds: string[], format: "html" | "xlsx"): Promise<{ path: string } | null>;
+  exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
+  openPath(path: string): Promise<void>;
+  showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   openTestPage(url: string): Promise<void>;
