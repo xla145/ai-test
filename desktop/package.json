@@ -70,6 +70,10 @@
       {
         "from": "../.release/engine-deps",
         "to": "engine-deps"
+      },
+      {
+        "from": "../.release/codex",
+        "to": "codex"
       }
     ],
     "linux": {
@@ -93,7 +97,9 @@
         "dmg"
       ],
       "category": "public.app-category.developer-tools",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "publish": null,
     "executableName": "aitest-desktop"

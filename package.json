@@ -12,6 +12,6 @@
     "test": "npm test -w mcp-servers && npm test -w desktop",
     "typecheck": "npm run typecheck -w mcp-servers && npm run typecheck -w desktop",
     "dev": "npm run dev -w desktop",
-    "dist": "scripts/prepare-engine-deps.sh && npm run dist -w desktop"
+    "dist": "scripts/prepare-engine-deps.sh && scripts/fetch-codex.sh && npm run dist -w desktop"
   }
 }

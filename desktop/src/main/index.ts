@@ -41,11 +41,13 @@ const paths = {
   data: () => app.getPath("userData"),
   db: () => process.env.AITEST_DB || join(app.getPath("userData"), "aitest.db"),
   codexHome: () => join(app.getPath("userData"), "codex"),
-  // 优先使用随安装包附带的 codex 二进制，其次 AITEST_CODEX_BIN，最后 PATH 上的 codex
+  // AITEST_CODEX_BIN 优先；其次随安装包附带的 codex（开发时为 scripts/fetch-codex.sh 下载到的
+  // .release/codex）；最后 PATH 上的 codex
   codexBin: () => {
     if (process.env.AITEST_CODEX_BIN) return process.env.AITEST_CODEX_BIN;
-    const bundled = join(process.resourcesPath, "bin", process.platform === "win32" ? "codex.exe" : "codex");
-    return app.isPackaged && existsSync(bundled) ? bundled : "codex";
+    const root = app.isPackaged ? join(process.resourcesPath, "codex") : join(repoRoot, ".release", "codex");
+    const bundled = join(root, "bin", process.platform === "win32" ? "codex.exe" : "codex");
+    return existsSync(bundled) ? bundled : "codex";
   },
   engineDir: () => (app.isPackaged ? join(process.resourcesPath, "engine") : join(repoRoot, "engine")),
   // 安装包内附带引擎的纯 Python 依赖（openpyxl、httpx、pytest 等），用户只需要 Python 3.10+

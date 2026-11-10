@@ -34,7 +34,7 @@ export type Decision = "accept" | "decline";
 export interface ThreadStartParams {
   cwd: string;
   model?: string;
-  approvalPolicy?: "untrusted" | "on-request" | "on-failure" | "never";
+  approvalPolicy?: "untrusted" | "on-request" | "never";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   baseInstructions?: string;
 }
