@@ -121,8 +121,9 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine<unknown[]>(args);
   }
 
-  updateCase(caseId: string, patch: Record<string, unknown>) {
-    return this.deps.engine(["update-case", "--case", caseId, "--json", JSON.stringify(patch)]);
+  /** 界面上的修改记为人工介入（计入「人工介入次数」） */
+  updateCase(caseId: string, patch: Record<string, unknown>, actor: "human" | "agent" = "human") {
+    return this.deps.engine(["update-case", "--case", caseId, "--json", JSON.stringify(patch), "--actor", actor]);
   }
 
   applyFix(caseId: string, field: string, value: unknown) {
@@ -170,9 +171,12 @@ export class Orchestrator extends EventEmitter {
     const settled: TriageItem[] = failures
       .filter((f) => f.failure_type !== "unknown")
       .map((f) => ({ case_id: f.case_id, failure_type: f.failure_type ?? "unknown", reason: "确定性规则判定" }));
+    await this.recordAttributions(runId, settled, "rule");
     if (!unknown.length) return settled;
     const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown));
-    return [...settled, ...parseTriage(turn.message)];
+    const judged = parseTriage(turn.message);
+    await this.recordAttributions(runId, judged, "agent");
+    return [...settled, ...judged];
   }
 
   // ------------------------------------------------------------------ UI 测试（二期）
@@ -245,7 +249,9 @@ export class Orchestrator extends EventEmitter {
       case_id: r.case_id, message: r.message, script: scriptMap.get(r.case_id), evidence_paths: r.evidence_paths ?? [],
     }));
     const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs));
-    return parseTriage(turn.message);
+    const judged = parseTriage(turn.message);
+    await this.recordAttributions(runId, judged, "agent");
+    return judged;
   }
 
   listProposals(status?: string) {
@@ -276,6 +282,64 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["set-environment", "--project", projectId, "--env", env, "--json", JSON.stringify(cfg)]);
   }
 
+  // ------------------------------------------------------------------ 三期：自愈与工程化
+
+  /** 归因落库，等待人工确认（用于统计归因准确率）；非法类型忽略 */
+  private async recordAttributions(runId: string, items: TriageItem[], source: "rule" | "agent") {
+    for (const it of items) {
+      if (!ATTRIBUTION_TYPES.has(it.failure_type)) continue;
+      await this.deps.engine([
+        "set-attribution", "--run", runId, "--case", it.case_id, "--type", it.failure_type, "--source", source,
+        ...(it.reason ? ["--reason", it.reason] : []),
+      ]);
+    }
+  }
+
+  listAttributions(projectId: string, pendingOnly = true) {
+    return this.deps.engine(["list-attributions", "--project", projectId, ...(pendingOnly ? ["--pending"] : [])]);
+  }
+
+  confirmAttribution(runId: string, caseId: string, failureType: string) {
+    return this.deps.engine(["confirm-attribution", "--run", runId, "--case", caseId, "--type", failureType]);
+  }
+
+  usageReport(projectId: string, days = 30) {
+    return this.deps.engine(["usage-report", "--project", projectId, "--days", String(days)]);
+  }
+
+  checkBudget(projectId: string) {
+    return this.deps.engine(["check-budget", "--project", projectId]);
+  }
+
+  getSettings(projectId: string) {
+    return this.deps.engine<Record<string, unknown>>(["get-settings", "--project", projectId]);
+  }
+
+  async setSettings(projectId: string, settings: Record<string, string | number | null | undefined>) {
+    for (const [key, value] of Object.entries(settings)) {
+      if (value === undefined || value === null || value === "") continue;
+      await this.deps.engine(["set-setting", "--project", projectId, "--key", key, "--value", String(value)]);
+    }
+    return this.getSettings(projectId);
+  }
+
+  metrics(projectId: string) {
+    return this.deps.engine(["metrics", "--project", projectId]);
+  }
+
+  stability(projectId: string) {
+    return this.deps.engine(["stability", "--project", projectId]);
+  }
+
+  /** 团队共享：导出项目元数据与用例到 workspace 并提交 git */
+  exportWorkspace(projectId: string) {
+    return this.deps.engine(["export-workspace", "--project", projectId, "--commit"]);
+  }
+
+  importWorkspace(workspace: string) {
+    return this.deps.engine(["import-workspace", "--workspace", workspace]);
+  }
+
   private requireUi(): UiDeps {
     if (!this.deps.ui) throw new Error("未启用 UI 执行器");
     return this.deps.ui;
@@ -284,6 +348,14 @@ export class Orchestrator extends EventEmitter {
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
   private async agentTask(projectId: string, purpose: string, prompt: string): Promise<TurnResult> {
     const project = await this.project(projectId);
+    const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
+      ["check-budget", "--project", projectId],
+    );
+    if (budget.allowed === false) {
+      throw new BudgetExceededError(`本月模型预算已用完（${budget.month_used}/${budget.monthly_budget} tokens），日常回归不受影响`);
+    }
+    const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
+    const tokenLimit = limits.length ? Math.min(...limits) : undefined;
     const agent = await this.deps.agent();
     const threadId = await agent.startThread({
       cwd: project.workspace_path,
@@ -294,11 +366,15 @@ export class Orchestrator extends EventEmitter {
       "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
     ]);
     this.emit("progress", { projectId, stage: purpose, threadId });
-    const result = await agent.runTurn(threadId, prompt, { tokenLimit: this.deps.tokenLimit });
+    const result = await agent.runTurn(threadId, prompt, { tokenLimit });
     await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
     return result;
   }
 }
+
+export class BudgetExceededError extends Error {}
+
+const ATTRIBUTION_TYPES = new Set(["product_bug", "script_error", "environment"]);
 
 /** 从 agent 最终回复中取出 JSON 数组 */
 export function parseTriage(message: string): TriageItem[] {

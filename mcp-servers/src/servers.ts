@@ -277,6 +277,20 @@ export const SERVERS: ServerDef[] = [
         toArgs: (i) => ["list-proposals", ...opt("--status", i.status)],
       },
       {
+        name: "record_attribution",
+        description: "记录失败归因结论（product_bug / script_error / environment），等待人工确认，用于统计归因准确率",
+        input: {
+          run_id: z.string(),
+          case_id: caseId,
+          failure_type: z.enum(["product_bug", "script_error", "environment"]),
+          reason: z.string(),
+        },
+        toArgs: (i) => [
+          "set-attribution", "--run", String(i.run_id), "--case", String(i.case_id), "--type", String(i.failure_type),
+          "--source", "agent", "--reason", String(i.reason),
+        ],
+      },
+      {
         name: "summarize_failures",
         description: "列出某次执行的失败用例与初步归因（environment / product_bug / unknown 需 agent 判断）",
         input: { run_id: z.string() },

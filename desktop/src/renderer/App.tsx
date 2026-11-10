@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApprovalRequest } from "../shared/ipc";
+import { OpsPanel } from "./OpsPanel";
 import { UiPanel } from "./UiPanel";
 import { api, LEVEL_LABEL, MODE_LABEL, STATUS_LABEL, type LintIssue, type Project, type TestCase } from "./api";
 
-type Tab = "import" | "cases" | "api" | "run" | "ui";
+type Tab = "import" | "cases" | "api" | "run" | "ui" | "ops";
 
 function useAsync() {
   const [busy, setBusy] = useState(false);
@@ -74,6 +75,7 @@ export function App() {
                   ["api", "接口测试"],
                   ["run", "接口回归"],
                   ["ui", "UI 测试"],
+                  ["ops", "工程化"],
                 ] as [Tab, string][]
               ).map(([k, label]) => (
                 <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
@@ -86,6 +88,7 @@ export function App() {
             {tab === "api" && <ApiPanel project={current} />}
             {tab === "run" && <RunPanel project={current} />}
             {tab === "ui" && <UiPanel key={current.id} project={current} />}
+            {tab === "ops" && <OpsPanel key={current.id} project={current} />}
           </>
         ) : (
           <p className="muted">先在左侧新建项目。</p>
@@ -229,7 +232,7 @@ function CasesPanel({ project }: { project: Project }) {
               <td>{STATUS_LABEL[c.status] ?? c.status}</td>
               <td>
                 {c.status === "draft" && (
-                  <button disabled={busy} onClick={() => run(async () => { await api().updateCase(c.id, { status: "reviewed" }); await load(); })}>
+                  <button disabled={busy} onClick={() => run(async () => { await api().updateCase(c.id, { status: "reviewed" }, "human"); await load(); })}>
                     审核通过
                   </button>
                 )}

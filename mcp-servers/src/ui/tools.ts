@@ -215,7 +215,12 @@ function browserTools(ctx: UiToolContext): UiTool[] {
           caseIds: case_ids,
           env: { ...secretEnv, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
         });
-        return { exit_code: out.exitCode, results: out.results.map(({ reviews: _r, ...r }) => r), stderr: out.stderr.slice(-1000) };
+        return {
+          exit_code: out.exitCode,
+          errors: out.errors,
+          results: out.results.map(({ reviews: _r, ...r }) => r),
+          stderr: out.stderr.slice(-1000),
+        };
       },
     },
     // ---- Midscene 视觉工具（与浏览器共享页面与 ref） ----

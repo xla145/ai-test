@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkData, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
+import {
+  AGENT_KEY_ENV,
+  checkModel,
+  codexProvider,
+  DEFAULT_MODEL_SETTINGS,
+  midsceneEnv,
+  PRESETS,
+  validateSettings,
+  type ModelSettings,
+} from "./models.js";
 import { Orchestrator } from "./orchestrator.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
 import { CHANNELS, type ApprovalRequest } from "../shared/ipc.js";
@@ -41,6 +51,29 @@ let approvalContext: ApprovalContext = { workspace: "", allowedHosts: [], produc
 const pendingApprovals = new Map<string, (accept: boolean) => void>();
 
 const engineEnv = () => ({ PYTHONPATH: paths.engineDir() });
+
+// ---- 模型设置（国内模型 / 私有化部署）：配置存 userData/settings.json，API key 存钥匙串 ----
+const MODEL_KEY_REF = { agent: "aitest:model:agent", vision: "aitest:model:vision" } as const;
+const settingsFile = () => join(app.getPath("userData"), "settings.json");
+
+function loadModelSettings(): ModelSettings {
+  try {
+    return existsSync(settingsFile()) ? { ...DEFAULT_MODEL_SETTINGS, ...JSON.parse(readFileSync(settingsFile(), "utf8")).models } : DEFAULT_MODEL_SETTINGS;
+  } catch {
+    return DEFAULT_MODEL_SETTINGS;
+  }
+}
+
+function saveModelSettings(models: ModelSettings): void {
+  const errors = validateSettings(models);
+  if (errors.length) throw new Error(errors.join("；"));
+  writeFileSync(settingsFile(), JSON.stringify({ models }, null, 2));
+  // 配置变化后重启 Codex，下一个 agent 任务按新配置启动
+  codex?.stop();
+  codex = undefined;
+}
+
+const modelKey = (slot: "agent" | "vision") => secretStore.get(MODEL_KEY_REF[slot])?.authToken ?? "";
 const engine = <T,>(args: string[], env: Record<string, string> = {}) =>
   runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env } });
 
@@ -61,6 +94,8 @@ async function getCodex(): Promise<CodexAppServer> {
   const codexHome = paths.codexHome();
   mkdirSync(codexHome, { recursive: true });
   const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support"];
+  const models = loadModelSettings();
+  const vision = models.vision ? midsceneEnv(models, modelKey("vision")) : {};
   const mcpEnv: Record<string, string> = {
     // browser 服务经 CDP 连接内嵌浏览器；AITEST_MIDSCENE=1 时启用 Midscene 视觉工具
     AITEST_CDP_ENDPOINT: `http://127.0.0.1:${CDP_PORT}`,
@@ -75,13 +110,19 @@ async function getCodex(): Promise<CodexAppServer> {
   writeFileSync(
     join(codexHome, "config.toml"),
     buildCodexConfig({
-      model: process.env.AITEST_MODEL,
-      mcpServers: servers.map((name) => ({ name, command: process.execPath, args: [paths.mcpEntry(), name], env: mcpEnv })),
+      ...codexProvider(models),
+      model: codexProvider(models).model ?? process.env.AITEST_MODEL,
+      // 视觉模型的配置只给 browser 服务（Midscene 在其中运行）
+      mcpServers: servers.map((name) => ({
+        name, command: process.execPath, args: [paths.mcpEntry(), name], env: name === "browser" ? { ...mcpEnv, ...vision } : mcpEnv,
+      })),
     }),
   );
   codex = new CodexAppServer({
     binary: paths.codexBin(),
     codexHome,
+    // agent 模型的 key 只注入 Codex 进程（对应配置中的 env_key）
+    env: modelKey("agent") ? { [AGENT_KEY_ENV]: modelKey("agent") } : {},
     approvals: {
       command: (p) => decide("command", evaluateCommand(p, approvalContext), p),
       fileChange: (p) => decide("fileChange", evaluateFileChange(p, approvalContext), p),
@@ -155,7 +196,7 @@ function registerIpc(orch: Orchestrator): void {
     importExcel: (p: string, f: string) => orch.importExcel(p, f),
     lint: (p: string) => orch.lint(p),
     listCases: (p: string, filters) => orch.listCases(p, filters),
-    updateCase: (c: string, patch) => orch.updateCase(c, patch),
+    updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
     generateApiSuite: async (p: string, f: string, enrich: boolean) => {
       await setApprovalContext(orch, p);
@@ -187,6 +228,35 @@ function registerIpc(orch: Orchestrator): void {
       return orch.runUiRegression(p, env, { headed });
     },
     listProposals: (status?: string) => orch.listProposals(status),
+    // ---- 三期 ----
+    usageReport: (p: string, days?: number) => orch.usageReport(p, days),
+    checkBudget: (p: string) => orch.checkBudget(p),
+    getSettings: (p: string) => orch.getSettings(p),
+    setSettings: (p: string, settings) => orch.setSettings(p, settings),
+    metrics: (p: string) => orch.metrics(p),
+    stability: (p: string) => orch.stability(p),
+    listAttributions: (p: string, pendingOnly?: boolean) => orch.listAttributions(p, pendingOnly ?? true),
+    confirmAttribution: (runId: string, caseId: string, type: string) => orch.confirmAttribution(runId, caseId, type),
+    exportWorkspace: (p: string) => orch.exportWorkspace(p),
+    importWorkspace: (dir: string) => orch.importWorkspace(dir),
+    initCi: async (p: string, provider: "github" | "gitlab", toolRepo: string, env: string) => {
+      const project = await orch.project(p);
+      return initCi(project.workspace_path, provider, toolRepo, env);
+    },
+    modelPresets: () => PRESETS,
+    getModelSettings: () => ({ ...loadModelSettings(), hasAgentKey: Boolean(modelKey("agent")), hasVisionKey: Boolean(modelKey("vision")) }),
+    setModelSettings: (models: ModelSettings, keys?: { agent?: string; vision?: string }) => {
+      if (keys?.agent) secretStore.set(MODEL_KEY_REF.agent, { authToken: keys.agent });
+      if (keys?.vision) secretStore.set(MODEL_KEY_REF.vision, { authToken: keys.vision });
+      saveModelSettings(models);
+      return loadModelSettings();
+    },
+    checkModel: (slot: "agent" | "vision") => {
+      const models = loadModelSettings();
+      const cfg = slot === "agent" ? models.agent : models.vision;
+      if (!cfg) throw new Error("未配置视觉模型");
+      return checkModel(cfg, slot, modelKey(slot));
+    },
     resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
     listReviews: (status?: string) => orch.listReviews(status),
     resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
