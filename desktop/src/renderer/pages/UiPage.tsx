@@ -25,7 +25,7 @@ import { api, type Project, type TestCase } from "../api";
 import { DiffView } from "../components/DiffView";
 import { LabelTag, LINT, MODE } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad } from "../hooks";
+import { useAction, useLoad, usePaged } from "../hooks";
 
 interface Proposal { id: string; case_id: string; script_path: string; diff: string; reason: string; status: string }
 interface Review { id: string; case_id: string; kind: string; description: string; ai_verdict: string; evidence_paths: string[]; status: string }
@@ -43,8 +43,13 @@ export function UiPage({ project }: { project: Project }) {
   const [headed, setHeaded] = useState(true);
   const [result, setResult] = useState<UiRunResult>();
   const { busy, run } = useAction();
-  const proposals = useLoad(() => api().listProposals("pending") as Promise<Proposal[]>, [project.id]);
-  const reviews = useLoad(() => api().listReviews("pending") as Promise<Review[]>, [project.id]);
+  // 只看当前项目的待处理项，按页读取
+  const proposals = usePaged<Proposal>(
+    (q) => api().pageProposals(project.id, { ...q, status: "pending" }) as Promise<{ items: Proposal[]; total: number }>,
+    [project.id], 5);
+  const reviews = usePaged<Review>(
+    (q) => api().pageReviews(project.id, { ...q, status: "pending" }) as Promise<{ items: Review[]; total: number }>,
+    [project.id], 10);
 
   if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
   const failed = result ? result.run.failed + result.run.error : 0;
@@ -84,10 +89,10 @@ export function UiPage({ project }: { project: Project }) {
       <Tabs
         type="card"
         items={[
-          { key: "proposals", label: <Badge count={proposals.data?.length ?? 0} size="small" offset={[10, 0]}>脚本修改建议</Badge>,
-            children: <Proposals project={project} data={proposals.data} loading={proposals.loading} reload={proposals.reload} /> },
-          { key: "reviews", label: <Badge count={reviews.data?.length ?? 0} size="small" offset={[10, 0]}>人工复核</Badge>,
-            children: <Reviews workspace={project.workspace_path} data={reviews.data} loading={reviews.loading} reload={reviews.reload} /> },
+          { key: "proposals", label: <Badge count={proposals.total} size="small" offset={[10, 0]}>脚本修改建议</Badge>,
+            children: <Proposals project={project} paged={proposals} /> },
+          { key: "reviews", label: <Badge count={reviews.total} size="small" offset={[10, 0]}>人工复核</Badge>,
+            children: <Reviews workspace={project.workspace_path} paged={reviews} /> },
           { key: "cases", label: "UI 用例", children: <UiCases project={project} env={env} /> },
           { key: "roles", label: "角色与登录", children: <Roles project={project} env={env} /> },
         ]}
@@ -96,13 +101,17 @@ export function UiPage({ project }: { project: Project }) {
   );
 }
 
-function Proposals({ project, data = [], loading, reload }: { project: Project; data?: Proposal[]; loading: boolean; reload: () => Promise<void> }) {
+type Paged<T> = ReturnType<typeof usePaged<T>>;
+
+function Proposals({ project, paged }: { project: Project; paged: Paged<Proposal> }) {
+  const { items: data, loading, reload, pagination } = paged;
   const { busy, run } = useAction();
   if (!loading && !data.length) return <Empty description="没有待处理的修改建议" />;
   return (
     <List
       loading={loading}
       dataSource={data}
+      pagination={{ ...pagination, pageSizeOptions: [5, 10, 20], align: "end" }}
       renderItem={(p) => (
         <Card size="small" style={{ marginBottom: 12 }}
           title={<Space><span className="mono">{p.case_id}</span><Typography.Text type="secondary" className="mono">{p.script_path}</Typography.Text></Space>}
@@ -119,7 +128,8 @@ function Proposals({ project, data = [], loading, reload }: { project: Project; 
   );
 }
 
-function Reviews({ workspace, data = [], loading, reload }: { workspace: string; data?: Review[]; loading: boolean; reload: () => Promise<void> }) {
+function Reviews({ workspace, paged }: { workspace: string; paged: Paged<Review> }) {
+  const { items: data, loading, reload, pagination } = paged;
   // 证据路径可能是 workspace 内的相对路径
   const fileUrl = (p: string) => `file://${/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${workspace}/${p}`}`;
   const { busy, run } = useAction();
@@ -130,7 +140,7 @@ function Reviews({ workspace, data = [], loading, reload }: { workspace: string;
       loading={loading}
       dataSource={data}
       locale={{ emptyText: <Empty description="没有待复核的 AI 判定" /> }}
-      pagination={{ pageSize: 10, size: "small" }}
+      pagination={{ ...pagination, size: "small" }}
       columns={[
         { title: "用例", dataIndex: "case_id", className: "mono", width: 150 },
         { title: "判定内容", dataIndex: "description" },
@@ -151,16 +161,19 @@ function Reviews({ workspace, data = [], loading, reload }: { workspace: string;
 }
 
 function UiCases({ project, env }: { project: Project; env: string }) {
-  const { data = [], loading, reload } = useLoad(() => api().listCases(project.id) as Promise<TestCase[]>, [project.id]);
+  // UI / 埋点抓包用例，排除已废弃
+  const { items: rows, loading, reload, pagination } = usePaged<TestCase>(
+    (q) => api().pageCases(project.id, { ...q, filters: { execution_mode: "ui,capture", status: "draft,reviewed" } }) as
+      Promise<{ items: TestCase[]; total: number }>,
+    [project.id], 15);
   const { busy, run } = useAction();
-  const rows = data.filter((c) => ["ui", "capture"].includes(c.execution_mode) && c.status !== "deprecated");
   return (
     <Table
       size="small"
       rowKey="id"
       loading={loading}
       dataSource={rows}
-      pagination={{ pageSize: 15, size: "small" }}
+      pagination={{ ...pagination, size: "small", pageSizeOptions: [15, 30, 50, 100] }}
       columns={[
         { title: "标题", dataIndex: "title" },
         { title: "执行方式", dataIndex: "execution_mode", width: 110, render: (v: string) => <LabelTag map={MODE} value={v} /> },

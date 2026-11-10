@@ -11,8 +11,10 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import {
+  Avatar,
   Badge,
   Button,
   Descriptions,
@@ -41,6 +43,7 @@ import { CasesPage } from "./pages/CasesPage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
 import { RunPage } from "./pages/RunPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { UiPage } from "./pages/UiPage";
 
 const { Sider, Header, Content } = Layout;
@@ -49,6 +52,13 @@ interface ActivityItem {
   time: string;
   method: string;
   detail: string;
+}
+
+/** 头像文字：中文取最后一个字（名），其他取首字母 */
+function initial(name?: string): string {
+  if (!name) return "?";
+  const n = name.trim();
+  return /[\u4e00-\u9fff]/.test(n) ? n.slice(-1) : n.charAt(0).toUpperCase();
 }
 
 /** Codex 事件 → 可读的活动记录 */
@@ -74,15 +84,22 @@ export function App() {
   const [approval, setApproval] = useState<ApprovalRequest>();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityOpen, setActivityOpen] = useState(false);
+  /** 打开活动面板后新到的条数，用于侧栏的提示点 */
+  const [unread, setUnread] = useState(0);
   const [creating, setCreating] = useState(false);
   const [viewVisible, setViewVisible] = useState(false);
+  // 全局设置不属于任何项目，单独一个视图
+  const [showSettings, setShowSettings] = useState(false);
+  const { data: user } = useLoad(() => api().getUserInfo(), []);
   const current = projects.find((p) => p.id === currentId) ?? projects[0];
 
   useEffect(() => {
     const offApproval = api().onApprovalRequest(setApproval);
     const offEvent = api().onEvent((e) => {
       const detail = describe(e.method, e.params);
-      if (detail) setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+      if (!detail) return;
+      setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+      setUnread((n) => n + 1);
     });
     const offView = api().onViewChange?.((v) => setViewVisible(v.visible));
     return () => {
@@ -122,22 +139,51 @@ export function App() {
           <Menu
             mode="inline"
             style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 8 }}
-            selectedKeys={current ? [current.id] : []}
-            onClick={(e) => setCurrentId(e.key)}
+            selectedKeys={current && !showSettings ? [current.id] : []}
+            onClick={(e) => {
+              setCurrentId(e.key);
+              setShowSettings(false);
+            }}
             items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
           />
-          <div className="sider-section" style={{ paddingBottom: 16 }}>
-            <Button block icon={<HistoryOutlined />} onClick={() => setActivityOpen(true)}>
-              <Badge count={activity.length} size="small" overflowCount={99} offset={[8, -2]}>
-                <span>agent 活动</span>
-              </Badge>
-            </Button>
+          <div className="sider-footer" style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
+            <Tooltip placement="topLeft" title={user && (
+              <>
+                <div>{user.name}{user.email ? ` <${user.email}>` : ""}</div>
+                <div style={{ opacity: 0.75, fontSize: 12 }}>
+                  {user.source === "git" ? "来自 git 全局配置（user.name / user.email）" : "系统用户名；可用 git config --global user.name 设置显示名"}
+                </div>
+              </>
+            )}>
+              <div className="sider-user">
+                <Avatar size={30} style={{ background: token.colorPrimary, flexShrink: 0, fontSize: 14 }}>
+                  {initial(user?.name)}
+                </Avatar>
+                <span className="sider-user-text">
+                  <span className="sider-user-name">{user?.name ?? "—"}</span>
+                  <span className="sider-user-sub" style={{ color: token.colorTextTertiary }}>{user?.email ?? "本机用户"}</span>
+                </span>
+              </div>
+            </Tooltip>
+            <Tooltip title="全局设置" placement="top">
+              <Button type="text" className="sider-action" aria-label="全局设置" icon={<SettingOutlined />}
+                style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
+                onClick={() => setShowSettings(true)} />
+            </Tooltip>
+            <Tooltip title={unread ? `agent 活动（${unread} 条新活动）` : "agent 活动"} placement="top">
+              <Button type="text" className="sider-action" aria-label="agent 活动"
+                icon={<Badge dot={unread > 0} offset={[-1, 2]}><HistoryOutlined /></Badge>}
+                onClick={() => {
+                  setActivityOpen(true);
+                  setUnread(0);
+                }} />
+            </Tooltip>
           </div>
         </Flex>
       </Sider>
 
       <Layout>
-        {current && (
+        {current && !showSettings && (
           <Header style={{ padding: "0 24px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
               <Flex align="baseline" gap={12} style={{ minWidth: 0 }}>
@@ -162,7 +208,9 @@ export function App() {
           </Header>
         )}
         <Content style={{ overflow: "hidden" }}>
-          {current ? (
+          {showSettings ? (
+            <div className="page"><SettingsPage /></div>
+          ) : current ? (
             <Tabs
               activeKey={tab}
               onChange={setTab}
@@ -181,7 +229,7 @@ export function App() {
         </Content>
       </Layout>
 
-      <NewProjectModal open={creating} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); }} />
+      <NewProjectModal open={creating} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); setShowSettings(false); }} />
 
       <Modal
         open={!!approval}
@@ -207,7 +255,7 @@ export function App() {
       </Modal>
 
       <Drawer title="agent 活动" open={activityOpen} onClose={() => setActivityOpen(false)} width={420}
-        extra={<Button size="small" onClick={() => setActivity([])}>清空</Button>}>
+        extra={<Button size="small" onClick={() => { setActivity([]); setUnread(0); }}>清空</Button>}>
         {activity.length ? (
           <Timeline items={[...activity].reverse().map((a) => ({ children: <><Typography.Text type="secondary">{a.time}</Typography.Text> {a.detail}</> }))} />
         ) : (
@@ -226,7 +274,8 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
     if (dir) form.setFieldValue("workspace", dir);
   };
   const submit = async () => {
-    const v = await form.validateFields();
+    const v = await form.validateFields().catch(() => undefined);
+    if (!v) return;
     const p = await run(() => api().createProject(v.name, v.workspace, v.baseUrl ? { [v.env || "test"]: { base_url: v.baseUrl } } : {}) as Promise<Project>, "项目已创建");
     if (p) {
       form.resetFields();

@@ -1,27 +1,28 @@
 import { CheckOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
 import { Button, Card, Descriptions, Drawer, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { LabelTag, LINT, MODE, STATUS } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad } from "../hooks";
+import { useAction, useDebounced, usePaged } from "../hooks";
 
 const PRIORITY_COLOR: Record<string, string> = { P0: "red", P1: "orange", P2: "blue", P3: "default" };
 
 export function CasesPage({ project }: { project: Project }) {
-  const { data: cases = [], loading, reload } = useLoad(() => api().listCases(project.id) as Promise<TestCase[]>, [project.id]);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<{ mode?: string; priority?: string; status?: string; lint?: string }>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<TestCase>();
   const { busy, run } = useAction();
-
-  const rows = useMemo(() => cases.filter((c) =>
-    (!query || c.title.includes(query) || c.id.includes(query) || c.module_path.join("/").includes(query)) &&
-    (!filters.mode || c.execution_mode === filters.mode) &&
-    (!filters.priority || c.priority === filters.priority) &&
-    (!filters.status || c.status === filters.status) &&
-    (!filters.lint || c.lint_status === filters.lint)), [cases, query, filters]);
+  const q = useDebounced(query.trim());
+  // 搜索与筛选在引擎端执行，按页读取
+  const { items: rows, loading, reload, pagination } = usePaged<TestCase>(
+    (page) => api().pageCases(project.id, {
+      ...page, query: q || undefined,
+      filters: { execution_mode: filters.mode, priority: filters.priority, status: filters.status, lint_status: filters.lint },
+    }) as Promise<{ items: TestCase[]; total: number }>,
+    [project.id, q, filters],
+  );
 
   const setStatus = (ids: string[], status: string) => run(async () => {
     for (const id of ids) await api().updateCase(id, { status }, "human");
@@ -33,7 +34,7 @@ export function CasesPage({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHeader title="用例库" description={`共 ${cases.length} 条。用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。`} />
+      <PageHeader title="用例库" description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。" />
       <Card size="small" style={{ marginBottom: 12 }}>
         <Flex gap={8} wrap align="center">
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID" style={{ width: 260 }}
@@ -59,14 +60,15 @@ export function CasesPage({ project }: { project: Project }) {
         rowKey="id"
         loading={loading}
         dataSource={rows}
-        rowSelection={{ selectedRowKeys: selected, onChange: (k) => setSelected(k as string[]) }}
-        pagination={{ pageSize: 20, showTotal: (t) => `${t} 条` }}
+        // 翻页后保留其它页已选的用例，可跨页批量审核
+        rowSelection={{ selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: (k) => setSelected(k as string[]) }}
+        pagination={pagination}
         onRow={(r) => ({ onDoubleClick: () => setDetail(r) })}
         columns={[
           { title: "标题", dataIndex: "title", render: (t: string, r: TestCase) => (
             <a onClick={() => setDetail(r)}>{t}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.module_path.join(" / ")}</Typography.Text></div></a>
           ) },
-          { title: "等级", dataIndex: "priority", width: 80, sorter: (a, b) => a.priority.localeCompare(b.priority),
+          { title: "等级", dataIndex: "priority", width: 80,
             render: (p: string) => <Tag color={PRIORITY_COLOR[p]} bordered={false}>{p}</Tag> },
           { title: "执行方式", dataIndex: "execution_mode", width: 110, render: (v: string) => <LabelTag map={MODE} value={v} /> },
           { title: "规范检查", dataIndex: "lint_status", width: 100, render: (v: string) => <LabelTag map={LINT} value={v} /> },

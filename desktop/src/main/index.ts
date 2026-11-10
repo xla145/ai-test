@@ -1,27 +1,30 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { userInfo } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, WebContentsView } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
+import { AGENT_KEY_ENV, checkModel, codexProvider, midsceneEnv, PRESETS, type ModelSettings } from "./models.js";
 import {
-  AGENT_KEY_ENV,
-  checkModel,
-  codexProvider,
-  DEFAULT_MODEL_SETTINGS,
-  midsceneEnv,
-  PRESETS,
-  validateSettings,
-  type ModelSettings,
-} from "./models.js";
+  activeModels,
+  DEFAULT_SETTINGS,
+  DEFAULT_TASK_TOKEN_LIMIT,
+  migrate,
+  modelKeyRef,
+  usageOf,
+  validateGlobal,
+  type GlobalSettings,
+} from "./settings.js";
 import { Orchestrator } from "./orchestrator.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
-import { CHANNELS, type ApprovalRequest } from "../shared/ipc.js";
+import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo } from "../shared/ipc.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -37,25 +40,46 @@ app.setPath("userData", join(app.getPath("appData"), "aitest-desktop"));
 app.commandLine.appendSwitch("remote-debugging-port", String(CDP_PORT));
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 
+type Source = RuntimeInfo["python"]["source"];
+
+/** codex 查找顺序：AITEST_CODEX_BIN → 全局配置 → 随安装包附带（开发时为 scripts/fetch-codex.sh 下载到的
+ *  .release/codex）→ PATH 上的 codex */
+function codexBin(): { path: string; source: Source } {
+  if (process.env.AITEST_CODEX_BIN) return { path: process.env.AITEST_CODEX_BIN, source: "env" };
+  const configured = loadSettings().general.codexPath;
+  if (configured) return { path: configured, source: "settings" };
+  const root = app.isPackaged ? join(process.resourcesPath, "codex") : join(repoRoot, ".release", "codex");
+  const bundled = join(root, "bin", process.platform === "win32" ? "codex.exe" : "codex");
+  return existsSync(bundled) ? { path: bundled, source: "bundled" } : { path: "codex", source: "default" };
+}
+
+/** Python：AITEST_PYTHON → 全局配置 → python3 */
+function python(): { path: string; source: Source } {
+  if (process.env.AITEST_PYTHON) return { path: process.env.AITEST_PYTHON, source: "env" };
+  const configured = loadSettings().general.pythonPath;
+  return configured ? { path: configured, source: "settings" } : { path: "python3", source: "default" };
+}
+
+/** agent 单次任务 token 上限：AITEST_TOKEN_LIMIT → 全局配置 → 默认值 */
+function taskTokenLimit(): { value: number; source: Source } {
+  const env = Number(process.env.AITEST_TOKEN_LIMIT);
+  if (env > 0) return { value: env, source: "env" };
+  const configured = loadSettings().general.taskTokenLimit;
+  return configured ? { value: configured, source: "settings" } : { value: DEFAULT_TASK_TOKEN_LIMIT, source: "default" };
+}
+
 const paths = {
   data: () => app.getPath("userData"),
   db: () => process.env.AITEST_DB || join(app.getPath("userData"), "aitest.db"),
   codexHome: () => join(app.getPath("userData"), "codex"),
-  // AITEST_CODEX_BIN 优先；其次随安装包附带的 codex（开发时为 scripts/fetch-codex.sh 下载到的
-  // .release/codex）；最后 PATH 上的 codex
-  codexBin: () => {
-    if (process.env.AITEST_CODEX_BIN) return process.env.AITEST_CODEX_BIN;
-    const root = app.isPackaged ? join(process.resourcesPath, "codex") : join(repoRoot, ".release", "codex");
-    const bundled = join(root, "bin", process.platform === "win32" ? "codex.exe" : "codex");
-    return existsSync(bundled) ? bundled : "codex";
-  },
+  codexBin: () => codexBin().path,
   engineDir: () => (app.isPackaged ? join(process.resourcesPath, "engine") : join(repoRoot, "engine")),
   // 安装包内附带引擎的纯 Python 依赖（openpyxl、httpx、pytest 等），用户只需要 Python 3.10+
   enginePythonPath: () =>
     app.isPackaged ? [join(process.resourcesPath, "engine"), join(process.resourcesPath, "engine-deps")].join(delimiter) : join(repoRoot, "engine"),
   // MCP Server 由 Codex 以独立进程启动，必须是 asar 之外的真实文件
   mcpEntry: () => unpacked(join(dirname(require.resolve("@ai-test/mcp-servers/package.json")), "dist", "index.js")),
-  python: () => process.env.AITEST_PYTHON || "python3",
+  python: () => python().path,
 };
 
 let mainWindow: BrowserWindow | undefined;
@@ -70,28 +94,56 @@ const pendingApprovals = new Map<string, (accept: boolean) => void>();
 
 const engineEnv = () => ({ PYTHONPATH: paths.enginePythonPath() });
 
-// ---- 模型设置（国内模型 / 私有化部署）：配置存 userData/settings.json，API key 存钥匙串 ----
-const MODEL_KEY_REF = { agent: "aitest:model:agent", vision: "aitest:model:vision" } as const;
+// ---- 全局配置（模型、运行环境、外观）：存 userData/settings.json，模型 API key 存钥匙串 ----
 const settingsFile = () => join(app.getPath("userData"), "settings.json");
 
-function loadModelSettings(): ModelSettings {
+function loadSettings(): GlobalSettings {
   try {
-    return existsSync(settingsFile()) ? { ...DEFAULT_MODEL_SETTINGS, ...JSON.parse(readFileSync(settingsFile(), "utf8")).models } : DEFAULT_MODEL_SETTINGS;
+    return existsSync(settingsFile()) ? migrate(JSON.parse(readFileSync(settingsFile(), "utf8"))) : migrate(DEFAULT_SETTINGS);
   } catch {
-    return DEFAULT_MODEL_SETTINGS;
+    return migrate(DEFAULT_SETTINGS);
   }
 }
 
-function saveModelSettings(models: ModelSettings): void {
-  const errors = validateSettings(models);
+const loadModelSettings = (): ModelSettings => activeModels(loadSettings());
+
+/** 保存全局配置；keys 为本次填写的 API key（按模型 id），删除的模型同时删除其 key */
+function saveSettings(next: GlobalSettings, keys: Record<string, string> = {}): void {
+  const s = migrate(next);
+  const errors = validateGlobal(s);
   if (errors.length) throw new Error(errors.join("；"));
-  writeFileSync(settingsFile(), JSON.stringify({ models }, null, 2));
+  const prev = loadSettings();
+  for (const m of prev.models) if (!s.models.some((x) => x.id === m.id)) secretStore.delete(modelKeyRef(m.id));
+  for (const [id, key] of Object.entries(keys)) if (key && s.models.some((m) => m.id === id)) secretStore.set(modelKeyRef(id), { authToken: key });
+  writeFileSync(settingsFile(), JSON.stringify(s, null, 2));
   // 配置变化后重启 Codex，下一个 agent 任务按新配置启动
   codex?.stop();
   codex = undefined;
 }
 
-const modelKey = (slot: "agent" | "vision") => secretStore.get(MODEL_KEY_REF[slot])?.authToken ?? "";
+const keyOf = (id?: string) => (id ? secretStore.get(modelKeyRef(id))?.authToken ?? "" : "");
+const modelKey = (slot: "agent" | "vision") => {
+  const s = loadSettings();
+  return keyOf(slot === "agent" ? s.agentModelId : s.visionModelId);
+};
+
+function runtimeInfo(): RuntimeInfo {
+  const envOverrides = ["AITEST_PYTHON", "AITEST_CODEX_BIN", "AITEST_TOKEN_LIMIT", "AITEST_DB"].filter((k) => process.env[k]);
+  return {
+    appVersion: app.getVersion(), dataDir: paths.data(), dbPath: paths.db(),
+    python: python(), codex: codexBin(), taskTokenLimit: taskTokenLimit(), envOverrides,
+  };
+}
+
+/** 运行 `<bin> --version` 检查可用性 */
+function versionOf(bin: string): Promise<RuntimeCheck> {
+  return new Promise((done) => {
+    execFile(bin, ["--version"], { timeout: 15_000, windowsHide: true }, (err, stdout, stderr) => {
+      const out = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
+      done(err ? { ok: false, detail: (err as NodeJS.ErrnoException).code === "ENOENT" ? `找不到 ${bin}` : err.message } : { ok: true, detail: out });
+    });
+  });
+}
 const engine = <T,>(args: string[], env: Record<string, string> = {}) =>
   runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env } });
 
@@ -221,6 +273,11 @@ function registerIpc(orch: Orchestrator): void {
     importExcel: (p: string, f: string) => orch.importExcel(p, f),
     lint: (p: string) => orch.lint(p),
     listCases: (p: string, filters) => orch.listCases(p, filters),
+    pageCases: (p: string, q) => orch.pageCases(p, q),
+    pageIssues: (p: string, q) => orch.pageIssues(p, q),
+    pageProposals: (p: string, q) => orch.pageProposals(p, q),
+    pageReviews: (p: string, q) => orch.pageReviews(p, q),
+    pageAttributions: (p: string, q) => orch.pageAttributions(p, q),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
     generateApiSuite: async (p: string, f: string, enrich: boolean) => {
@@ -269,19 +326,23 @@ function registerIpc(orch: Orchestrator): void {
       return initCi(project.workspace_path, provider, toolRepo, env);
     },
     modelPresets: () => PRESETS,
-    getModelSettings: () => ({ ...loadModelSettings(), hasAgentKey: Boolean(modelKey("agent")), hasVisionKey: Boolean(modelKey("vision")) }),
-    setModelSettings: (models: ModelSettings, keys?: { agent?: string; vision?: string }) => {
-      if (keys?.agent) secretStore.set(MODEL_KEY_REF.agent, { authToken: keys.agent });
-      if (keys?.vision) secretStore.set(MODEL_KEY_REF.vision, { authToken: keys.vision });
-      saveModelSettings(models);
-      return loadModelSettings();
+    getGlobalSettings: () => globalSettingsView(),
+    saveGlobalSettings: (next: GlobalSettings, keys?: Record<string, string>) => {
+      saveSettings(next, keys);
+      return globalSettingsView();
     },
-    checkModel: (slot: "agent" | "vision") => {
-      const models = loadModelSettings();
-      const cfg = slot === "agent" ? models.agent : models.vision;
-      if (!cfg) throw new Error("未配置视觉模型");
-      return checkModel(cfg, slot, modelKey(slot));
+    checkModel: (id: string) => {
+      const s = loadSettings();
+      const m = s.models.find((x) => x.id === id);
+      if (!m) throw new Error("模型不存在，请先保存");
+      return checkModel(m, usageOf(s, id), keyOf(id));
     },
+    checkRuntime: async () => {
+      const [py, cx] = await Promise.all([versionOf(paths.python()), versionOf(paths.codexBin())]);
+      return { python: py, codex: cx };
+    },
+    openDataDir: () => shell.openPath(paths.data()),
+    getUserInfo: () => localUser(),
     resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
     listReviews: (status?: string) => orch.listReviews(status),
     resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
@@ -307,6 +368,31 @@ function registerIpc(orch: Orchestrator): void {
   });
 }
 
+const gitConfig = (key: string) => new Promise<string>((done) =>
+  execFile("git", ["config", "--global", key], { timeout: 5_000, windowsHide: true }, (err, out) => done(err ? "" : out.trim())));
+
+/** 本机用户：git 全局配置的 user.name / user.email，未配置时用系统用户名 */
+async function localUser(): Promise<UserInfo> {
+  const [name, email] = await Promise.all([gitConfig("user.name"), gitConfig("user.email")]);
+  if (name) return { name, ...(email ? { email } : {}), source: "git" };
+  let system = "";
+  try {
+    system = userInfo().username;
+  } catch {
+    // 个别环境下取不到系统用户
+  }
+  return { name: system || "本机用户", ...(email ? { email } : {}), source: "system" };
+}
+
+function globalSettingsView() {
+  const settings = loadSettings();
+  return {
+    settings,
+    hasKey: Object.fromEntries(settings.models.map((m) => [m.id, Boolean(keyOf(m.id))])),
+    runtime: runtimeInfo(),
+  };
+}
+
 async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
   const p = await orch.project(projectId);
   const hosts = (prod: boolean) =>
@@ -324,7 +410,10 @@ app.whenReady().then(async () => {
     agent: getCodex,
     secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles),
     ui: { runUiSuite, checkData, seedData },
-    tokenLimit: Number(process.env.AITEST_TOKEN_LIMIT || 200_000),
+    // 每次 agent 任务时读取，全局配置修改后立即生效
+    get tokenLimit() {
+      return taskTokenLimit().value;
+    },
   });
   orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));
   registerIpc(orch);

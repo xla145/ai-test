@@ -30,6 +30,17 @@ def _project(store: Store, project_id: str) -> Project:
     return p
 
 
+def _paged(a: argparse.Namespace, fetch: Callable[[int | None, int], list], count: Callable[[], int],
+           **extra: Any) -> Any:
+    """未指定 --page-size 时返回完整列表（兼容已有调用方）；
+    指定时返回 ``{"items", "total", "page", "page_size", ...}``，页码从 1 开始。"""
+    if not a.page_size:
+        return fetch(None, 0)
+    page = max(a.page, 1)
+    return {"items": fetch(a.page_size, (page - 1) * a.page_size), "total": count(), "page": page,
+            "page_size": a.page_size, **extra}
+
+
 def cmd_init_project(store: Store, a: argparse.Namespace) -> Any:
     envs = json.loads(a.environments) if a.environments else {}
     p = Project(name=a.name, workspace_path=str(Path(a.workspace).resolve()), environments=envs)
@@ -94,7 +105,11 @@ def cmd_lint(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_issues(store: Store, a: argparse.Namespace) -> Any:
-    return [asdict(i) for i in store.list_lint_issues(a.case)]
+    scope = {"project_id": a.project}
+    extra = {"levels": store.lint_level_counts(a.case, **scope)} if a.page_size else {}
+    return _paged(a, lambda limit, offset: [asdict(i) for i in store.list_lint_issues(
+                      a.case, **scope, level=a.level, limit=limit, offset=offset)],
+                  lambda: store.count_lint_issues(a.case, **scope, level=a.level), **extra)
 
 
 def cmd_apply_fix(store: Store, a: argparse.Namespace) -> Any:
@@ -138,9 +153,11 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_cases(store: Store, a: argparse.Namespace) -> Any:
-    cases = store.list_cases(a.project, type=a.type, priority=a.priority, execution_mode=a.execution_mode,
-                             status=a.status, lint_status=a.lint_status)
-    return [c.to_dict() for c in cases]
+    filters = {"query": a.query, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
+               "status": a.status, "lint_status": a.lint_status}
+    return _paged(a, lambda limit, offset: [c.to_dict() for c in store.list_cases(
+                      a.project, limit=limit, offset=offset, **filters)],
+                  lambda: store.count_cases(a.project, **filters))
 
 
 def cmd_link_requirement(store: Store, a: argparse.Namespace) -> Any:
@@ -313,7 +330,8 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_run_results(store: Store, a: argparse.Namespace) -> Any:
-    return [asdict(r) for r in store.list_run_results(a.run)]
+    return _paged(a, lambda limit, offset: [asdict(r) for r in store.list_run_results(a.run, limit=limit, offset=offset)],
+                  lambda: store.count_run_results(a.run))
 
 
 def cmd_propose_fix(store: Store, a: argparse.Namespace) -> Any:
@@ -324,13 +342,15 @@ def cmd_propose_fix(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_proposals(store: Store, a: argparse.Namespace) -> Any:
-    out = []
-    for prop in store.list_proposals(a.status):
-        d = asdict(prop)
-        if not a.full:
-            d.pop("original"), d.pop("proposed")
-        out.append(d)
-    return out
+    def fetch(limit: int | None, offset: int) -> list:
+        out = []
+        for prop in store.list_proposals(a.status, project_id=a.project, limit=limit, offset=offset):
+            d = asdict(prop)
+            if not a.full:
+                d.pop("original"), d.pop("proposed")
+            out.append(d)
+        return out
+    return _paged(a, fetch, lambda: store.count_proposals(a.status, project_id=a.project))
 
 
 def cmd_resolve_proposal(store: Store, a: argparse.Namespace) -> Any:
@@ -349,7 +369,9 @@ def cmd_add_review(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_reviews(store: Store, a: argparse.Namespace) -> Any:
-    return [asdict(r) for r in store.list_reviews(a.status)]
+    return _paged(a, lambda limit, offset: [asdict(r) for r in store.list_reviews(
+                      a.status, project_id=a.project, limit=limit, offset=offset)],
+                  lambda: store.count_reviews(a.status, project_id=a.project))
 
 
 def cmd_resolve_review(store: Store, a: argparse.Namespace) -> Any:
@@ -392,7 +414,8 @@ def cmd_confirm_attribution(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_attributions(store: Store, a: argparse.Namespace) -> Any:
-    return ops.list_attributions(store, a.project, a.pending)
+    return _paged(a, lambda limit, offset: ops.list_attributions(store, a.project, a.pending, limit=limit, offset=offset),
+                  lambda: ops.count_attributions(store, a.project, a.pending))
 
 
 def cmd_metrics(store: Store, a: argparse.Namespace) -> Any:
@@ -437,6 +460,16 @@ def build_parser() -> argparse.ArgumentParser:
         sp.set_defaults(fn=fn)
 
     req = {"required": True}
+
+    def positive(v: str) -> int:
+        n = int(v)
+        if n < 1:
+            raise argparse.ArgumentTypeError("必须是正整数")
+        return n
+
+    # 列表命令的分页参数：不传 --page-size 时返回完整列表
+    paging = ((("--page",), {"type": positive, "default": 1}),
+              (("--page-size",), {"type": positive, "help": "每页条数；指定后返回 {items, total, page, page_size}"}))
     add("init-project", cmd_init_project, (("--name",), req), (("--workspace",), req), (("--environments",), {}))
     add("list-projects", cmd_list_projects)
     add("parse-requirement", cmd_parse_requirement, (("--project",), req), (("--file",), req))
@@ -447,14 +480,15 @@ def build_parser() -> argparse.ArgumentParser:
         (("--column-map",), {}))
     add("lint", cmd_lint, (("--project",), req), (("--case-ids",), {}),
         (("--p0-threshold",), {"type": float, "default": 0.25}), (("--with-issues",), {"action": "store_true"}))
-    add("list-issues", cmd_list_issues, (("--case",), {}))
+    add("list-issues", cmd_list_issues, (("--case",), {}), (("--project",), {}), (("--level",), {}), *paging)
     add("apply-fix", cmd_apply_fix, (("--case",), req), (("--field",), req), (("--value",), req))
     add("export-excel", cmd_export_excel, (("--project",), req), (("--out",), req))
     add("create-case", cmd_create_case, (("--project",), req), (("--json",), req))
     add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
         (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))
-    add("list-cases", cmd_list_cases, (("--project",), req), *[((f"--{k}",), {}) for k in
-                                                               ("type", "priority", "execution-mode", "status", "lint-status")])
+    # 过滤值可用逗号分隔多个（如 --execution-mode ui,capture）；--query 匹配标题、用例 ID 与模块路径
+    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}),
+        *[((f"--{k}",), {}) for k in ("type", "priority", "execution-mode", "status", "lint-status")], *paging)
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
     add("route", cmd_route, (("--project",), req), (("--overwrite",), {"action": "store_true"}))
     add("generate-api-cases", cmd_generate_api_cases, (("--project",), req), (("--openapi",), req),
@@ -481,15 +515,15 @@ def build_parser() -> argparse.ArgumentParser:
     add("list-scripts", cmd_list_scripts, (("--case",), {}))
     add("save-run", cmd_save_run, (("--project",), req), (("--env",), req), (("--results-file",), req),
         (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}))
-    add("list-run-results", cmd_list_run_results, (("--run",), req))
+    add("list-run-results", cmd_list_run_results, (("--run",), req), *paging)
     add("propose-fix", cmd_propose_fix, (("--project",), req), (("--case",), req), (("--script",), req),
         (("--content-file",), req), (("--reason",), {}), (("--failure-type",), {"default": "script_error"}),
         (("--run",), {}))
-    add("list-proposals", cmd_list_proposals, (("--status",), {}), (("--full",), flag))
+    add("list-proposals", cmd_list_proposals, (("--status",), {}), (("--project",), {}), (("--full",), flag), *paging)
     add("resolve-proposal", cmd_resolve_proposal, (("--project",), req), (("--id",), req), (("--accept",), flag))
     add("add-review", cmd_add_review, (("--case",), req), (("--kind",), {"default": "visual"}),
         (("--description",), req), (("--evidence",), {}), (("--ai-verdict",), {}), (("--run",), {}))
-    add("list-reviews", cmd_list_reviews, (("--status",), {}))
+    add("list-reviews", cmd_list_reviews, (("--status",), {}), (("--project",), {}), *paging)
     add("resolve-review", cmd_resolve_review, (("--id",), req), (("--passed",), flag))
     # ---- 三期 ----
     failure_types = {"choices": sorted(ops.FAILURE_TYPES), "required": True}
@@ -501,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("set-attribution", cmd_set_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types),
         (("--source",), {"choices": ["rule", "agent"], "default": "agent"}), (("--reason",), {}))
     add("confirm-attribution", cmd_confirm_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types))
-    add("list-attributions", cmd_list_attributions, (("--project",), req), (("--pending",), flag))
+    add("list-attributions", cmd_list_attributions, (("--project",), req), (("--pending",), flag), *paging)
     add("metrics", cmd_metrics, (("--project",), req))
     add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
     add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))

@@ -116,7 +116,15 @@ aitest set-setting  --project <项目ID> --key monthly_token_budget --value 2000
 aitest metrics      --project <项目ID>
 ```
 
-桌面端「工程化」页集中展示这些内容，并可配置国内模型（百炼、DeepSeek、方舟）或私有化部署的 OpenAI 兼容服务。
+桌面端「工程化」页集中展示这些内容（按项目）。
+
+侧栏底部的「全局设置」对所有项目生效，不随项目保存：
+- **模型**：可添加多个模型（OpenAI、百炼、DeepSeek、方舟或私有化部署的 OpenAI 兼容服务），分别指定 agent 与视觉定位使用哪一个，并测试连通；API key 存系统钥匙串。
+- **运行环境**：Python 与 Codex 路径（默认 python3 与内置 Codex）、agent 单次任务 token 上限。环境变量 `AITEST_PYTHON`、`AITEST_CODEX_BIN`、`AITEST_TOKEN_LIMIT` 优先于这里的配置。
+- **外观**：跟随系统 / 浅色 / 深色。
+- **数据与关于**：版本号、数据目录与数据库位置。
+
+配置保存在数据目录的 `settings.json`，旧版本的模型配置会自动迁移。
 
 ## 当前进度
 
