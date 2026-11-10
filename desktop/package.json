@@ -97,7 +97,9 @@
         "dmg"
       ],
       "category": "public.app-category.developer-tools",
-      "identity": null
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "publish": null,
     "executableName": "aitest-desktop"

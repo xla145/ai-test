@@ -85,7 +85,8 @@ jobs:
         shell: bash
     env:
       VERSION: ${{ needs.version.outputs.version }}
-      # 未配置代码签名证书：macOS / Windows 安装包为未签名版本
+      # 未配置代码签名证书：Windows 安装包未签名；macOS 用 ad-hoc 签名（desktop/package.json 的
+      # mac.identity = "-"），否则 Apple 芯片上会提示"已损坏"且无法在「隐私与安全性」中放行
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
@@ -106,6 +107,12 @@ jobs:
           npm version "${VERSION}" -w desktop --no-git-tag-version --allow-same-version
           npm run build -w desktop
           cd desktop && npx electron-builder --publish never
+      - name: 校验 macOS 签名
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d desktop/release/mac*/*.app | head -n 1)
+          codesign --verify --deep --strict --verbose=2 "${app}"
+          codesign -dv "${app}" 2>&1 | grep -E "Signature|Identifier"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}
@@ -137,7 +144,10 @@ jobs:
 
           桌面端需要本机安装 Python 3.10+（引擎依赖已随安装包附带）。Codex 已内置（锁定版本），
           如需使用其他版本，可用 `AITEST_CODEX_BIN` 指定 codex 路径。
-          安装包未做代码签名：macOS 首次打开需在「系统设置 → 隐私与安全性」中允许，Windows 可能出现 SmartScreen 提示。
+          安装包未使用开发者证书签名（macOS 为 ad-hoc 签名、未公证）：
+          - macOS：首次打开被拦截后，到「系统设置 → 隐私与安全性」底部点「仍要打开」；
+            也可在终端执行 `xattr -dr com.apple.quarantine "/Applications/AI 测试客户端.app"` 后再打开。
+          - Windows：可能出现 SmartScreen 提示，点「更多信息 → 仍要运行」。
 
           ## 其他发布物
 
