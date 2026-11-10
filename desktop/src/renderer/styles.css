@@ -11,8 +11,18 @@ body {
   background: linear-gradient(135deg, #3b6ef5, #7a5af8); color: #fff; font-size: 16px;
 }
 .sider-section { padding: 0 12px; }
-.sider-footer { display: flex; gap: 4px; padding: 8px 12px 12px; }
-.sider-action.ant-btn { width: 36px; height: 36px; font-size: 16px; }
+.sider-footer { display: flex; align-items: center; gap: 0; padding: 10px 8px 12px; }
+.sider-action.ant-btn { width: 30px; height: 30px; font-size: 16px; flex-shrink: 0; }
+/* 当前 agent 模型：占据左侧剩余宽度，点击进入全局设置 */
+.sider-model {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px; margin-right: 2px;
+  border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; font: inherit;
+}
+.sider-model:hover { background: rgba(128, 128, 128, .1); }
+.sider-model-icon { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; flex-shrink: 0; font-size: 15px; }
+.sider-model-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.sider-model-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.sider-model-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .page { padding: 20px 24px 32px; overflow: auto; height: 100%; }
 .page-title { margin-bottom: 4px !important; }
 .diff { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6;

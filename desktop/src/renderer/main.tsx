@@ -3,7 +3,8 @@ import zhCN from "antd/locale/zh_CN";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { THEME_EVENT } from "./pages/SettingsPage";
+import type { GlobalSettingsView } from "../shared/ipc";
+import { SETTINGS_EVENT } from "./pages/SettingsPage";
 import "./styles.css";
 
 function usePrefersDark(): boolean {
@@ -24,9 +25,9 @@ function useThemeMode(): ThemeMode {
   const [mode, setMode] = useState<ThemeMode>("system");
   useEffect(() => {
     window.aitest.getGlobalSettings().then((v) => setMode(v.settings.general.theme), () => undefined);
-    const on = (e: Event) => setMode((e as CustomEvent<ThemeMode>).detail);
-    window.addEventListener(THEME_EVENT, on);
-    return () => window.removeEventListener(THEME_EVENT, on);
+    const on = (e: Event) => setMode((e as CustomEvent<GlobalSettingsView>).detail.settings.general.theme);
+    window.addEventListener(SETTINGS_EVENT, on);
+    return () => window.removeEventListener(SETTINGS_EVENT, on);
   }, []);
   return mode;
 }

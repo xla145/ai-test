@@ -33,8 +33,8 @@ import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
 import { useAction, useLoad } from "../hooks";
 
-/** 主题修改后通知根组件立即切换 */
-export const THEME_EVENT = "aitest:theme";
+/** 全局设置保存后广播（detail 为 GlobalSettingsView）：主题、侧栏当前模型据此立即刷新 */
+export const SETTINGS_EVENT = "aitest:settings";
 
 const SOURCE: Record<string, string> = { env: "环境变量", settings: "全局设置", bundled: "内置", default: "默认" };
 
@@ -48,7 +48,7 @@ export function SettingsPage() {
     run(async () => {
       const next = await api().saveGlobalSettings(settings, keys);
       view.setData(next);
-      window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: next.settings.general.theme }));
+      window.dispatchEvent(new CustomEvent<GlobalSettingsView>(SETTINGS_EVENT, { detail: next }));
       return next;
     }, success);
 

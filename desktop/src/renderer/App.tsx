@@ -10,7 +10,9 @@ import {
   HistoryOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RobotOutlined,
   SafetyCertificateOutlined,
+  WarningFilled,
   SettingOutlined,
 } from "@ant-design/icons";
 import {
@@ -34,7 +36,7 @@ import {
   theme,
 } from "antd";
 import { useCallback, useEffect, useState } from "react";
-import type { ApprovalRequest } from "../shared/ipc";
+import type { ApprovalRequest, GlobalSettingsView } from "../shared/ipc";
 import { api, type Project } from "./api";
 import { useAction, useLoad } from "./hooks";
 import { ApiPage } from "./pages/ApiPage";
@@ -42,7 +44,7 @@ import { CasesPage } from "./pages/CasesPage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
 import { RunPage } from "./pages/RunPage";
-import { SettingsPage } from "./pages/SettingsPage";
+import { SETTINGS_EVENT, SettingsPage } from "./pages/SettingsPage";
 import { UiPage } from "./pages/UiPage";
 
 const { Sider, Header, Content } = Layout;
@@ -51,6 +53,20 @@ interface ActivityItem {
   time: string;
   method: string;
   detail: string;
+}
+
+/** 侧栏底部显示的当前 agent 模型；全局设置保存后立即刷新 */
+function useAgentModel(): { name: string; hasKey: boolean } | undefined {
+  const [view, setView] = useState<GlobalSettingsView>();
+  useEffect(() => {
+    api().getGlobalSettings().then(setView, () => undefined);
+    const on = (e: Event) => setView((e as CustomEvent<GlobalSettingsView>).detail);
+    window.addEventListener(SETTINGS_EVENT, on);
+    return () => window.removeEventListener(SETTINGS_EVENT, on);
+  }, []);
+  if (!view) return undefined;
+  const m = view.settings.models.find((x) => x.id === view.settings.agentModelId);
+  return m && { name: m.name, hasKey: Boolean(view.hasKey[m.id]) };
 }
 
 /** Codex 事件 → 可读的活动记录 */
@@ -82,6 +98,7 @@ export function App() {
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
   const [showSettings, setShowSettings] = useState(false);
+  const agentModel = useAgentModel();
   const current = projects.find((p) => p.id === currentId) ?? projects[0];
 
   useEffect(() => {
@@ -138,6 +155,23 @@ export function App() {
             items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
           />
           <div className="sider-footer" style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
+            <Tooltip placement="topLeft" title={agentModel?.hasKey === false
+              ? "该模型还没有保存 API key，点击前往全局设置"
+              : "当前 agent 使用的模型，点击前往全局设置切换"}>
+              <button type="button" className="sider-model" onClick={() => setShowSettings(true)}
+                style={{ color: token.colorText }}>
+                <span className="sider-model-icon" style={{ background: token.colorPrimaryBg, color: token.colorPrimary }}>
+                  <RobotOutlined />
+                </span>
+                <span className="sider-model-text">
+                  <span style={{ color: token.colorTextTertiary, fontSize: 12 }}>agent 模型</span>
+                  <span className="sider-model-row">
+                    <span className="sider-model-name">{agentModel?.name ?? "—"}</span>
+                    {agentModel?.hasKey === false && <WarningFilled style={{ color: token.colorWarning, flexShrink: 0 }} />}
+                  </span>
+                </span>
+              </button>
+            </Tooltip>
             <Tooltip title="全局设置" placement="top">
               <Button type="text" className="sider-action" aria-label="全局设置" icon={<SettingOutlined />}
                 style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
