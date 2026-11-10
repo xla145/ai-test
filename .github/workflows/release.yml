@@ -146,7 +146,7 @@ jobs:
           如需使用其他版本，可用 `AITEST_CODEX_BIN` 指定 codex 路径。
           安装包未使用开发者证书签名（macOS 为 ad-hoc 签名、未公证）：
           - macOS：首次打开被拦截后，到「系统设置 → 隐私与安全性」底部点「仍要打开」；
-            也可在终端执行 `xattr -dr com.apple.quarantine "/Applications/AI 测试客户端.app"` 后再打开。
+            也可在终端执行 `xattr -dr com.apple.quarantine "/Applications/aitest-desktop.app"` 后再打开。
           - Windows：可能出现 SmartScreen 提示，点「更多信息 → 仍要运行」。
 
           ## 其他发布物
