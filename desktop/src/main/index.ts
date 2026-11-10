@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { userInfo } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
@@ -23,7 +24,7 @@ import {
 } from "./settings.js";
 import { Orchestrator } from "./orchestrator.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
-import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo } from "../shared/ipc.js";
+import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo } from "../shared/ipc.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -341,6 +342,7 @@ function registerIpc(orch: Orchestrator): void {
       return { python: py, codex: cx };
     },
     openDataDir: () => shell.openPath(paths.data()),
+    getUserInfo: () => localUser(),
     resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
     listReviews: (status?: string) => orch.listReviews(status),
     resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
@@ -364,6 +366,22 @@ function registerIpc(orch: Orchestrator): void {
     pendingApprovals.get(id)?.(accept);
     pendingApprovals.delete(id);
   });
+}
+
+const gitConfig = (key: string) => new Promise<string>((done) =>
+  execFile("git", ["config", "--global", key], { timeout: 5_000, windowsHide: true }, (err, out) => done(err ? "" : out.trim())));
+
+/** 本机用户：git 全局配置的 user.name / user.email，未配置时用系统用户名 */
+async function localUser(): Promise<UserInfo> {
+  const [name, email] = await Promise.all([gitConfig("user.name"), gitConfig("user.email")]);
+  if (name) return { name, ...(email ? { email } : {}), source: "git" };
+  let system = "";
+  try {
+    system = userInfo().username;
+  } catch {
+    // 个别环境下取不到系统用户
+  }
+  return { name: system || "本机用户", ...(email ? { email } : {}), source: "system" };
 }
 
 function globalSettingsView() {

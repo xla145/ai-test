@@ -104,6 +104,13 @@ export interface ModelCheckResult {
   models?: string[];
 }
 
+/** 侧栏显示的本机用户：git 全局配置优先，未配置时用系统用户名 */
+export interface UserInfo {
+  name: string;
+  email?: string;
+  source: "git" | "system";
+}
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
   createProject(name: string, workspace: string, environments: Record<string, unknown>): Promise<unknown>;
@@ -149,6 +156,7 @@ export interface AitestApi {
   /** 用已保存的配置测试某个模型的连通性 */
   checkModel(modelId: string): Promise<ModelCheckResult>;
   checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck }>;
+  getUserInfo(): Promise<UserInfo>;
   openDataDir(): Promise<string>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;

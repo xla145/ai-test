@@ -213,6 +213,7 @@ const mockApi: AitestApi = {
   },
   checkRuntime: () => delay({ python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" } }, 500),
   openDataDir: () => delay(""),
+  getUserInfo: () => delay({ name: "张晓", email: "zhangxiao@example.com", source: "git" as const }),
   checkModel: (id) => delay(id !== "vision"
     ? { ok: true, latencyMs: 312, detail: "服务可用" }
     : { ok: false, latencyMs: 15003, detail: "无法连接 http://10.0.0.8:8000/v1：timeout" }, 700),
