@@ -16,8 +16,8 @@ const methods = [
   "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
   "listProposals", "resolveProposal", "listReviews", "resolveReview",
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
-  "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getModelSettings",
-  "setModelSettings", "checkModel", "hideTestView",
+  "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",
+  "saveGlobalSettings", "checkModel", "checkRuntime", "openDataDir", "hideTestView",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
 ] as const;
 

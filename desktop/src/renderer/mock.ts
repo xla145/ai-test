@@ -2,7 +2,7 @@
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
  */
-import type { AitestApi, ApprovalRequest, Page, PageQuery } from "../shared/ipc";
+import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -84,6 +84,32 @@ const attributions = [
   { run_id: "run_5c1e", case_id: "tc_8f2a1c0e08", auto_type: "product_bug", source: "agent", reason: "停用后接口仍返回 200，未校验授权状态" },
   { run_id: "run_5c1e", case_id: "tc_8f2a1c0e04", auto_type: "environment", source: "rule", reason: "确定性规则判定" },
 ];
+
+let globalSettings: GlobalSettings = {
+  version: 2,
+  models: [
+    { id: "agent", name: "百炼 qwen-max", preset: "dashscope", model: "qwen-max" },
+    { id: "vision", name: "私有化 Qwen3-VL", preset: "private", baseUrl: "http://10.0.0.8:8000/v1", model: "Qwen3-VL-8B" },
+    { id: "m_ds", name: "DeepSeek", preset: "deepseek", model: "deepseek-chat" },
+  ],
+  agentModelId: "agent",
+  visionModelId: "vision",
+  general: { theme: "system" },
+};
+const modelKeys: Record<string, boolean> = { agent: true, m_ds: true };
+const globalView = (): GlobalSettingsView => ({
+  settings: globalSettings,
+  hasKey: Object.fromEntries(globalSettings.models.map((m) => [m.id, Boolean(modelKeys[m.id])])),
+  runtime: {
+    appVersion: "0.3.5", dataDir: "/Users/demo/Library/Application Support/aitest-desktop",
+    dbPath: "/Users/demo/Library/Application Support/aitest-desktop/aitest.db",
+    python: { path: globalSettings.general.pythonPath || "python3", source: globalSettings.general.pythonPath ? "settings" : "default" },
+    codex: globalSettings.general.codexPath ? { path: globalSettings.general.codexPath, source: "settings" }
+      : { path: "/Applications/aitest-desktop.app/Contents/Resources/codex/bin/codex", source: "bundled" },
+    taskTokenLimit: { value: globalSettings.general.taskTokenLimit ?? 200000, source: globalSettings.general.taskTokenLimit ? "settings" : "default" },
+    envOverrides: [],
+  },
+});
 
 const listeners: { approval?: (r: ApprovalRequest) => void; event?: (e: { method: string; params: unknown }) => void } = {};
 
@@ -177,9 +203,17 @@ const mockApi: AitestApi = {
     { id: "ark", name: "火山方舟（豆包）", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "", visionFamily: "doubao-vision", note: "模型名填方舟上的推理接入点 ID" },
     { id: "private", name: "私有化部署（OpenAI 兼容）", baseUrl: "", model: "", visionFamily: "qwen-vl", note: "如 vLLM / SGLang 部署的 Qwen3、Qwen3-VL" },
   ]),
-  getModelSettings: () => delay({ agent: { preset: "dashscope" }, vision: { preset: "private", baseUrl: "http://10.0.0.8:8000/v1", model: "Qwen3-VL-8B" }, hasAgentKey: true, hasVisionKey: false }),
-  setModelSettings: (m) => delay(m),
-  checkModel: (slot) => delay(slot === "agent"
+  getGlobalSettings: () => delay(globalView()),
+  saveGlobalSettings: async (s, keys) => {
+    if (s.models.some((m, i) => s.models.findIndex((x) => x.name === m.name) !== i)) throw new Error("模型名称重复");
+    for (const id of Object.keys(modelKeys)) if (!s.models.some((m) => m.id === id)) delete modelKeys[id];
+    for (const [id, k] of Object.entries(keys ?? {})) if (k) modelKeys[id] = true;
+    globalSettings = structuredClone(s);
+    return delay(globalView());
+  },
+  checkRuntime: () => delay({ python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" } }, 500),
+  openDataDir: () => delay(""),
+  checkModel: (id) => delay(id !== "vision"
     ? { ok: true, latencyMs: 312, detail: "服务可用" }
     : { ok: false, latencyMs: 15003, detail: "无法连接 http://10.0.0.8:8000/v1：timeout" }, 700),
   pickFile: () => delay("/Users/demo/Downloads/特征中心v4.4用例.xlsx"),

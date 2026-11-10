@@ -11,6 +11,7 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import {
   Badge,
@@ -41,6 +42,7 @@ import { CasesPage } from "./pages/CasesPage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
 import { RunPage } from "./pages/RunPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { UiPage } from "./pages/UiPage";
 
 const { Sider, Header, Content } = Layout;
@@ -76,6 +78,8 @@ export function App() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [viewVisible, setViewVisible] = useState(false);
+  // 全局设置不属于任何项目，单独一个视图
+  const [showSettings, setShowSettings] = useState(false);
   const current = projects.find((p) => p.id === currentId) ?? projects[0];
 
   useEffect(() => {
@@ -122,11 +126,18 @@ export function App() {
           <Menu
             mode="inline"
             style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 8 }}
-            selectedKeys={current ? [current.id] : []}
-            onClick={(e) => setCurrentId(e.key)}
+            selectedKeys={current && !showSettings ? [current.id] : []}
+            onClick={(e) => {
+              setCurrentId(e.key);
+              setShowSettings(false);
+            }}
             items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
           />
           <div className="sider-section" style={{ paddingBottom: 16 }}>
+            <Button block icon={<SettingOutlined />} type={showSettings ? "primary" : "default"} ghost={showSettings}
+              style={{ marginBottom: 8 }} onClick={() => setShowSettings(true)}>
+              全局设置
+            </Button>
             <Button block icon={<HistoryOutlined />} onClick={() => setActivityOpen(true)}>
               <Badge count={activity.length} size="small" overflowCount={99} offset={[8, -2]}>
                 <span>agent 活动</span>
@@ -137,7 +148,7 @@ export function App() {
       </Sider>
 
       <Layout>
-        {current && (
+        {current && !showSettings && (
           <Header style={{ padding: "0 24px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
               <Flex align="baseline" gap={12} style={{ minWidth: 0 }}>
@@ -162,7 +173,9 @@ export function App() {
           </Header>
         )}
         <Content style={{ overflow: "hidden" }}>
-          {current ? (
+          {showSettings ? (
+            <div className="page"><SettingsPage /></div>
+          ) : current ? (
             <Tabs
               activeKey={tab}
               onChange={setTab}
@@ -181,7 +194,7 @@ export function App() {
         </Content>
       </Layout>
 
-      <NewProjectModal open={creating} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); }} />
+      <NewProjectModal open={creating} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); setShowSettings(false); }} />
 
       <Modal
         open={!!approval}
@@ -226,7 +239,8 @@ function NewProjectModal({ open, onClose, onCreated }: { open: boolean; onClose:
     if (dir) form.setFieldValue("workspace", dir);
   };
   const submit = async () => {
-    const v = await form.validateFields();
+    const v = await form.validateFields().catch(() => undefined);
+    if (!v) return;
     const p = await run(() => api().createProject(v.name, v.workspace, v.baseUrl ? { [v.env || "test"]: { base_url: v.baseUrl } } : {}) as Promise<Project>, "项目已创建");
     if (p) {
       form.resetFields();

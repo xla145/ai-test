@@ -29,6 +29,81 @@ export interface CaseQuery extends PageQuery {
   filters?: Record<string, string | undefined>;
 }
 
+// ---- 全局配置（不随项目） ----
+
+/** 一个模型服务：OpenAI 兼容接口；API key 存钥匙串，不在这里 */
+export interface ModelEntry {
+  id: string;
+  /** 显示名，如「百炼 qwen-max」 */
+  name: string;
+  /** 服务预设 id（openai / dashscope / deepseek / ark / private） */
+  preset: string;
+  /** 留空用预设地址 */
+  baseUrl?: string;
+  /** 留空用预设的默认模型 */
+  model?: string;
+}
+
+export interface GeneralSettings {
+  theme: "system" | "light" | "dark";
+  /** 空表示 python3 */
+  pythonPath?: string;
+  /** 空表示内置 Codex */
+  codexPath?: string;
+  /** agent 单次任务 token 上限；项目可在「工程化」中设置更低的值 */
+  taskTokenLimit?: number;
+}
+
+export interface GlobalSettings {
+  version: 2;
+  models: ModelEntry[];
+  agentModelId: string;
+  /** 不设置则不启用视觉定位（Midscene） */
+  visionModelId?: string;
+  general: GeneralSettings;
+}
+
+export interface RuntimeInfo {
+  appVersion: string;
+  dataDir: string;
+  dbPath: string;
+  python: { path: string; source: "env" | "settings" | "bundled" | "default" };
+  codex: { path: string; source: "env" | "settings" | "bundled" | "default" };
+  taskTokenLimit: { value: number; source: "env" | "settings" | "bundled" | "default" };
+  /** 生效中的环境变量覆盖（优先于全局配置） */
+  envOverrides: string[];
+}
+
+export interface RuntimeCheck {
+  ok: boolean;
+  /** 版本输出或错误原因 */
+  detail: string;
+}
+
+export interface GlobalSettingsView {
+  settings: GlobalSettings;
+  /** 各模型是否已在钥匙串保存 API key */
+  hasKey: Record<string, boolean>;
+  runtime: RuntimeInfo;
+}
+
+export interface ModelPresetInfo {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  visionModel?: string;
+  visionFamily?: string;
+  note: string;
+}
+
+export interface ModelCheckResult {
+  ok: boolean;
+  latencyMs: number;
+  detail: string;
+  models?: string[];
+}
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
   createProject(name: string, workspace: string, environments: Record<string, unknown>): Promise<unknown>;
@@ -67,10 +142,14 @@ export interface AitestApi {
   exportWorkspace(projectId: string): Promise<any>;
   importWorkspace(dir: string): Promise<any>;
   initCi(projectId: string, provider: "github" | "gitlab", toolRepo: string, env: string): Promise<string>;
-  modelPresets(): Promise<any[]>;
-  getModelSettings(): Promise<any>;
-  setModelSettings(models: unknown, keys?: { agent?: string; vision?: string }): Promise<any>;
-  checkModel(slot: "agent" | "vision"): Promise<any>;
+  modelPresets(): Promise<ModelPresetInfo[]>;
+  getGlobalSettings(): Promise<GlobalSettingsView>;
+  /** keys：本次填写的 API key（按模型 id），留空的不修改 */
+  saveGlobalSettings(settings: GlobalSettings, keys?: Record<string, string>): Promise<GlobalSettingsView>;
+  /** 用已保存的配置测试某个模型的连通性 */
+  checkModel(modelId: string): Promise<ModelCheckResult>;
+  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck }>;
+  openDataDir(): Promise<string>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   openTestPage(url: string): Promise<void>;

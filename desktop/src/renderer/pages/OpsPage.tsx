@@ -1,10 +1,8 @@
 import {
-  ApiOutlined,
   CheckCircleFilled,
   CloseCircleFilled,
   CloudDownloadOutlined,
   CloudUploadOutlined,
-  ExperimentOutlined,
   GithubOutlined,
 } from "@ant-design/icons";
 import {
@@ -26,7 +24,6 @@ import {
   Table,
   Tabs,
   Tag,
-  Tooltip,
   Typography,
 } from "antd";
 import { useEffect, useState } from "react";
@@ -40,7 +37,7 @@ const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}
 export function OpsPage({ project }: { project: Project }) {
   return (
     <>
-      <PageHeader title="工程化" description="验证指标与门禁、失败归因确认、模型用量与预算、团队共享与 CI、模型服务配置。" />
+      <PageHeader title="工程化" description="验证指标与门禁、失败归因确认、模型用量与预算、团队共享与 CI。模型服务在「全局设置」中配置。" />
       <Tabs
         tabPosition="left"
         items={[
@@ -48,7 +45,6 @@ export function OpsPage({ project }: { project: Project }) {
           { key: "attribution", label: "失败归因", children: <Attributions project={project} /> },
           { key: "usage", label: "用量与预算", children: <Usage project={project} /> },
           { key: "share", label: "团队共享与 CI", children: <Share project={project} /> },
-          { key: "models", label: "模型服务", children: <Models /> },
         ]}
       />
     </>
@@ -239,73 +235,5 @@ function Share({ project }: { project: Project }) {
         </Card>
       </Col>
     </Row>
-  );
-}
-
-function Models() {
-  const presets = useLoad(() => api().modelPresets(), []);
-  const settings = useLoad(() => api().getModelSettings(), []);
-  const [cfg, setCfg] = useState<any>();
-  const [keys, setKeys] = useState({ agent: "", vision: "" });
-  const [check, setCheck] = useState<Record<string, any>>({});
-  const { busy, run } = useAction();
-  useEffect(() => setCfg(settings.data), [settings.data]);
-  if (!cfg || !presets.data) return <Card loading />;
-
-  const slot = (kind: "agent" | "vision", title: string, hint: string) => {
-    const value = cfg[kind];
-    const preset = presets.data!.find((p: any) => p.id === value?.preset);
-    const hasKey = cfg[kind === "agent" ? "hasAgentKey" : "hasVisionKey"];
-    return (
-      <Card size="small" title={title} extra={<Typography.Text type="secondary">{hint}</Typography.Text>} style={{ marginBottom: 16 }}>
-        <Form layout="vertical">
-          <Row gutter={8}>
-            <Col span={8}>
-              <Form.Item label="服务">
-                <Select value={value?.preset ?? ""} onChange={(v) => setCfg({ ...cfg, [kind]: v ? { preset: v } : undefined })}
-                  options={[...(kind === "vision" ? [{ value: "", label: "不启用" }] : []),
-                    ...presets.data!.filter((p: any) => kind === "agent" || p.visionFamily).map((p: any) => ({ value: p.id, label: p.name }))]} />
-              </Form.Item>
-            </Col>
-            {value && <>
-              <Col span={8}><Form.Item label="服务地址"><Input placeholder={preset?.baseUrl || "http://…/v1"} value={value.baseUrl ?? ""} onChange={(e) => setCfg({ ...cfg, [kind]: { ...value, baseUrl: e.target.value } })} /></Form.Item></Col>
-              <Col span={8}><Form.Item label="模型"><Input placeholder={(kind === "agent" ? preset?.model : preset?.visionModel) || "模型名"} value={value.model ?? ""} onChange={(e) => setCfg({ ...cfg, [kind]: { ...value, model: e.target.value } })} /></Form.Item></Col>
-              <Col span={16}>
-                <Form.Item label="API key" extra={hasKey ? "已保存在钥匙串，留空则不修改" : undefined}>
-                  <Input.Password value={keys[kind]} placeholder={hasKey ? "••••••••" : "API key"} onChange={(e) => setKeys({ ...keys, [kind]: e.target.value })} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item label=" ">
-                  <Button block icon={<ApiOutlined />} loading={busy} onClick={() => run(async () => setCheck({ ...check, [kind]: await api().checkModel(kind) }))}>测试连通</Button>
-                </Form.Item>
-              </Col>
-            </>}
-          </Row>
-          {preset?.note && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{preset.note}</Typography.Text>}
-          {check[kind] && (
-            <Alert style={{ marginTop: 8 }} type={check[kind].ok ? "success" : "error"} showIcon
-              message={<>{check[kind].detail}<Typography.Text type="secondary">（{check[kind].latencyMs} ms）</Typography.Text></>} />
-          )}
-        </Form>
-      </Card>
-    );
-  };
-
-  return (
-    <>
-      <Alert style={{ marginBottom: 16 }} showIcon icon={<ExperimentOutlined />} type="info"
-        message="非 GPT 模型效果需要实测：先测试连通、确认合规，再在小范围用例上验证。保存后下一个 agent 任务按新配置启动。" />
-      {slot("agent", "agent 模型", "用例设计、失败归因，建议强模型")}
-      {slot("vision", "视觉模型", "仅探索与自愈时的元素定位")}
-      <Tooltip title="API key 存入系统钥匙串，只注入对应进程">
-        <Button type="primary" loading={busy} onClick={() => run(async () => {
-          const { hasAgentKey: _a, hasVisionKey: _v, ...models } = cfg;
-          await api().setModelSettings(models, { agent: keys.agent || undefined, vision: keys.vision || undefined });
-          setKeys({ agent: "", vision: "" });
-          await settings.reload();
-        }, "已保存")}>保存模型配置</Button>
-      </Tooltip>
-    </>
   );
 }

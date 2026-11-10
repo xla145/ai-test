@@ -3,6 +3,7 @@ import zhCN from "antd/locale/zh_CN";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { THEME_EVENT } from "./pages/SettingsPage";
 import "./styles.css";
 
 function usePrefersDark(): boolean {
@@ -16,8 +17,24 @@ function usePrefersDark(): boolean {
   return dark;
 }
 
+type ThemeMode = "system" | "light" | "dark";
+
+/** 全局设置中的主题：启动时读取，设置页保存后通过事件立即切换 */
+function useThemeMode(): ThemeMode {
+  const [mode, setMode] = useState<ThemeMode>("system");
+  useEffect(() => {
+    window.aitest.getGlobalSettings().then((v) => setMode(v.settings.general.theme), () => undefined);
+    const on = (e: Event) => setMode((e as CustomEvent<ThemeMode>).detail);
+    window.addEventListener(THEME_EVENT, on);
+    return () => window.removeEventListener(THEME_EVENT, on);
+  }, []);
+  return mode;
+}
+
 function Root() {
-  const dark = usePrefersDark();
+  const prefersDark = usePrefersDark();
+  const mode = useThemeMode();
+  const dark = mode === "system" ? prefersDark : mode === "dark";
   return (
     <ConfigProvider
       locale={zhCN}
