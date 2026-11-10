@@ -138,20 +138,18 @@ export function App() {
             items={projects.map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name }))}
           />
           <div className="sider-footer" style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
-            <Button type="text" className="sider-action" icon={<SettingOutlined />}
-              style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
-              onClick={() => setShowSettings(true)}>
-              全局设置
-            </Button>
-            <Tooltip title={unread ? `${unread} 条新活动` : undefined}>
-              <Button type="text" className="sider-action"
+            <Tooltip title="全局设置" placement="top">
+              <Button type="text" className="sider-action" aria-label="全局设置" icon={<SettingOutlined />}
+                style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
+                onClick={() => setShowSettings(true)} />
+            </Tooltip>
+            <Tooltip title={unread ? `agent 活动（${unread} 条新活动）` : "agent 活动"} placement="top">
+              <Button type="text" className="sider-action" aria-label="agent 活动"
                 icon={<Badge dot={unread > 0} offset={[-1, 2]}><HistoryOutlined /></Badge>}
                 onClick={() => {
                   setActivityOpen(true);
                   setUnread(0);
-                }}>
-                agent 活动
-              </Button>
+                }} />
             </Tooltip>
           </div>
         </Flex>

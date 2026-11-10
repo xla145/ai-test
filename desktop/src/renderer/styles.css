@@ -11,8 +11,8 @@ body {
   background: linear-gradient(135deg, #3b6ef5, #7a5af8); color: #fff; font-size: 16px;
 }
 .sider-section { padding: 0 12px; }
-.sider-footer { display: flex; gap: 4px; padding: 8px 8px 12px; }
-.sider-action { flex: 1; min-width: 0; height: 36px; padding-inline: 6px; }
+.sider-footer { display: flex; gap: 4px; padding: 8px 12px 12px; }
+.sider-action.ant-btn { width: 36px; height: 36px; font-size: 16px; }
 .page { padding: 20px 24px 32px; overflow: auto; height: 100%; }
 .page-title { margin-bottom: 4px !important; }
 .diff { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6;
