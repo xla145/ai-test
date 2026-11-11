@@ -62,9 +62,14 @@ export function AppPage({ project }: { project: Project }) {
           message={`环境「${env}」没有配置 ${PLATFORM_LABEL[platform]} App`}
           description={`点击顶部项目名旁的设置按钮，在执行环境中填写${platform === "ios" ? " iOS Bundle ID" : " Android 包名"}。`} />
       )}
+      {platform === "ios" && (
+        <Alert type="info" showIcon style={{ marginBottom: 16 }}
+          message="iOS 回归目前只能在模拟器上执行"
+          description="Maestro 暂不支持 iOS 真机（Android 真机可以）。探索可以用 Pinky 在 iPhone 真机上进行，生成的脚本在 iOS 模拟器上回归。" />
+      )}
       {tools.data && !tools.data.maestro.ok && (
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="未检测到 Maestro，无法执行 App 回归"
-          description="安装 Maestro（maestro.dev）后，在「全局设置 → 运行环境」中确认路径。测 iOS 需要 Mac 与 Xcode 模拟器。" />
+          description="安装 Maestro（maestro.dev，依赖 Java 17+）后，在「全局设置 → 运行环境」中确认路径。测 iOS 需要 Mac 与 Xcode 模拟器。" />
       )}
 
       {result && (

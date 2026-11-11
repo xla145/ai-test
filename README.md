@@ -126,7 +126,7 @@ aitest metrics      --project <项目ID>
   走通后写成 Maestro 脚本 `scripts/app/<用例ID>.yaml`（`appId: ${APP_ID}`，Android 与 iOS 共用），由 `app` MCP 服务保存并试跑。
 - **回归**：「App 测试」页选择平台、环境与设备，用 [Maestro](https://maestro.dev) 执行脚本；失败按规则归因（设备未连接、App 未安装等记为环境问题）。
 - **配置**：在执行环境中填写 Android 包名 / iOS Bundle ID；在「全局设置 → 运行环境」中配置 Maestro 路径并启用 Pinky。
-  Maestro 与 Pinky 需另行安装；测 iOS 需要 Mac 与 Xcode。角色账号在脚本中以变量引用（如 `${ROLE_ADMIN_USERNAME}`，由 `app.app_info` 列出）。
+  Maestro（依赖 Java 17+）与 Pinky 需另行安装；Maestro 暂不支持 iOS 真机，iOS 回归在模拟器上执行（需要 Mac 与 Xcode），Android 真机与模拟器都支持。角色账号在脚本中以变量引用（如 `${ROLE_ADMIN_USERNAME}`，由 `app.app_info` 列出）。
 - 用例类型 `app`，或标题 / 步骤含 App端、Android、iOS 等时自动归为「App」执行方式。
 
 ### 大项目与子项目

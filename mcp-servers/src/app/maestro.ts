@@ -97,6 +97,8 @@ export function maestroArgs(opts: Pick<AppRunOptions, "device" | "platform" | "a
   const vars: Record<string, string> = { APP_ID: opts.appId, PLATFORM: opts.platform, ...roleVariables(opts.roles) };
   return [
     ...(opts.device ? ["--device", opts.device] : []),
+    // 同时连着 Android 设备与 iOS 模拟器时，按平台挑设备（未指定设备时 Maestro 用该平台的第一台）
+    "--platform", opts.platform,
     "test",
     "--format", "junit",
     "--output", junit,
@@ -115,7 +117,10 @@ const attr = (tag: string, name: string) => {
   return m ? unescape(m[1]) : undefined;
 };
 
-/** 解析 Maestro 的 JUnit 报告；脚本名即用例 ID（normalizeFlow 保证），否则从名字中找已知用例 ID */
+/**
+ * 解析 Maestro 的 JUnit 报告。testcase 的 name 为 flow 名（normalizeFlow 写成用例 ID）；
+ * 对不上时用 file 属性的文件名（scripts/app/<用例ID>.yaml）。失败信息在 <failure> 的文本中。
+ */
 export function parseJunit(xml: string, caseIds: string[] = []): AppCaseResult[] {
   const results: AppCaseResult[] = [];
   const re = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
@@ -123,7 +128,9 @@ export function parseJunit(xml: string, caseIds: string[] = []): AppCaseResult[]
     const tag = m[1];
     const body = m[3] ?? "";
     const name = attr(tag, "name") ?? attr(tag, "id") ?? "";
-    const caseId = caseIds.find((id) => name === id) ?? caseIds.find((id) => name.includes(id)) ?? name.split(/\s/)[0];
+    const fileId = (attr(tag, "file") ?? "").split(/[\\/]/).pop()?.replace(/\.ya?ml$/, "") ?? "";
+    const caseId = caseIds.find((id) => name === id) ?? caseIds.find((id) => fileId === id)
+      ?? caseIds.find((id) => name.includes(id)) ?? (fileId || name.split(/\s/)[0]);
     let status: AppCaseResult["status"] = "passed";
     let message = "";
     const fail = /<(failure|error|skipped)\b([^>]*?)(\/>|>([\s\S]*?)<\/\1>)/.exec(body);

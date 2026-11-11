@@ -33,7 +33,7 @@ describe("maestro flows", () => {
   it("builds the maestro command line", () => {
     expect(maestroArgs({ platform: "ios", appId: "com.x", device: "UDID-1", roles: [{ role: "admin", username: "u", password: "p" }] },
       ["/ws/scripts/app/tc_1.yaml"], "/out/junit.xml", "/out/debug")).toEqual([
-      "--device", "UDID-1", "test", "--format", "junit", "--output", "/out/junit.xml", "--debug-output", "/out/debug",
+      "--device", "UDID-1", "--platform", "ios", "test", "--format", "junit", "--output", "/out/junit.xml", "--debug-output", "/out/debug",
       "-e", "APP_ID=com.x", "-e", "PLATFORM=ios", "-e", "ROLE_ADMIN_USERNAME=u", "-e", "ROLE_ADMIN_PASSWORD=p",
       "/ws/scripts/app/tc_1.yaml",
     ]);
@@ -44,11 +44,14 @@ describe("maestro flows", () => {
       <testcase id="tc_1" name="tc_1" classname="tc_1" time="12.5"/>
       <testcase name="tc_2" time="3"><failure message="Element not found: Text matching regex: 已停用">stack &amp; more</failure></testcase>
       <testcase name="tc_3 标题" time="1"><error message="Device emulator-5554 not found"/></testcase>
+      <testcase name="下单流程" file="/ws/scripts/app/tc_4.yaml" status="ERROR" time="2"><failure>Element not found: Text matching regex: 成功</failure></testcase>
     </testsuite></testsuites>`;
-    expect(parseJunit(xml, ["tc_1", "tc_2", "tc_3"])).toEqual([
+    expect(parseJunit(xml, ["tc_1", "tc_2", "tc_3", "tc_4"])).toEqual([
       { case_id: "tc_1", status: "passed", duration: 12.5, message: "", evidence_paths: [], reviews: [] },
       { case_id: "tc_2", status: "failed", duration: 3, message: "Element not found: Text matching regex: 已停用\nstack & more", evidence_paths: [], reviews: [] },
       { case_id: "tc_3", status: "error", duration: 1, message: "Device emulator-5554 not found", evidence_paths: [], reviews: [] },
+      // Maestro 实际的写法：失败信息是 <failure> 的文本；名字对不上时按 file 属性对应用例
+      { case_id: "tc_4", status: "failed", duration: 2, message: "Element not found: Text matching regex: 成功", evidence_paths: [], reviews: [] },
     ]);
   });
 
@@ -68,7 +71,7 @@ const flows = a.filter((x) => x.endsWith(".yaml")).map((f) => path.basename(f, "
 fs.mkdirSync(path.join(debug, "tc_bad"), { recursive: true });
 fs.writeFileSync(path.join(debug, "tc_bad", "screenshot-❌-tc_bad.png"), "png");
 fs.writeFileSync(out, "<testsuites><testsuite>" + flows.map((f) => f === "tc_bad"
-  ? '<testcase name="' + f + '" time="2"><failure message="Assertion is false: &quot;已停用&quot; is visible"/></testcase>'
+  ? '<testcase name="' + f + '" time="2"><failure>Assertion is false: &quot;已停用&quot; is visible</failure></testcase>'
   : '<testcase name="' + f + '" time="5"/>').join("") + "</testsuite></testsuites>");
 process.exit(flows.includes("tc_bad") ? 1 : 0);
 `);
@@ -83,7 +86,7 @@ process.exit(flows.includes("tc_bad") ? 1 : 0);
     expect(bad.message).toContain('"已停用" is visible');
     expect(bad.evidence_paths[0]).toMatch(/^reports\/app-android-.*\/debug\/tc_bad\/.*\.png$/);
     const args = JSON.parse(readFileSync(join(ws, "args.json"), "utf8")) as string[];
-    expect(args.slice(0, 3)).toEqual(["--device", "emulator-5554", "test"]);
+    expect(args.slice(0, 5)).toEqual(["--device", "emulator-5554", "--platform", "android", "test"]);
     expect(args).toContain("APP_ID=com.example.shop");
     expect(args).toContain("ROLE_E7AEA1E79086E59198_PASSWORD=pw");
 

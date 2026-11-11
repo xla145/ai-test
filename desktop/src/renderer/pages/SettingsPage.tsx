@@ -338,7 +338,7 @@ function Runtime({ view, save, busy }: SectionProps) {
         <Typography.Title level={5} style={{ marginTop: 8 }}>App 测试（Android / iOS）</Typography.Title>
         <Form.Item label={<Space>Maestro{envNote("AITEST_MAESTRO")}</Space>} name="maestroPath"
           extra={<Space direction="vertical" size={0}>
-            <span>App 回归用 Maestro 执行脚本，不调用模型。需另行安装（maestro.dev）；iOS 需要 Mac 与 Xcode。留空使用 PATH 上的 maestro。</span>
+            <span>App 回归用 Maestro 执行脚本，不调用模型。需另行安装（maestro.dev，依赖 Java 17+）；iOS 目前只支持模拟器（需要 Mac 与 Xcode），Android 真机与模拟器都支持。留空使用 PATH 上的 maestro。</span>
             <span>当前：<span className="mono">{runtime.maestro.path}</span>（{SOURCE[runtime.maestro.source]}） {status(check?.maestro)}</span>
           </Space>}>
           <Input className="mono" placeholder="maestro" allowClear />
