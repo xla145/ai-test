@@ -38,6 +38,7 @@ export function ApiPage({ project }: { project: Project }) {
     }
     if (!["http:", "https:"].includes(url.protocol)) throw new Error("OpenAPI 地址仅支持 HTTP/HTTPS");
     setResult((await api().generateApiSuite(project.id, source, enrich)) as SuiteResult);
+    notifyProjectChanged(project.id);
   }, "接口用例与脚本已生成");
 
   const fromRequirement = () => run(async () => {
