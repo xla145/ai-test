@@ -1,12 +1,12 @@
 import { ApiOutlined, CheckCircleOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Empty, Segmented, Space, Statistic, Table, Typography } from "antd";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type LintIssue, type Project } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { LabelTag, LEVEL } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { useProjects } from "../components/ProjectSettings";
-import { useAction, useLoad, usePaged, notifyProjectChanged } from "../hooks";
+import { useAction, usePaged, useProjectChanged, notifyProjectChanged } from "../hooks";
 
 interface ImportResult {
   imported: number;
@@ -40,12 +40,32 @@ const checked = (r: unknown): LintReport => ({ ...(r as LintReport), checkedAt: 
 
 export function ImportPage({ project }: { project: Project }) {
   const [report, setReport] = useState<LintReport>();
+  const [checking, setChecking] = useState(true);
+  const checkSeq = useRef(0);
   const [level, setLevel] = useState<string>("all");
   const { busy, run } = useAction();
   const { modal, message } = App.useApp();
   const { goTab } = useProjects();
-  // 还没检查过时，按项目里是否已有用例给出不同的提示
-  const caseCount = useLoad(() => api().pageCases(project.id, { page: 1, pageSize: 1 }).then((r) => r.total), [project.id]);
+  // 进入页面和项目数据变化后都执行本地规范检查，同步统计与问题明细。
+  const refresh = useCallback(async () => {
+    const seq = ++checkSeq.current;
+    setChecking(true);
+    try {
+      const result = await api().lint(project.id);
+      if (seq === checkSeq.current) setReport(checked(result));
+    } catch (e) {
+      if (seq === checkSeq.current) message.error(`规范检查失败：${(e as Error).message}`);
+    } finally {
+      if (seq === checkSeq.current) setChecking(false);
+    }
+  }, [project.id, message]);
+  useEffect(() => {
+    setReport(undefined);
+    setLevel("all");
+    void refresh();
+    return () => { checkSeq.current++; };
+  }, [refresh]);
+  useProjectChanged(project.id, () => { void refresh(); });
   // 问题明细按页从引擎读取；每次检查后 report 变化，回到第 1 页重新读取
   const issues = usePaged<LintIssue>(
     (q) => report
@@ -60,7 +80,6 @@ export function ImportPage({ project }: { project: Project }) {
     if (!file) return;
     const out = await api().importExcel(project.id, file) as ImportResult;
     notifyProjectChanged(project.id);
-    setReport(checked(await api().lint(project.id)));
     if (out?.missing_columns?.length) {
       // 列名没对上时整批用例会缺字段并被阻断，明确告诉用户是哪一列
       modal.warning({
@@ -79,10 +98,11 @@ export function ImportPage({ project }: { project: Project }) {
           </>
         ),
       });
-    } else message.success(`导入 ${out?.imported ?? 0} 条，已完成规范检查`);
+    } else message.success(`导入 ${out?.imported ?? 0} 条，正在自动检查`);
   });
 
-  const recheck = () => run(async () => setReport(checked(await api().lint(project.id))));
+  const recheck = () => { void refresh(); };
+  const loading = busy || checking;
   const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
@@ -91,15 +111,15 @@ export function ImportPage({ project }: { project: Project }) {
         title="用例导入与规范检查"
         description="导入团队已有的 Excel 用例。结构类规则由代码检查、不耗模型；阻断级问题修复前不会生成脚本。"
         extra={<>
-          <Button icon={<ReloadOutlined />} loading={busy} onClick={recheck}>重新检查</Button>
-          <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={importExcel}>导入 Excel</Button>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={recheck}>重新检查</Button>
+          <Button type="primary" icon={<UploadOutlined />} loading={loading} onClick={importExcel}>导入 Excel</Button>
         </>}
       />
-      {!report ? (
-        <Card>
-          {caseCount.loading ? null : caseCount.data ? (
-            <Empty description={`项目中已有 ${caseCount.data} 条用例，检查后查看规范问题`}>
-              <Button type="primary" icon={<ReloadOutlined />} loading={busy} onClick={recheck}>开始检查</Button>
+      {!report || report.total === 0 ? (
+        <Card loading={checking}>
+          {!report ? (
+            <Empty description="未能获取规范检查结果，请重新检查">
+              <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={recheck}>重新检查</Button>
             </Empty>
           ) : (
             <Empty description={
@@ -111,7 +131,7 @@ export function ImportPage({ project }: { project: Project }) {
               </Space>
             }>
               <Space wrap style={{ justifyContent: "center" }}>
-                <Button type="primary" icon={<UploadOutlined />} loading={busy} onClick={importExcel}>导入 Excel</Button>
+                <Button type="primary" icon={<UploadOutlined />} loading={loading} onClick={importExcel}>导入 Excel</Button>
                 {goTab && <Button icon={<ApiOutlined />} onClick={() => goTab("api")}>从 OpenAPI / 需求文档生成</Button>}
               </Space>
             </Empty>
