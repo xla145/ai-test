@@ -193,6 +193,8 @@ jobs:
   # 放在独立前缀下，不影响存储桶中的其它内容。客户端从 UPDATE_URL 检查更新。
   update-feed:
     needs: [version, desktop, release]
+    # 部分平台构建失败时，已发布的平台照常推送更新
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
