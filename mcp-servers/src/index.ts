@@ -24,7 +24,7 @@ async function main() {
     engine: engineOptionsFromEnv(),
     secrets: secretResolverFromEnv(),
     cdpEndpoint: process.env.AITEST_CDP_ENDPOINT || undefined,
-    vision: process.env.AITEST_MIDSCENE ? midsceneFactory() : undefined,
+    vision: process.env.AITEST_MIDSCENE === "1" ? midsceneFactory() : undefined,
     headless: !process.env.AITEST_HEADED,
     maestroBin: process.env.AITEST_MAESTRO || undefined,
   });

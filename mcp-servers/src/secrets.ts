@@ -9,7 +9,8 @@ export interface SecretResolver {
   /** 返回注入引擎 / 执行器子进程的环境变量；roles 非空时附带 AITEST_ROLES（各角色账号） */
   resolve(projectId: string, env: string, opts?: { roles?: string[] }): Promise<Record<string, string>>;
   /** 桌面端：为角色准备内嵌浏览器视图，返回视图 URL 中的标记 */
-  openView?(projectId: string, role: string): Promise<string>;
+  /** env：与内嵌试跑、单步调试共用同一个角色视图（同一份登录态） */
+  openView?(projectId: string, role: string, env?: string): Promise<string>;
 }
 
 export class BrokerSecretResolver implements SecretResolver {
@@ -34,8 +35,8 @@ export class BrokerSecretResolver implements SecretResolver {
     return body.env ?? {};
   }
 
-  async openView(projectId: string, role: string): Promise<string> {
-    const body = await this.post<{ marker: string }>("/views", { projectId, role });
+  async openView(projectId: string, role: string, env?: string): Promise<string> {
+    const body = await this.post<{ marker: string }>("/views", { projectId, role, env });
     return body.marker;
   }
 }

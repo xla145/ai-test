@@ -2,6 +2,12 @@ import { chromium, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BrowserSession } from "../src/ui/browser.js";
 import { startDemoApp, type DemoApp } from "./fixtures/app.js";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { runUiSuite } from "../src/ui/runner.js";
+import { generateSpec } from "../src/ui/codegen.js";
+import { chooseBrowser } from "../src/ui/chromium.js";
 
 /** 模拟桌面端：浏览器已在运行（Electron 开了 remote-debugging-port），角色视图由“桌面端”创建 */
 const PORT = 9400 + Math.floor(Math.random() * 400);
@@ -10,7 +16,7 @@ let app: DemoApp;
 
 beforeAll(async () => {
   app = await startDemoApp();
-  host = await chromium.launch({ args: [`--remote-debugging-port=${PORT}`] });
+  host = await chromium.launch({ executablePath: chooseBrowser().executablePath, args: [`--remote-debugging-port=${PORT}`] });
 });
 
 afterAll(async () => {
@@ -19,6 +25,61 @@ afterAll(async () => {
 });
 
 describe("CDP mode (embedded browser)", () => {
+  it("logs in and switches isolated embedded role pages, with credentials excluded from live progress", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-embedded-roles-"));
+    const contexts = [];
+    const viewMarkers: Record<string, string> = {};
+    for (const role of ["default", "admin", "viewer"]) {
+      const context = await host.newContext(); contexts.push(context);
+      const page = await context.newPage();
+      viewMarkers[role] = `aitest-view=${role}-${Date.now()}`;
+      await page.goto(`data:text/html,#${viewMarkers[role]}`);
+    }
+    mkdirSync(join(dir, "scripts/ui"), { recursive: true });
+    writeFileSync(join(dir, "scripts/ui/tc_roles.spec.ts"), generateSpec({ caseId: "tc_roles", title: "权限校验", steps: [
+      { action: "goto", role: "admin", url: "/dashboard" },
+      { action: "expectVisible", role: "admin", target: { kind: "testid", value: "menu-tags" } },
+      { action: "goto", role: "viewer", url: "/dashboard" },
+      { action: "expectHidden", role: "viewer", target: { kind: "testid", value: "menu-tags" } },
+    ] }));
+    const progress: { title: string; role?: string }[] = [];
+    try {
+      const out = await runUiSuite({ workspace: dir, baseUrl: app.url, caseIds: ["tc_roles"],
+        cdpEndpoint: `http://127.0.0.1:${PORT}`, viewMarkers, onProgress: e => progress.push(e), env: {
+          AITEST_ROLES: JSON.stringify([{ role: "admin", username: "alice", password: "pw-admin" }, { role: "viewer", username: "bob", password: "pw-viewer" }]),
+          AITEST_LOGIN: JSON.stringify({ url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" }),
+        } });
+      expect(out.results, out.stderr).toMatchObject([{ case_id: "tc_roles", status: "passed" }]);
+      expect(progress.map(p => p.role).filter(Boolean)).toEqual(expect.arrayContaining(["admin", "viewer"]));
+      expect(JSON.stringify(progress)).not.toContain("pw-admin");
+      expect(JSON.stringify(progress)).not.toContain("pw-viewer");
+    } finally { for (const context of contexts) await context.close(); rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  it("replays an existing Playwright script in the prepared page without changing its source or closing the host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-embedded-run-"));
+    const ctx = await host.newContext();
+    const page = await ctx.newPage();
+    const marker = `aitest-view=replay-${Date.now()}`;
+    await page.goto(`data:text/html,#${marker}`);
+    const source = 'import { test, expect } from "@playwright/test";\ntest("tc_replay embedded", async ({ page }) => { await page.goto("/login"); await expect(page.locator("#username")).toBeVisible(); });';
+    mkdirSync(join(dir, "scripts/ui"), { recursive: true });
+    const path = join(dir, "scripts/ui/tc_replay.spec.ts");
+    writeFileSync(path, source);
+    const progress: string[] = [];
+    try {
+      const out = await runUiSuite({ workspace: dir, baseUrl: app.url, caseIds: ["tc_replay"],
+        cdpEndpoint: `http://127.0.0.1:${PORT}`, viewMarkers: { default: marker }, onProgress: e => progress.push(e.title) });
+      expect(out.errors, out.stderr).toEqual([]);
+      expect(out.results, out.stderr).toMatchObject([{ case_id: "tc_replay", status: "passed" }]);
+      expect(page.url()).toContain("/login");
+      expect(host.isConnected()).toBe(true);
+      expect(readFileSync(path, "utf8")).toBe(source);
+      expect(readdirSync(join(dir, "scripts/ui")).some(f => f.startsWith(".aitest-"))).toBe(false);
+      expect(progress).toEqual(expect.arrayContaining([expect.stringMatching(/navigate|goto/i)]));
+    } finally { await ctx.close(); rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   it("finds the role view by its URL marker and drives it", async () => {
     const opened: string[] = [];
     const openView = async (role: string) => {
@@ -46,6 +107,41 @@ describe("CDP mode (embedded browser)", () => {
       await session.close();
     }
     // 断开连接不关闭宿主浏览器
+    expect(host.isConnected()).toBe(true);
+  }, 60_000);
+
+  it("replays recorded steps in role views for step-by-step debugging without recording them", async () => {
+    const openView = async (role: string) => {
+      const ctx = await host.newContext();
+      const page = await ctx.newPage();
+      const marker = `aitest-view=debug-${role}-${Date.now()}`;
+      await page.goto(`data:text/html,#${marker}`);
+      return marker;
+    };
+    const session = new BrowserSession({ cdpEndpoint: `http://127.0.0.1:${PORT}`, openView, baseUrl: app.url });
+    try {
+      await session.newRoleContext("admin", {
+        login: { url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" },
+        credentials: { username: "alice", password: "pw-admin" },
+      });
+      const steps = [
+        { action: "goto", role: "admin", url: "/tags" },
+        { action: "click", role: "admin", target: { kind: "testid", value: "disable-TAG-1001" } },
+        { action: "expectText", role: "admin", target: { kind: "testid", value: "status-TAG-1001" }, text: "已停用" },
+      ] as const;
+      for (const st of steps) await session.runStep(st, { timeoutMs: 3000 });
+      await expect(session.runStep({ action: "click", role: "admin", target: { kind: "testid", value: "no-such" } }, { timeoutMs: 500 }))
+        .rejects.toThrow(/Timeout/);
+      await expect(session.runStep({ action: "expectText", role: "admin", target: { kind: "testid", value: "status-TAG-1001" }, text: "启用中" }, { timeoutMs: 500 }))
+        .rejects.toThrow("不包含「启用中」");
+      await session.runStep({ action: "expectValue", role: "admin", target: { kind: "label", value: "搜索标签" }, value: "" }, { timeoutMs: 500 });
+      await session.runStep({ action: "expectNoText", role: "admin", target: { kind: "testid", value: "status-TAG-1001" }, text: "启用中" }, { timeoutMs: 500 });
+      await expect(session.runStep({ action: "expectValue", role: "admin", target: { kind: "label", value: "搜索标签" }, value: "x" }, { timeoutMs: 300 }))
+        .rejects.toThrow("当前值为「」");
+      expect(session.recording()).toEqual([]);
+    } finally {
+      await session.close();
+    }
     expect(host.isConnected()).toBe(true);
   }, 60_000);
 });
