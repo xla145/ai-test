@@ -88,3 +88,37 @@ describe("mcp server", () => {
     expect((res.content as { text: string }[])[0].text).toContain("项目不存在");
   });
 });
+
+describe("app server", () => {
+  it("reports app ids and role variables, then saves and registers a maestro flow", async () => {
+    const { client, db } = await connect("app");
+    const ws = mkdtempSync(join(tmpdir(), "app-ws-"));
+    const eng = (args: string[]) => runEngine<any>(args, { db, env: { PYTHONPATH: ENGINE_DIR } });
+    const project = await eng(["init-project", "--name", "shop", "--workspace", ws, "--environments",
+      JSON.stringify({ test: { base_url: "https://t", app: { android: "com.example.shop" } } })]);
+    await eng(["add-role", "--project", project.id, "--role", "admin"]);
+    const c = await eng(["create-case", "--project", project.id, "--json",
+      JSON.stringify({ title: "订单-App端下单", type: "app", priority: "P1", steps: ["下单"], expected: ["成功"] })]);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const res = await client.callTool({ name, arguments: args });
+      return { error: res.isError, body: (res.content as { text: string }[])[0].text };
+    };
+
+    const info = JSON.parse((await call("app_info", { project_id: project.id, env: "test", platform: "android" })).body);
+    expect(info.app_id).toBe("com.example.shop");
+    expect(info.configured_platforms).toEqual(["android"]);
+    expect(info.variables).toContain("ROLE_ADMIN_USERNAME（角色：admin）");
+    expect(JSON.parse((await call("app_info", { project_id: project.id, env: "test", platform: "ios" })).body).note).toContain("没有配置");
+
+    const bad = await call("save_app_flow", { project_id: project.id, case_id: c.id, yaml: "appId: com.example.shop\n---\n- launchApp\n" });
+    expect(bad.error).toBe(true);
+    expect(bad.body).toContain("APP_ID");
+
+    const saved = await call("save_app_flow", { project_id: project.id, case_id: c.id,
+      yaml: "appId: ${APP_ID}\n---\n- launchApp\n- tapOn: \"下单\"\n- assertVisible: \"成功\"\n" });
+    expect(saved.error).toBeFalsy();
+    expect(JSON.parse(saved.body).path).toBe(`scripts/app/${c.id}.yaml`);
+    const scripts = await eng(["list-scripts", "--case", c.id]);
+    expect(scripts).toMatchObject([{ framework: "maestro", path: `scripts/app/${c.id}.yaml` }]);
+  });
+});

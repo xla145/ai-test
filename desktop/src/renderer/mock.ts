@@ -15,7 +15,7 @@ const projects: any[] = [
   {
     id: "grp_feature", name: "特征中心", workspace_path: "", kind: "group", parent_id: "",
     environments: {
-      test: { base_url: "https://feature-test.example.com", login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
+      test: { base_url: "https://feature-test.example.com", app: { android: "com.example.feature.test", ios: "com.example.feature.test" }, login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
       prod: { base_url: "https://feature.example.com", production: true },
     },
   },
@@ -56,6 +56,9 @@ const cases = [
   mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed"),
   mk("tc_8f2a1c0e09", "多端-桌面客户端同步", "manual", "P3", "warned", "draft"),
   mk("tc_8f2a1c0e10", "埋点表-字段核对", "doc", "P2", "passed", "draft"),
+  mk("tc_app_001", "标签管理-App端停用标签", "app", "P0", "passed", "reviewed", { type: "app" }),
+  mk("tc_app_003", "综合总览-App端指标卡片", "app", "P1", "passed", "reviewed", { type: "app" }),
+  mk("tc_app_007", "登录-iOS 面容登录", "app", "P1", "warned", "draft", { type: "app" }),
   // 批量导入的用例，用来演示分页
   ...Array.from({ length: 56 }, (_, i) => mk(`tc_imp${String(i + 1).padStart(4, "0")}`,
     `${["标签管理", "综合总览", "推荐配置", "数据清洗"][i % 4]}-导入场景 ${i + 1}`,
@@ -124,6 +127,8 @@ const globalView = (): GlobalSettingsView => ({
     codex: globalSettings.general.codexPath ? { path: globalSettings.general.codexPath, source: "settings" }
       : { path: "/Applications/aitest-desktop.app/Contents/Resources/codex/bin/codex", source: "bundled" },
     taskTokenLimit: { value: globalSettings.general.taskTokenLimit ?? 200000, source: globalSettings.general.taskTokenLimit ? "settings" : "default" },
+    maestro: { path: globalSettings.general.maestroPath || "maestro", source: globalSettings.general.maestroPath ? "settings" : "default" },
+    pinky: { path: globalSettings.general.pinkyPath || "pinkyctl", enabled: Boolean(globalSettings.general.pinkyEnabled) },
     envOverrides: [],
   },
 });
@@ -227,6 +232,8 @@ const mockApi: AitestApi = {
     return delay({ id, workspace_path: p?.workspace_path ?? "" });
   },
   getCase: (id) => delay(cases.find((c) => c.id === id)),
+  scriptMap: (framework) => delay<Record<string, string>>(framework === "maestro"
+    ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" } : {}),
   caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
   exploreUiCase: () => delay({ message: "已生成脚本 scripts/ui/tc_8f2a1c0e02.spec.ts，试跑通过" }, 900),
   runUiRegression: (id, env, _headed, opts) => requireConfirm(id, env, opts) ?? delay({
@@ -290,7 +297,19 @@ const mockApi: AitestApi = {
     globalSettings = structuredClone(s);
     return delay(globalView());
   },
-  checkRuntime: () => delay({ python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" } }, 500),
+  checkRuntime: () => delay({
+    python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" },
+    maestro: { ok: true, detail: "2.1.0" }, pinky: { ok: true, detail: "pinkyctl 0.4.2" },
+  }, 500),
+  runAppRegression: (id, env, platform, opts) => requireConfirm(id, env, opts) ?? delay({
+    platform, report: "reports/app-android-2026-11-11",
+    run: { run_id: "run_app1", total: 12, passed: 10, failed: 1, error: 1, skipped: 0, pass_rate: 0.833 },
+    failures: [
+      { case_id: "tc_app_003", status: "failed", failure_type: "unknown", message: "Assertion is false: \"已停用\" is visible" },
+      { case_id: "tc_app_007", status: "error", failure_type: "environment", message: platform === "ios" ? "App com.example.feature is not installed on the device" : "Device emulator-5554 not found" },
+    ],
+  }, 1200),
+  exploreAppCase: () => delay({ message: "已在 Android 上走通 5 步，生成 scripts/app/tc_app_001.yaml，试跑通过；「删除标签」一步由你在 Pinky 中确认。", tokens: 21400 }, 1200),
   openDataDir: () => delay(""),
   getUserInfo: () => delay({ name: "张晓", email: "zhangxiao@example.com", source: "git" as const }),
   checkModel: (id) => delay(id !== "vision"

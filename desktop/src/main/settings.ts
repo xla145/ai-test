@@ -104,6 +104,9 @@ export function validateGlobal(s: GlobalSettings): string[] {
   }
   const g = s.general;
   if (!["system", "light", "dark"].includes(g.theme)) errors.push("主题无效");
+  for (const [k, label] of [["maestroPath", "Maestro"], ["pinkyPath", "Pinky"]] as const) {
+    if (g[k] != null && typeof g[k] !== "string") errors.push(`${label} 路径无效`);
+  }
   if (g.taskTokenLimit != null && (!Number.isInteger(g.taskTokenLimit) || g.taskTokenLimit <= 0)) {
     errors.push("单次任务 token 上限应为正整数");
   }

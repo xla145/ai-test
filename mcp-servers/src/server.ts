@@ -5,6 +5,7 @@ import { engineEnvFor, SERVERS, getServer } from "./servers.js";
 import { BrowserSession } from "./ui/browser.js";
 import type { VisionAgentFactory } from "./ui/midscene.js";
 import { UI_SERVERS, type UiToolContext } from "./ui/tools.js";
+import { APP_SERVER, appTools } from "./app/tools.js";
 
 export interface CreateOptions {
   engine: EngineOptions;
@@ -16,9 +17,11 @@ export interface CreateOptions {
   session?: BrowserSession;
   vision?: VisionAgentFactory;
   headless?: boolean;
+  /** app 服务：maestro 可执行文件 */
+  maestroBin?: string;
 }
 
-export const ALL_SERVER_NAMES = [...SERVERS.map((s) => s.name), ...UI_SERVERS.map((s) => s.name)];
+export const ALL_SERVER_NAMES = [...SERVERS.map((s) => s.name), ...UI_SERVERS.map((s) => s.name), APP_SERVER.name];
 
 const text = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data ?? null, null, 2) }] });
 const failure = (e: unknown) => ({ isError: true, content: [{ type: "text" as const, text: (e as Error).message }] });
@@ -27,6 +30,24 @@ export function createServer(name: string, opts: CreateOptions): McpServer {
   const run = opts.run ?? runEngine;
   const ui = UI_SERVERS.find((s) => s.name === name);
   const server = new McpServer({ name: `aitest-${name}`, version: "0.2.0" });
+
+  if (name === APP_SERVER.name) {
+    const ctx = {
+      engine: ((args: string[], env?: Record<string, string>) => run(args, { ...opts.engine, env: { ...opts.engine.env, ...env } })) as UiToolContext["engine"],
+      secrets: opts.secrets,
+      maestroBin: opts.maestroBin,
+    };
+    for (const tool of appTools(ctx)) {
+      server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (input: Record<string, unknown>) => {
+        try {
+          return text(await tool.handler(input));
+        } catch (e) {
+          return failure(e);
+        }
+      });
+    }
+    return server;
+  }
 
   if (ui) {
     const ctx: UiToolContext = {

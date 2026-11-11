@@ -20,7 +20,10 @@ from .models import FailureType, Run, RunMode, RunResult
 
 _ID_RE = re.compile(r"\[(.+)\]$")
 _ENV_PATTERNS = re.compile(
-    r"(ConnectError|ConnectTimeout|ReadTimeout|Name or service not known|Connection refused|net::ERR_|未设置 AITEST_BASE_URL)")
+    r"(ConnectError|ConnectTimeout|ReadTimeout|Name or service not known|Connection refused|net::ERR_|未设置 AITEST_BASE_URL"
+    # 移动端：设备未连接、App 未安装（Maestro / adb）
+    r"|[Nn]o devices? (found|connected)|[Dd]evice .{0,40}not (found|connected)|device offline|[Aa]pp .{0,60}not installed"
+    r"|[Uu]nable to launch app)")
 _SERVER_ERROR = re.compile(r"状态码 5\d\d")
 
 

@@ -126,3 +126,23 @@ def test_old_database_is_migrated(tmp_path, capsys):
     assert main(["--db", str(db), "list-projects"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["data"][0]["kind"] == "project" and out["data"][0]["parent_id"] == ""
+
+
+def test_app_cases_route_to_app_mode(cli, tree):
+    _, a, _ = tree
+    from aitest import router
+    from aitest.models import TestCase
+    mk = lambda title, type_="ui": TestCase(project_id="p", title=title, type=type_, priority="P1", steps=["s"], expected=["e"])
+    assert router.route(mk("标签管理-Android 端停用标签")) == "app"
+    assert router.route(mk("登录-iPhone 指纹登录")) == "app"
+    assert router.route(mk("任意标题", "app")) == "app"
+    assert router.route(mk("兼容性-Firefox 下展示")) == "manual"
+    case = json.dumps({"title": "订单-App端下单", "type": "app", "priority": "P1", "steps": ["下单"], "expected": ["成功"]}, ensure_ascii=False)
+    assert cli("create-case", "--project", a["id"], "--json", case)["execution_mode"] == "app"
+
+
+def test_mobile_failures_are_classified_as_environment():
+    from aitest.runner import classify_failure
+    assert classify_failure("Device emulator-5554 not found") == "environment"
+    assert classify_failure("App com.example.shop is not installed on the device") == "environment"
+    assert classify_failure("Element not found: Text matching regex: 已停用") == "unknown"

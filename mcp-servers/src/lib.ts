@@ -9,4 +9,8 @@ export { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecor
 export { candidates, toCode, type LocatorSpec } from "./ui/locator.js";
 export { midsceneFactory, type VisionAgent, type VisionAgentFactory } from "./ui/midscene.js";
 export { parseReport, runUiSuite, type UiCaseResult, type UiRunOutput } from "./ui/runner.js";
+export {
+  flowPath, maestroArgs, normalizeFlow, parseJunit, roleVar, roleVariables, runAppSuite, validateFlow,
+  type AppCaseResult, type AppRunOptions, type AppRunOutput, type Platform,
+} from "./app/maestro.js";
 export { initCi, runCi, toJunit, toSummary, workflowTemplate, type CiCaseResult, type CiReport } from "./ci.js";

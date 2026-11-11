@@ -16,6 +16,7 @@ def new_id(prefix: str) -> str:
 class CaseType(str, Enum):
     API = "api"
     UI = "ui"
+    APP = "app"  # 移动端 App（Android / iOS）
 
 
 class ExecutionMode(str, Enum):
@@ -24,6 +25,7 @@ class ExecutionMode(str, Enum):
     CAPTURE = "capture"  # 埋点抓包
     DOC = "doc"  # 文档核对
     MANUAL = "manual"
+    APP = "app"  # 移动端 App：Pinky 探索 + Maestro 回归
 
 
 class CaseStatus(str, Enum):

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import { checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
@@ -58,6 +58,18 @@ function python(): { path: string; source: Source } {
   if (process.env.AITEST_PYTHON) return { path: process.env.AITEST_PYTHON, source: "env" };
   const configured = loadSettings().general.pythonPath;
   return configured ? { path: configured, source: "settings" } : { path: "python3", source: "default" };
+}
+
+/** maestro：AITEST_MAESTRO → 全局配置 → PATH 上的 maestro */
+function maestroBin(): { path: string; source: Source } {
+  if (process.env.AITEST_MAESTRO) return { path: process.env.AITEST_MAESTRO, source: "env" };
+  const configured = loadSettings().general.maestroPath;
+  return configured ? { path: configured, source: "settings" } : { path: "maestro", source: "default" };
+}
+
+function pinky(): { path: string; enabled: boolean } {
+  const g = loadSettings().general;
+  return { path: g.pinkyPath || "pinkyctl", enabled: Boolean(g.pinkyEnabled) };
 }
 
 /** agent 单次任务 token 上限：AITEST_TOKEN_LIMIT → 全局配置 → 默认值 */
@@ -128,19 +140,22 @@ const modelKey = (slot: "agent" | "vision") => {
 };
 
 function runtimeInfo(): RuntimeInfo {
-  const envOverrides = ["AITEST_PYTHON", "AITEST_CODEX_BIN", "AITEST_TOKEN_LIMIT", "AITEST_DB"].filter((k) => process.env[k]);
+  const envOverrides = ["AITEST_PYTHON", "AITEST_CODEX_BIN", "AITEST_TOKEN_LIMIT", "AITEST_DB", "AITEST_MAESTRO"].filter((k) => process.env[k]);
   return {
     appVersion: app.getVersion(), dataDir: paths.data(), dbPath: paths.db(),
-    python: python(), codex: codexBin(), taskTokenLimit: taskTokenLimit(), envOverrides,
+    python: python(), codex: codexBin(), taskTokenLimit: taskTokenLimit(), maestro: maestroBin(), pinky: pinky(), envOverrides,
   };
 }
 
-/** 运行 `<bin> --version` 检查可用性 */
+/** 运行 `<bin> --version` 检查可用性；能启动但不支持 --version 的程序也视为已安装 */
 function versionOf(bin: string): Promise<RuntimeCheck> {
   return new Promise((done) => {
     execFile(bin, ["--version"], { timeout: 15_000, windowsHide: true }, (err, stdout, stderr) => {
       const out = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
-      done(err ? { ok: false, detail: (err as NodeJS.ErrnoException).code === "ENOENT" ? `找不到 ${bin}` : err.message } : { ok: true, detail: out });
+      if (!err) return done({ ok: true, detail: out });
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EACCES") return done({ ok: false, detail: `找不到 ${bin}` });
+      done(out ? { ok: true, detail: `已安装（${out.slice(0, 80)}）` } : { ok: false, detail: err.message });
     });
   });
 }
@@ -163,7 +178,7 @@ async function getCodex(): Promise<CodexAppServer> {
   if (!broker) throw new Error("凭据代理未启动");
   const codexHome = paths.codexHome();
   mkdirSync(codexHome, { recursive: true });
-  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support"];
+  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support", "app"];
   const models = loadModelSettings();
   const vision = models.vision ? midsceneEnv(models, modelKey("vision")) : {};
   const mcpEnv: Record<string, string> = {
@@ -183,9 +198,14 @@ async function getCodex(): Promise<CodexAppServer> {
       ...codexProvider(models),
       model: codexProvider(models).model ?? process.env.AITEST_MODEL,
       // 视觉模型的配置只给 browser 服务（Midscene 在其中运行）
-      mcpServers: servers.map((name) => ({
-        name, command: process.execPath, args: [paths.mcpEntry(), name], env: name === "browser" ? { ...mcpEnv, ...vision } : mcpEnv,
-      })),
+      mcpServers: [
+        ...servers.map((name) => ({
+          name, command: process.execPath, args: [paths.mcpEntry(), name],
+          env: name === "browser" ? { ...mcpEnv, ...vision } : name === "app" ? { ...mcpEnv, AITEST_MAESTRO: maestroBin().path } : mcpEnv,
+        })),
+        // App 探索：Pinky 操作手机，关键步骤在 Pinky 中由用户确认
+        ...(pinky().enabled ? [{ name: "pinky", command: pinky().path, args: ["mcp"] }] : []),
+      ],
     }),
   );
   codex = new CodexAppServer({
@@ -326,10 +346,19 @@ function registerIpc(orch: Orchestrator): void {
       return out;
     },
     getCase: (c: string) => orch.getCase(c),
+    scriptMap: (framework: string) => orch.scriptMap(framework),
     caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
     exploreUiCase: async (p: string, env: string, caseId: string) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId);
+    },
+    runAppRegression: async (p: string, env: string, platform: "android" | "ios", opts?: { device?: string; confirmProduction?: boolean }) => {
+      await setApprovalContext(orch, p);
+      return orch.runAppRegression(p, env, platform, opts ?? {});
+    },
+    exploreAppCase: async (p: string, env: string, platform: "android" | "ios", caseId: string, opts?: { confirmProduction?: boolean }) => {
+      await setApprovalContext(orch, p);
+      return orch.exploreAppCase(p, env, platform, caseId, opts ?? {});
     },
     runUiRegression: async (p: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
@@ -364,8 +393,10 @@ function registerIpc(orch: Orchestrator): void {
       return checkModel(m, usageOf(s, id), keyOf(id));
     },
     checkRuntime: async () => {
-      const [py, cx] = await Promise.all([versionOf(paths.python()), versionOf(paths.codexBin())]);
-      return { python: py, codex: cx };
+      const [py, cx, ma, pk] = await Promise.all([
+        versionOf(paths.python()), versionOf(paths.codexBin()), versionOf(maestroBin().path), versionOf(pinky().path),
+      ]);
+      return { python: py, codex: cx, maestro: ma, pinky: pk };
     },
     openDataDir: () => shell.openPath(paths.data()),
     getUserInfo: () => localUser(),
@@ -449,6 +480,7 @@ app.whenReady().then(async () => {
     agent: getCodex,
     secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles, projectParents.get(projectId)),
     ui: { runUiSuite, checkData, seedData },
+    app: { runAppSuite, maestroBin: () => maestroBin().path, pinkyEnabled: () => pinky().enabled },
     // 每次 agent 任务时读取，全局配置修改后立即生效
     get tokenLimit() {
       return taskTokenLimit().value;

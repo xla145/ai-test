@@ -52,6 +52,12 @@ export interface GeneralSettings {
   codexPath?: string;
   /** agent 单次任务 token 上限；项目可在「工程化」中设置更低的值 */
   taskTokenLimit?: number;
+  /** App 回归：maestro 可执行文件，空表示 PATH 上的 maestro */
+  maestroPath?: string;
+  /** App 探索：启用后把 Pinky 注册给 agent（pinkyctl mcp） */
+  pinkyEnabled?: boolean;
+  /** pinkyctl 可执行文件，空表示 PATH 上的 pinkyctl */
+  pinkyPath?: string;
 }
 
 export interface GlobalSettings {
@@ -70,6 +76,8 @@ export interface RuntimeInfo {
   python: { path: string; source: "env" | "settings" | "bundled" | "default" };
   codex: { path: string; source: "env" | "settings" | "bundled" | "default" };
   taskTokenLimit: { value: number; source: "env" | "settings" | "bundled" | "default" };
+  maestro: { path: string; source: "env" | "settings" | "bundled" | "default" };
+  pinky: { path: string; enabled: boolean };
   /** 生效中的环境变量覆盖（优先于全局配置） */
   envOverrides: string[];
 }
@@ -167,9 +175,17 @@ export interface AitestApi {
   /** 从客户端移除项目（数据库记录与凭据）；workspace 目录保留 */
   deleteProject(projectId: string): Promise<{ id: string; workspace_path: string }>;
   getCase(caseId: string): Promise<unknown>;
+  /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
+  scriptMap(framework: string): Promise<Record<string, string>>;
   caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
   exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */
+  runAppRegression(projectId: string, env: string, platform: "android" | "ios",
+    opts?: { device?: string; confirmProduction?: boolean }): Promise<unknown>;
+  /** App 探索（agent 通过 Pinky 操作手机，生成 Maestro 脚本） */
+  exploreAppCase(projectId: string, env: string, platform: "android" | "ios", caseId: string,
+    opts?: { confirmProduction?: boolean }): Promise<unknown>;
   listProposals(status?: string): Promise<unknown[]>;
   pageProposals(projectId: string, q: PageQuery & { status?: string }): Promise<Page<unknown>>;
   resolveProposal(projectId: string, id: string, accept: boolean): Promise<unknown>;
@@ -194,7 +210,7 @@ export interface AitestApi {
   saveGlobalSettings(settings: GlobalSettings, keys?: Record<string, string>): Promise<GlobalSettingsView>;
   /** 用已保存的配置测试某个模型的连通性 */
   checkModel(modelId: string): Promise<ModelCheckResult>;
-  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck }>;
+  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>;
   getUserInfo(): Promise<UserInfo>;
   openDataDir(): Promise<string>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;

@@ -59,11 +59,11 @@ const apiSpec = z.object({
 
 const caseInput = z.object({
   title: z.string().describe("「模块-场景」"),
-  type: z.enum(["api", "ui"]),
+  type: z.enum(["api", "ui", "app"]),
   priority: z.enum(["P0", "P1", "P2", "P3"]),
   category: z.enum(["功能测试", "安全相关", "兼容性", "其它"]).optional(),
   module_path: z.array(z.string()).optional(),
-  execution_mode: z.enum(["ui", "api", "capture", "doc", "manual"]).optional(),
+  execution_mode: z.enum(["ui", "api", "capture", "doc", "manual", "app"]).optional(),
   requirement_ids: z.array(z.string()).optional(),
   preconditions: z.array(z.string()).optional(),
   data_refs: z.array(z.string()).optional(),
@@ -119,9 +119,9 @@ export const SERVERS: ServerDef[] = [
         input: {
           project_id: project,
           query: z.string().optional().describe("匹配标题、用例 ID、模块路径"),
-          type: z.enum(["api", "ui"]).optional(),
+          type: z.enum(["api", "ui", "app"]).optional(),
           priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
-          execution_mode: z.enum(["ui", "api", "capture", "doc", "manual"]).optional(),
+          execution_mode: z.enum(["ui", "api", "capture", "doc", "manual", "app"]).optional(),
           status: z.enum(["draft", "reviewed", "deprecated"]).optional(),
           lint_status: z.enum(["unchecked", "passed", "warned", "blocked"]).optional(),
           ...paging,

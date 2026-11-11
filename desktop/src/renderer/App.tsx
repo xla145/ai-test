@@ -10,6 +10,7 @@ import {
   FileExcelOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
+  MobileOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   SafetyCertificateOutlined,
@@ -45,6 +46,7 @@ import { api, isGroup, type Project } from "./api";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
 import { useAction, useLoad } from "./hooks";
 import { ApiPage } from "./pages/ApiPage";
+import { AppPage } from "./pages/AppPage";
 import { GroupPage } from "./pages/GroupPage";
 import { CasesPage } from "./pages/CasesPage";
 import { ImportPage } from "./pages/ImportPage";
@@ -73,7 +75,8 @@ function describe(method: string, params: any): string | undefined {
   switch (method) {
     case "aitest/progress":
       return { run: "开始接口回归", "ui-run": "开始 UI 回归", case_gen: "agent：生成用例", api_script: "agent：补充接口脚本",
-        triage: "agent：失败归因", explore: "agent：探索 UI 用例", heal: "agent：自愈" }[params?.stage as string] ?? params?.stage;
+        triage: "agent：失败归因", explore: "agent：探索 UI 用例", heal: "agent：自愈",
+        "app-run": "开始 App 回归", app_explore: "agent：探索 App 用例" }[params?.stage as string] ?? params?.stage;
     case "item/started":
       return params?.item?.type === "mcpToolCall" ? `调用工具 ${params.item.server ?? ""}.${params.item.tool ?? ""}` : undefined;
     case "turn/completed":
@@ -152,6 +155,7 @@ export function App() {
         { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
         { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "app", label: "App 测试", icon: <MobileOutlined />, children: <AppPage project={current} /> },
         { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
       ]
     : [];

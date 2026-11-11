@@ -11,8 +11,10 @@ import re
 from .models import ExecutionMode, TestCase
 
 _RULES: list[tuple[str, re.Pattern[str]]] = [
-    # 跨端、多浏览器内核：手工
-    (ExecutionMode.MANUAL.value, re.compile(r"(桌面客户端|App端|APP端|移动端|iOS|Android|安卓|多浏览器|Firefox|Safari|火狐|IE\b|Edge浏览器)", re.I)),
+    # 移动端 App：Pinky 探索、Maestro 回归（Android / iOS）
+    (ExecutionMode.APP.value, re.compile(r"(App端|APP端|移动端|手机端|iOS|iPhone|iPad|Android|安卓|鸿蒙)", re.I)),
+    # 桌面客户端、多浏览器内核：手工
+    (ExecutionMode.MANUAL.value, re.compile(r"(桌面客户端|多浏览器|Firefox|Safari|火狐|IE\b|Edge浏览器)", re.I)),
     # 对需求附件做静态核对
     (ExecutionMode.DOC.value, re.compile(r"(埋点表|附件|文档核对|对照.{0,6}文档)")),
     # 埋点抓包
@@ -25,6 +27,8 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
 def route(case: TestCase) -> str:
     if case.type == "api" or case.api is not None:
         return ExecutionMode.API.value
+    if case.type == "app":
+        return ExecutionMode.APP.value
     text = " ".join([case.title, *case.preconditions, *case.steps, *case.expected])
     for mode, pattern in _RULES:
         if pattern.search(text):

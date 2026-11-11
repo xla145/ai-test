@@ -18,8 +18,9 @@ const methods = [
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",
   "saveGlobalSettings", "checkModel", "checkRuntime", "getUserInfo", "openDataDir", "hideTestView",
+  "runAppRegression", "exploreAppCase",
   "moveProject", "projectOverview", "getSettingsDetail",
-  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles",
+  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
 ] as const;
 

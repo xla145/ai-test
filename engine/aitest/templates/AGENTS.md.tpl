@@ -17,6 +17,7 @@
 ## 脚本规范
 - 接口：pytest + httpx，数据驱动（用例数据与脚本分离），断言状态码、JSON Schema、关键字段。
 - UI：一个用例一个 Playwright spec 文件，文件头注释写用例 ID。
+- App：一个用例一个 Maestro 脚本（scripts/app/<用例ID>.yaml），`appId: ${APP_ID}`，Android 与 iOS 共用；探索时用 Pinky 操作手机。
 - 选择器优先级：data-testid → getByRole / getByLabel → 文本 → CSS，禁用绝对 XPath。
 - 登录态用 storageState 复用，不在脚本里写明文密码。
 - 加解密、签名由项目 `aitest_hooks.py` 提供，不要自行实现。
