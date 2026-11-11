@@ -60,6 +60,11 @@ describe("aitest-ci", () => {
     expect(junit).toContain('<testsuite name="ui" tests="1" failures="0"');
     expect(readFileSync(summaryFile, "utf8")).toContain("通过 3");
     expect(logs.join("\n")).toContain("不调用模型");
+    const html = readFileSync(join(ws, "reports/ci/report.html"), "utf8");
+    expect(report.htmlReport).toBe(join(ws, "reports/ci/report.html"));
+    expect(html).toContain("CI 演示 · 测试报告");
+    expect(html).toContain("登录页-可访问");
+    expect(html).toContain("标签管理-停用标签");
   }, 120_000);
 
   it("fails the build and lists undetermined failures after a page redesign", async () => {

@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 /** 模拟被测系统：登录、角色菜单、标签停用、埋点上报。version=2 模拟页面改版（按钮 testid 变了） */
 export interface DemoApp {
   url: string;
-  state: { version: 1 | 2; beacons: unknown[]; disabled: Set<string> };
+  state: { version: 1 | 2; beacons: unknown[]; disabled: Set<string>; onDisable?: (tag: string) => void };
   close(): Promise<void>;
 }
 
@@ -47,6 +47,7 @@ export async function startDemoApp(): Promise<DemoApp> {
       if (url.pathname.startsWith("/api/tags/") && req.method === "POST") {
         if (role !== "admin") return send(403, "forbidden");
         state.disabled.add(url.pathname.split("/")[3]);
+        state.onDisable?.(url.pathname.split("/")[3]);
         res.writeHead(200, { "content-type": "application/json" }).end('{"ok":true}');
         return;
       }

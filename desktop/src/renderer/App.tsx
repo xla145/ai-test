@@ -7,7 +7,9 @@ import {
   BugOutlined,
   ChromeOutlined,
   CloseOutlined,
+  DatabaseOutlined,
   FileExcelOutlined,
+  FileSearchOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
   MobileOutlined,
@@ -51,8 +53,10 @@ import { ApiPage } from "./pages/ApiPage";
 import { AppPage } from "./pages/AppPage";
 import { GroupPage } from "./pages/GroupPage";
 import { CasesPage } from "./pages/CasesPage";
+import { DatabasePage } from "./pages/DatabasePage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
+import { ReportsPage } from "./pages/ReportsPage";
 import { RunPage } from "./pages/RunPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { UiPage } from "./pages/UiPage";
@@ -170,6 +174,8 @@ export function App() {
         { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
         { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "db", label: "数据库", icon: <DatabaseOutlined />, children: <DatabasePage project={current} onChanged={reload} /> },
+        { key: "reports", label: "测试报告", icon: <FileSearchOutlined />, children: <ReportsPage project={current} /> },
         { key: "app", label: "App 测试", icon: <MobileOutlined />, children: <AppPage project={current} /> },
         { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
       ]

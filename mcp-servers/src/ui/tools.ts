@@ -166,6 +166,27 @@ function browserTools(ctx: UiToolContext): UiTool[] {
       handler: ({ name, fields, forbidden }) => s.expectRequest(name, fields, forbidden),
     },
     {
+      name: "expect_db",
+      description: "数据库断言（入库校验）：查询被测系统数据库（只读），立即验证通过后录入脚本。expect 支持 rows / min_rows / empty / value / row / contains",
+      input: {
+        db: z.string().optional().describe("连接名；只有一个连接时可省略"),
+        sql: z.string().describe("单条只读 SQL，参数用 :name"),
+        params: z.record(z.string(), z.unknown()).optional(),
+        expect: z.record(z.string(), z.unknown()).optional(),
+        timeout_ms: z.number().int().optional(),
+        description: z.string().optional().describe("这条校验在验证什么，如「新用户已入库」"),
+      },
+      handler: async (check) => {
+        const { project, env } = active(ctx);
+        const secretEnv = await ctx.secrets.resolve(project.id, env);
+        const res = await ctx.engine<{ ok: boolean; errors: string[]; rows: unknown[] }>(
+          ["db-check", "--project", project.id, "--env", env, "--spec", JSON.stringify(check)], secretEnv);
+        if (!res.ok) throw new Error(`断言不成立：${res.errors.join("；")}；查询结果：${JSON.stringify(res.rows.slice(0, 5))}`);
+        s.recordDbCheck(check);
+        return { ok: true, rows: res.rows.slice(0, 5) };
+      },
+    },
+    {
       name: "install_clock",
       description: "控制前端时间（Playwright clock），须在 navigate 之前调用",
       input: { time: z.string().describe("ISO 时间") },
@@ -209,11 +230,12 @@ function browserTools(ctx: UiToolContext): UiTool[] {
         const roles = await ctx.engine<{ role_name: string }[]>(["list-roles", "--project", project.id]);
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: roles.map((r) => r.role_name) });
         const envCfg = project.environments[env];
+        const dbRuntime = await ctx.engine<Record<string, string>>(["db-runtime-env", "--project", project.id, "--env", env], secretEnv);
         const out = await runUiSuite({
           workspace: project.workspace_path,
           baseUrl: envCfg.base_url,
           caseIds: case_ids,
-          env: { ...secretEnv, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
+          env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
         });
         return {
           exit_code: out.exitCode,
@@ -282,7 +304,33 @@ function envSupportTools(ctx: UiToolContext): UiTool[] {
     const secretEnv = await ctx.secrets.resolve(projectId, env);
     return { project, envCfg, records, deps: { authToken: secretEnv.AITEST_AUTH_TOKEN } };
   };
+  const dbEnv = async (projectId: string, env: string) => ctx.secrets.resolve(projectId, env);
   return [
+    {
+      name: "db_list",
+      description: "列出环境配置的被测系统数据库连接（不含密码）",
+      input: { project_id: z.string(), env: z.string() },
+      handler: ({ project_id, env }) => ctx.engine(["db-list", "--project", project_id, "--env", env]),
+    },
+    {
+      name: "db_query",
+      description: "查询被测系统数据库（只允许单条只读语句，参数用 :name），用于了解数据或确认入库结果",
+      input: { project_id: z.string(), env: z.string(), db: z.string().optional(), sql: z.string(), params: z.record(z.string(), z.unknown()).optional(), limit: z.number().int().max(500).optional() },
+      handler: async ({ project_id, env, db, sql, params, limit }) => ctx.engine([
+        "db-query", "--project", project_id, "--env", env, ...(db ? ["--conn", db] : []), "--sql", sql,
+        ...(params ? ["--params", JSON.stringify(params)] : []), "--limit", String(limit ?? 50),
+      ], await dbEnv(project_id, env)),
+    },
+    {
+      name: "db_check",
+      description: "执行一条数据库断言并返回是否通过（不录入脚本）",
+      input: {
+        project_id: z.string(), env: z.string(), db: z.string().optional(), sql: z.string(),
+        params: z.record(z.string(), z.unknown()).optional(), expect: z.record(z.string(), z.unknown()).optional(),
+      },
+      handler: async ({ project_id, env, ...check }) => ctx.engine(
+        ["db-check", "--project", project_id, "--env", env, "--spec", JSON.stringify(check)], await dbEnv(project_id, env)),
+    },
     {
       name: "check_data",
       description: "检查用例依赖的测试数据是否存在（keys 或 case_id 的 data_refs）",

@@ -10,5 +10,7 @@
    - 埋点：操作前 `browser.start_capture`，操作后 `browser.expect_request` 断言上报字段。
    - 视觉类预期（颜色、遮挡、截断）：`browser.visual_check`，结果进入人工复核队列。
    - 时间窗口：`browser.install_clock` 控制前端时间；服务端时间用 `env-support.set_clock`。
+   - 入库校验：页面操作会改数据时，用 `browser.expect_db` 断言数据库中的结果（只读，入库延迟会自动重试）。
+     不要用时间戳等每次都变化的字段做断言。
 5. `browser.save_ui_script` 生成脚本（一个用例一个 spec，文件头写用例 ID），再 `browser.run_playwright_script` 试跑一次。
 6. 选择器优先级：data-testid → role / label → 文本 → CSS，禁用绝对 XPath。不要在脚本里写明文密码。

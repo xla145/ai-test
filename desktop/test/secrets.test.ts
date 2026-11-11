@@ -52,6 +52,21 @@ describe("secrets", () => {
   });
 });
 
+describe("database passwords", () => {
+  it("are stored per project/env/connection and injected as AITEST_DB_PASSWORDS", async () => {
+    const { secretEnvFor } = await import("../src/main/secrets.js");
+    const file = join(mkdtempSync(join(tmpdir(), "sec-")), "s.json");
+    const store = new SecretStore(file, cipher);
+    store.setDbPassword("p1", "test", "main", "db-pw");
+    store.setDbPassword("p1", "test", "analytics", "an-pw");
+    store.setDbPassword("p1", "prod", "main", "prod-pw");
+    expect(readFileSync(file, "utf8")).not.toContain("db-pw");
+    expect(store.dbPasswords("p1", "test")).toEqual({ main: "db-pw", analytics: "an-pw" });
+    expect(JSON.parse(secretEnvFor(store, "p1", "test").AITEST_DB_PASSWORDS)).toEqual({ main: "db-pw", analytics: "an-pw" });
+    expect(secretEnvFor(store, "p2", "test").AITEST_DB_PASSWORDS).toBeUndefined();
+  });
+});
+
 describe("secrets inherited from the big project", () => {
   it("falls back to the parent's token and role accounts, own values win", async () => {
     const { secretEnvFor } = await import("../src/main/secrets.js");
@@ -79,6 +94,18 @@ describe("secrets inherited from the big project", () => {
       await broker.close();
     }
     expect(store.deletePrefix("aitest:grp:")).toBe(2);
+  });
+});
+
+describe("database passwords with two-level projects", () => {
+  it("falls back to the big project's passwords, own values win", async () => {
+    const { secretEnvFor } = await import("../src/main/secrets.js");
+    const store = new SecretStore(join(mkdtempSync(join(tmpdir(), "sec-")), "s.json"), cipher);
+    store.setDbPassword("grp", "test", "main", "group-pw");
+    store.setDbPassword("grp", "test", "analytics", "an-pw");
+    store.setDbPassword("child", "test", "main", "child-pw");
+    expect(JSON.parse(secretEnvFor(store, "child", "test", [], "grp").AITEST_DB_PASSWORDS)).toEqual({ main: "child-pw", analytics: "an-pw" });
+    expect(JSON.parse(secretEnvFor(store, "child", "test").AITEST_DB_PASSWORDS)).toEqual({ main: "child-pw" });
   });
 });
 

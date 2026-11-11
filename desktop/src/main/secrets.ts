@@ -58,6 +58,21 @@ export class SecretStore {
     return this.read<EnvSecret>(ref);
   }
 
+  /** 被测系统数据库密码：按「项目 + 环境 + 连接名」存放 */
+  static dbRef(projectId: string, env: string, name: string): string {
+    return `aitest:${projectId}:${env}:db:${name}`;
+  }
+
+  setDbPassword(projectId: string, env: string, name: string, password: string): void {
+    this.set(SecretStore.dbRef(projectId, env, name), { authToken: password });
+  }
+
+  dbPasswords(projectId: string, env: string): Record<string, string> {
+    const prefix = `aitest:${projectId}:${env}:db:`;
+    return Object.fromEntries(Object.keys(this.data).filter((k) => k.startsWith(prefix))
+      .map((k) => [k.slice(prefix.length), this.read<EnvSecret>(k)?.authToken ?? ""]));
+  }
+
   getRole(projectId: string, role: string): RoleSecret | undefined {
     return this.read<RoleSecret>(SecretStore.roleRef(projectId, role));
   }
@@ -94,13 +109,13 @@ export interface Broker {
 }
 
 /**
- * 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES）。
+ * 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES）+ 数据库密码（AITEST_DB_PASSWORDS）。
  * 子项目先找自己的凭据，没有再用大项目（parentId）的——与环境、角色的继承规则一致。
  */
 /** roles 传 ["*"] 表示该项目（含大项目）保存了凭据的全部角色，用于接口多账号 */
 export const ALL_ROLES = "*";
 
-export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames">>,
+export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames" | "dbPasswords">>,
   projectId: string, env: string, roles: string[] = [], parentId?: string): Record<string, string> {
   const out: Record<string, string> = {};
   const secret = store.get(SecretStore.ref(projectId, env)) ?? (parentId ? store.get(SecretStore.ref(parentId, env)) : undefined);
@@ -120,6 +135,9 @@ export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole"> & Parti
   // 接口多账号：角色固定 token
   const tokens = Object.fromEntries(found.filter((r) => r.cred!.token).map((r) => [r.role, r.cred!.token!]));
   if (Object.keys(tokens).length) out.AITEST_ROLE_TOKENS = JSON.stringify(tokens);
+  // 数据库密码：大项目的为基础，子项目自己设置的覆盖同名连接
+  const dbPasswords = { ...(parentId ? store.dbPasswords?.(parentId, env) ?? {} : {}), ...store.dbPasswords?.(projectId, env) };
+  if (Object.keys(dbPasswords).length) out.AITEST_DB_PASSWORDS = JSON.stringify(dbPasswords);
   return out;
 }
 
@@ -130,7 +148,7 @@ export interface BrokerHandlers {
   openView?: (projectId: string, role: string) => Promise<string>;
 }
 
-export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames">>, handlers: BrokerHandlers = {}): Promise<Broker> {
+export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames" | "dbPasswords">>, handlers: BrokerHandlers = {}): Promise<Broker> {
   const token = randomBytes(24).toString("hex");
   const expected = Buffer.from(`Bearer ${token}`);
   const server: Server = createServer((req, res) => {

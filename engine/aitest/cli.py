@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from datetime import datetime, timezone
 
-from . import apigen, docparser, heal, hierarchy, importer, linter, openapi, ops, router, runner, workspace
+from . import apigen, db, docparser, heal, hierarchy, importer, linter, openapi, ops, reports, router, runner, workspace
 from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .store import Store
 
@@ -270,8 +270,10 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
         api_login=env_cfg.get("api_login") or None,
     )
     suite_dir = Path(p.workspace_path) / "scripts" / "api"
+    # 入库校验需要的数据库连接（密码来自 AITEST_DB_PASSWORDS，只传给脚本进程）
+    db_env = db.runtime_env(db.configs_for_env(env_cfg))
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
-                                     report_dir=Path(p.workspace_path) / "reports")
+                                     report_dir=Path(p.workspace_path) / "reports", extra_env=db_env)
     store.save_run(run, results)
     return {"run_id": run.id, **run.result}
 
@@ -412,6 +414,8 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
             r.failure_type = runner.classify_failure(r.message)
     run.result = runner.summarize(results)
     run.result["framework"] = a.framework
+    if a.html_report:
+        run.result["html_report"] = a.html_report  # Playwright HTML 报告目录，界面可直接打开
     store.save_run(run, results)
     reviews = []
     for r in items:
@@ -541,6 +545,70 @@ class _Parser(argparse.ArgumentParser):
         raise CliArgumentError(f"{self.prog}: {message}")
 
 
+# ---- 测试报告 ----
+
+
+def cmd_list_runs(store: Store, a: argparse.Namespace) -> Any:
+    return reports.list_runs(store, a.project, a.limit, a.framework)
+
+
+def cmd_run_detail(store: Store, a: argparse.Namespace) -> Any:
+    return reports.run_detail(store, a.run)
+
+
+def cmd_export_report(store: Store, a: argparse.Namespace) -> Any:
+    return reports.export_report(store, a.run, a.format, a.out)
+
+
+# ---- 被测系统数据库 ----
+
+
+def _db_configs(store: Store, a: argparse.Namespace) -> dict[str, db.DbConfig]:
+    p = _project(store, a.project)
+    env_cfg = hierarchy.effective_environments(store, p).get(a.env)  # 子项目含继承自大项目的环境
+    if env_cfg is None:
+        raise KeyError(f"项目未配置环境：{a.env}")
+    return db.configs_for_env(env_cfg)
+
+
+def _one_db(store: Store, a: argparse.Namespace) -> db.DbConfig:
+    configs = _db_configs(store, a)
+    name = a.conn or (next(iter(configs)) if len(configs) == 1 else None)
+    if not name or name not in configs:
+        raise KeyError(f"未配置数据库连接：{a.conn or '（未指定）'}，可用：{', '.join(configs) or '无'}")
+    return configs[name]
+
+
+def cmd_db_list(store: Store, a: argparse.Namespace) -> Any:
+    return [c.public() for c in _db_configs(store, a).values()]
+
+
+def cmd_db_test(store: Store, a: argparse.Namespace) -> Any:
+    return db.test_connection(_one_db(store, a))
+
+
+def cmd_db_query(store: Store, a: argparse.Namespace) -> Any:
+    params = json.loads(a.params) if a.params else {}
+    return db.query(_one_db(store, a), a.sql, params, a.limit)
+
+
+def cmd_db_check(store: Store, a: argparse.Namespace) -> Any:
+    spec = json.loads(a.spec)
+    variables = json.loads(a.vars) if a.vars else {}
+    configs = db.configs_from_runtime_env() if a.runtime else _db_configs(store, a)
+    return db.check(configs, spec, variables)
+
+
+def cmd_db_exec(store: Store, a: argparse.Namespace) -> Any:
+    params = json.loads(a.params) if a.params else {}
+    return db.execute(_one_db(store, a), a.sql, params)
+
+
+def cmd_db_runtime_env(store: Store, a: argparse.Namespace) -> Any:
+    """供客户端 / CI 注入 UI 脚本进程（含密码，只经本地子进程传递，不进模型上下文）。"""
+    return db.runtime_env(_db_configs(store, a))
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = _Parser(prog="aitest", description="AI 测试客户端引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
@@ -614,7 +682,8 @@ def build_parser() -> argparse.ArgumentParser:
         (("--framework",), {"default": "playwright"}))
     add("list-scripts", cmd_list_scripts, (("--case",), {}))
     add("save-run", cmd_save_run, (("--project",), req), (("--env",), req), (("--results-file",), req),
-        (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}))
+        (("--mode",), {"default": "regression"}), (("--framework",), {"default": "playwright"}),
+        (("--html-report",), {}))
     add("list-run-results", cmd_list_run_results, (("--run",), req), *paging)
     add("propose-fix", cmd_propose_fix, (("--project",), req), (("--case",), req), (("--script",), req),
         (("--content-file",), req), (("--reason",), {}), (("--failure-type",), {"default": "script_error"}),
@@ -640,6 +709,22 @@ def build_parser() -> argparse.ArgumentParser:
     add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
     add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))
     add("import-workspace", cmd_import_workspace, (("--workspace",), req), (("--name",), {}))
+    # ---- 测试报告 ----
+    add("list-runs", cmd_list_runs, (("--project",), req), (("--limit",), {"type": int, "default": 50}),
+        (("--framework",), {"choices": ["pytest", "playwright"]}))
+    add("run-detail", cmd_run_detail, (("--run",), req))
+    # ---- 被测系统数据库 ----
+    # 连接名用 --conn：--db 是全局参数（引擎自身的 SQLite 路径）
+    dbargs = ((("--project",), req), (("--env",), req), (("--conn",), {}))
+    add("db-list", cmd_db_list, *dbargs)
+    add("db-test", cmd_db_test, *dbargs)
+    add("db-query", cmd_db_query, *dbargs, (("--sql",), req), (("--params",), {}), (("--limit",), {"type": int, "default": 200}))
+    add("db-check", cmd_db_check, (("--project",), {}), (("--env",), {}), (("--spec",), req), (("--vars",), {}),
+        (("--runtime",), {"action": "store_true", "help": "从 AITEST_DATABASES 读取连接（脚本运行时）"}))
+    add("db-exec", cmd_db_exec, *dbargs, (("--sql",), req), (("--params",), {}))
+    add("db-runtime-env", cmd_db_runtime_env, (("--project",), req), (("--env",), req))
+    add("export-report", cmd_export_report, (("--run",), {"action": "append", "required": True}),
+        (("--format",), {"choices": ["html", "xlsx"], "default": "html"}), (("--out",), {}))
     return ap
 
 

@@ -41,8 +41,19 @@ export interface AgentEngine {
   runTurn(threadId: string, text: string, opts?: { tokenLimit?: number }): Promise<TurnResult>;
 }
 
+export interface DatabaseInfo {
+  type: "mysql" | "postgresql" | "sqlite";
+  host?: string;
+  port?: number;
+  database?: string;
+  user?: string;
+  path?: string;
+  readonly?: boolean;
+}
+
 export interface EnvironmentInfo {
   base_url: string;
+  databases?: Record<string, DatabaseInfo>;
   auth_header?: string;
   production?: boolean;
   login?: Record<string, string>;
@@ -61,6 +72,8 @@ export interface ProjectInfo {
   /** 两层项目："group" 为大项目，只存放共享配置 */
   kind?: "project" | "group";
   parent_id?: string;
+  /** 继承自大项目的环境：环境名 → 定义它的大项目 ID */
+  inherited_environments?: Record<string, string>;
 }
 
 /** UI 执行相关依赖（来自 @ai-test/mcp-servers，测试时可替换） */
@@ -351,18 +364,24 @@ export class Orchestrator extends EventEmitter {
     const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
 
     const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    const secretEnv = this.deps.secretEnv(projectId, env, roles);
+    // UI 脚本中的数据库断言需要的连接配置（含密码，只注入脚本进程）
+    const dbRuntime = envCfg.databases && Object.keys(envCfg.databases).length
+      ? await this.deps.engine<Record<string, string>>(["db-runtime-env", "--project", projectId, "--env", env], secretEnv)
+      : {};
     this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
     const out = await ui.runUiSuite({
       workspace: project.workspace_path,
       baseUrl: envCfg.base_url,
       caseIds,
       headed: opts.headed,
-      env: { ...this.deps.secretEnv(projectId, env, roles), ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
+      env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     });
     const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
     writeFileSync(file, JSON.stringify(out.results));
     const run = await this.deps.engine<RunSummary & { reviews: number }>([
       "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "playwright",
+      "--html-report", out.htmlReport,
     ]);
     let heal: TriageItem[] | undefined;
     if (opts.autoHeal !== false && run.needs_agent.length) {
@@ -528,6 +547,67 @@ export class Orchestrator extends EventEmitter {
 
   importWorkspace(workspace: string) {
     return this.deps.engine(["import-workspace", "--workspace", workspace]);
+  }
+
+  // ------------------------------------------------------------------ 被测系统数据库
+
+  /** 环境由谁定义：继承来的环境写回大项目，所有子项目共享连接配置 */
+  async environmentOwner(projectId: string, env: string): Promise<{ ownerId: string; envCfg: EnvironmentInfo }> {
+    const p = await this.project(projectId);
+    const ownerId = p.inherited_environments?.[env] ?? projectId;
+    const envCfg = (ownerId === projectId ? p : await this.project(ownerId)).environments[env];
+    if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    return { ownerId, envCfg };
+  }
+
+  /** 保存连接配置（不含密码，密码由调用方按返回的 ownerId 存钥匙串） */
+  async saveDatabase(projectId: string, env: string, name: string, cfg: DatabaseInfo) {
+    if (!/^[A-Za-z_][\w-]*$/.test(name)) throw new Error("连接名只能包含字母、数字、下划线和连字符，且以字母开头");
+    const { ownerId, envCfg } = await this.environmentOwner(projectId, env);
+    const clean = Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== undefined && v !== "")) as unknown as DatabaseInfo;
+    await this.setEnvironment(ownerId, env, { ...envCfg, databases: { ...envCfg.databases, [name]: clean } });
+    return { ownerId };
+  }
+
+  async removeDatabase(projectId: string, env: string, name: string) {
+    const { ownerId, envCfg } = await this.environmentOwner(projectId, env);
+    const { [name]: _removed, ...rest } = envCfg.databases ?? {};
+    await this.setEnvironment(ownerId, env, { ...envCfg, databases: rest });
+    return { ownerId };
+  }
+
+  testDatabase(projectId: string, env: string, name: string) {
+    return this.deps.engine(["db-test", "--project", projectId, "--env", env, "--conn", name], this.deps.secretEnv(projectId, env));
+  }
+
+  /** 只读查询（引擎双重校验：语句类型 + 只读连接） */
+  queryDatabase(projectId: string, env: string, name: string, sql: string, params: Record<string, unknown> = {}, limit = 200) {
+    return this.deps.engine([
+      "db-query", "--project", projectId, "--env", env, "--conn", name, "--sql", sql,
+      "--params", JSON.stringify(params), "--limit", String(limit),
+    ], this.deps.secretEnv(projectId, env));
+  }
+
+  // ------------------------------------------------------------------ 测试报告
+
+  listRuns(projectId: string, framework?: "pytest" | "playwright", limit = 100) {
+    return this.deps.engine(["list-runs", "--project", projectId, "--limit", String(limit), ...(framework ? ["--framework", framework] : [])]);
+  }
+
+  runDetail(runId: string) {
+    return this.deps.engine(["run-detail", "--run", runId]);
+  }
+
+  /** 导出单文件 HTML 汇总报告或 Excel 明细；可合并多次执行 */
+  exportReport(runIds: string[], format: "html" | "xlsx", out?: string) {
+    if (!runIds.length) throw new Error("请选择要导出的执行记录");
+    return this.deps.engine<{ path: string }>([
+      "export-report", ...runIds.flatMap((id) => ["--run", id]), "--format", format, ...(out ? ["--out", out] : []),
+    ]);
+  }
+
+  exportCasesExcel(projectId: string, out: string) {
+    return this.deps.engine<{ path: string; cases: number }>(["export-excel", "--project", projectId, "--out", out]);
   }
 
   private requireApp(): AppDeps {

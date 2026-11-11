@@ -79,7 +79,7 @@ def parse_junit(xml_path: str | Path, run_id: str) -> list[RunResult]:
 
 def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_name: str = "default",
                report_dir: str | Path | None = None, extra_args: list[str] | None = None,
-               timeout: float | None = None) -> tuple[Run, list[RunResult]]:
+               timeout: float | None = None, extra_env: dict[str, str] | None = None) -> tuple[Run, list[RunResult]]:
     suite_dir = Path(suite_dir)
     run = Run(project_id=project_id, env=env_name, mode=RunMode.REGRESSION.value,
               started_at=datetime.now(timezone.utc).isoformat())
@@ -88,7 +88,7 @@ def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_
     junit = report_dir / f"{run.id}.xml"
     cmd = [sys.executable, "-m", "pytest", str(suite_dir), f"--junitxml={junit}", "-q", "-p", "no:cacheprovider",
            "--rootdir", str(suite_dir), *(extra_args or [])]
-    proc_env = {**os.environ, **env.to_env()}
+    proc_env = {**os.environ, **env.to_env(), **(extra_env or {})}
     proc = subprocess.run(cmd, cwd=str(suite_dir), env=proc_env, capture_output=True, text=True, timeout=timeout)
     results = parse_junit(junit, run.id) if junit.exists() else []
     run.result = summarize(results)

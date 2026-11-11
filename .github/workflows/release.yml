@@ -132,6 +132,9 @@ jobs:
 
   release:
     needs: [version, packages, desktop]
+    # 某个平台失败（例如 macOS runner 排队被取消）时，仍发布已构建成功的平台，并在说明中列出缺失的平台；
+    # 失败的任务在 Actions 中保持红色。测试或打包失败则不发布。
+    if: ${{ !cancelled() && needs.version.result == 'success' && needs.packages.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -144,6 +147,17 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
         run: |
           ls -la assets
+          shopt -s nullglob
+          installers=(assets/*.exe assets/*.dmg assets/*.AppImage)
+          if [ ${#installers[@]} -eq 0 ]; then
+            echo "::error::没有任何平台的安装包构建成功，不发布"
+            exit 1
+          fi
+          missing=()
+          win=(assets/*.exe); mac=(assets/*.dmg); linux=(assets/*.AppImage)
+          [ ${#win[@]} -gt 0 ] || missing+=("Windows")
+          [ ${#mac[@]} -gt 0 ] || missing+=("macOS")
+          [ ${#linux[@]} -gt 0 ] || missing+=("Linux")
           cat > notes.md <<'NOTES'
           ## 安装包
 
@@ -165,6 +179,9 @@ jobs:
           - `aitest_engine-*.whl`：执行引擎（`pip install` 后提供 `aitest` 命令）
           - `ai-test-mcp-servers-*.tgz`：MCP Server 与 CI 执行器 `aitest-ci`
           NOTES
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf '\n> ⚠️ 本次未包含 %s 安装包（构建失败或未执行），详见本次工作流运行记录。\n' "${missing[*]}" >> notes.md
+          fi
           gh release create "$TAG" assets/* \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
@@ -176,6 +193,8 @@ jobs:
   # 放在独立前缀下，不影响存储桶中的其它内容。客户端从 UPDATE_URL 检查更新。
   update-feed:
     needs: [version, desktop, release]
+    # 部分平台构建失败时，已发布的平台照常推送更新
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}

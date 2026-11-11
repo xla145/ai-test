@@ -1,5 +1,5 @@
 # 由 AI 测试客户端生成，请勿手工修改（重新生成会覆盖）。
-# 接口用例的执行：变量替换、按角色鉴权、请求、断言与提取。单个请求与流程（多步、多账号）共用。
+# 接口用例的执行：变量替换、按角色鉴权、数据准备、请求、断言、提取与入库校验。单个请求与流程（多步、多账号）共用。
 import re
 
 from _aitest_schema import validate
@@ -53,6 +53,11 @@ def execute(step, client, env, variables, auth_for, label=""):
     if step.get("body") is not None:
         kwargs["json"] = render(step["body"], variables)
 
+    if step.get("db_setup"):
+        from _aitest_db import configs_from_runtime_env, run_setup
+
+        run_setup(configs_from_runtime_env(), step["db_setup"], variables)
+
     resp = client.request(step["method"], path, **kwargs)
 
     assert resp.status_code in step["expected_status"], (
@@ -70,4 +75,14 @@ def execute(step, client, env, variables, auth_for, label=""):
         assert actual == want, f"{where}字段 {dotted} 实际为 {actual!r}，预期 {want!r}"
     for var, dotted in (step.get("extract") or {}).items():
         variables[var] = pick(body, dotted)
+    # 入库校验：查询被测系统数据库（只读），可引用前面提取的变量
+    if step.get("db_checks"):
+        from _aitest_db import assert_check, configs_from_runtime_env
+
+        configs = configs_from_runtime_env()
+        for spec in step["db_checks"]:
+            try:
+                assert_check(configs, spec, variables)
+            except AssertionError as e:
+                raise AssertionError(f"{where}{e}") from None
     return body

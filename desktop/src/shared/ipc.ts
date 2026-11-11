@@ -234,6 +234,20 @@ export interface AitestApi {
   checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>;
   getUserInfo(): Promise<UserInfo>;
   openDataDir(): Promise<string>;
+  saveDatabase(projectId: string, env: string, name: string, cfg: Record<string, unknown>, password?: string): Promise<unknown>;
+  removeDatabase(projectId: string, env: string, name: string): Promise<unknown>;
+  testDatabase(projectId: string, env: string, name: string): Promise<{ ok: boolean; elapsed_ms: number }>;
+  queryDatabase(projectId: string, env: string, name: string, sql: string, params?: Record<string, unknown>): Promise<{
+    columns: string[]; rows: Record<string, unknown>[]; row_count: number; truncated: boolean; elapsed_ms: number;
+  }>;
+  hasDbPassword(projectId: string, env: string, name: string): Promise<boolean>;
+  listRuns(projectId: string, framework?: "pytest" | "playwright"): Promise<any[]>;
+  runDetail(runId: string): Promise<any>;
+  /** 弹出保存对话框；用户取消返回 null */
+  exportReport(runIds: string[], format: "html" | "xlsx"): Promise<{ path: string } | null>;
+  exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
+  openPath(path: string): Promise<void>;
+  showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
   openTestPage(url: string): Promise<void>;

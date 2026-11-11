@@ -191,6 +191,58 @@
             },
             "name": {
               "type": "string"
+            },
+            "db_setup": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sql"
+                ],
+                "properties": {
+                  "db": {
+                    "type": "string"
+                  },
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "db_checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sql"
+                ],
+                "properties": {
+                  "db": {
+                    "type": "string"
+                  },
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "params": {
+                    "type": "object"
+                  },
+                  "expect": {
+                    "type": "object"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         }
@@ -263,6 +315,58 @@
           },
           "name": {
             "type": "string"
+          },
+          "db_setup": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "db_checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                },
+                "expect": {
+                  "type": "object"
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

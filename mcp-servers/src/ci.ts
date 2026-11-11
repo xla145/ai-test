@@ -48,6 +48,8 @@ export interface CiReport {
   junit: string;
   summary: string;
   runs: Record<string, string>;
+  /** 单文件 HTML 汇总报告 */
+  htmlReport?: string;
 }
 
 interface Project {
@@ -69,7 +71,7 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
     python: opts.python ?? secrets.AITEST_PYTHON ?? "python3",
     db: join(mkdtempSync(join(tmpdir(), "aitest-ci-")), "ci.sqlite"),
     // 接口多账号：角色账号密码（配合环境的接口登录）与角色 token
-    env: pick(secrets, ["AITEST_AUTH_TOKEN", "AITEST_AUTH_HEADER", "AITEST_ROLES", "AITEST_ROLE_TOKENS", "PYTHONPATH"]),
+    env: pick(secrets, ["AITEST_AUTH_TOKEN", "AITEST_AUTH_HEADER", "AITEST_ROLES", "AITEST_ROLE_TOKENS", "AITEST_DB_PASSWORDS", "PYTHONPATH"]),
   };
   const engine = <T,>(args: string[], env?: Record<string, string>) =>
     runEngine<T>(args, { ...engineOpts, env: { ...engineOpts.env, ...env } });
@@ -105,11 +107,14 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
     const uiDir = join(workspace, "scripts", "ui");
     const specs = existsSync(uiDir) ? readdirSync(uiDir).filter((f) => f.endsWith(".spec.ts")) : [];
     if (specs.length) {
+      const dbRuntime = await engine<Record<string, string>>(["db-runtime-env", "--project", project.id, "--env", opts.env]);
       const out = await runUiSuite({
         workspace,
         baseUrl,
         env: {
-          ...pick(secrets, ["AITEST_ROLES", "AITEST_CHROMIUM_PATH", "AITEST_AUTH_MAX_AGE_MIN"]),
+          ...pick(secrets, ["AITEST_ROLES", "AITEST_CHROMIUM_PATH", "AITEST_AUTH_MAX_AGE_MIN", "PYTHONPATH"]),
+          ...dbRuntime,
+          AITEST_PYTHON: engineOpts.python ?? "python3",
           ...(envCfg?.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}),
         },
       });
@@ -119,6 +124,7 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
       writeFileSync(file, JSON.stringify(out.results));
       const run = await engine<{ run_id: string; total: number; passed: number }>([
         "save-run", "--project", project.id, "--env", opts.env, "--results-file", file, "--framework", "playwright",
+        "--html-report", out.htmlReport,
       ]);
       runs.ui = run.run_id;
       const rows = await engine<CiCaseResult[]>(["list-run-results", "--run", run.run_id]);
@@ -133,10 +139,18 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
   const summary = toSummary(project.name, opts.env, baseUrl, results);
   writeFileSync(join(outDir, "junit.xml"), junit);
   writeFileSync(join(outDir, "summary.md"), summary);
+  // 单文件 HTML 汇总报告（截图内嵌），作为构建产物上传后可直接打开
+  const runIds = Object.values(runs);
+  let htmlReport: string | undefined;
+  if (runIds.length) {
+    htmlReport = (await engine<{ path: string }>([
+      "export-report", ...runIds.flatMap((id) => ["--run", id]), "--out", join(outDir, "report.html"),
+    ])).path;
+  }
   if (secrets.GITHUB_STEP_SUMMARY) appendFileSync(secrets.GITHUB_STEP_SUMMARY, summary + "\n");
   const exitCode = results.some((r) => FAILED.has(r.status)) ? 1 : 0;
-  log(`结果写入 ${outDir}（junit.xml、summary.md），退出码 ${exitCode}`);
-  return { exitCode, project: project.name, env: opts.env, baseUrl, results, junit, summary, runs };
+  log(`结果写入 ${outDir}（junit.xml、summary.md${htmlReport ? "、report.html" : ""}），退出码 ${exitCode}`);
+  return { exitCode, project: project.name, env: opts.env, baseUrl, results, junit, summary, runs, htmlReport };
 }
 
 function pick(env: NodeJS.ProcessEnv, keys: string[]): Record<string, string> {
@@ -205,7 +219,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
       path: ".gitlab-ci.yml",
       content: [
         "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
-        "# 在 CI/CD 变量中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）。",
+        "# 在 CI/CD 变量中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
         "aitest-regression:",
         "  image: mcr.microsoft.com/playwright:v1.63.0-noble",
         "  script:",
@@ -226,7 +240,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
     path: ".github/workflows/aitest.yml",
     content: [
       "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
-      "# 在仓库 Secrets 中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）。",
+      "# 在仓库 Secrets 中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
       "name: AI 测试回归",
       "on:",
       "  push:",
@@ -249,6 +263,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
       "          AITEST_AUTH_TOKEN: ${{ secrets.AITEST_AUTH_TOKEN }}",
       "          AITEST_ROLES: ${{ secrets.AITEST_ROLES }}",
       "          AITEST_ROLE_TOKENS: ${{ secrets.AITEST_ROLE_TOKENS }}",
+      "          AITEST_DB_PASSWORDS: ${{ secrets.AITEST_DB_PASSWORDS }}",
       "      - uses: actions/upload-artifact@v4",
       "        if: always()",
       "        with:",

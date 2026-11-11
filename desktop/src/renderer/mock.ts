@@ -15,7 +15,11 @@ const projects: any[] = [
   {
     id: "grp_feature", name: "特征中心", workspace_path: "", kind: "group", parent_id: "",
     environments: {
-      test: { base_url: "https://feature-test.example.com", app: { android: "com.example.feature.test", ios: "com.example.feature.test" }, login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
+      test: { base_url: "https://feature-test.example.com", app: { android: "com.example.feature.test", ios: "com.example.feature.test" }, login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" },
+        databases: {
+          main: { type: "mysql", host: "10.0.3.21", port: 3306, database: "feature_center", user: "qa_readonly", readonly: true },
+          analytics: { type: "postgresql", host: "10.0.3.40", database: "tracking", user: "qa", readonly: false },
+        } },
       prod: { base_url: "https://feature.example.com", production: true },
     },
   },
@@ -116,6 +120,42 @@ const attributions = [
   { run_id: "run_5c1e", case_id: "tc_8f2a1c0e08", auto_type: "product_bug", source: "agent", reason: "停用后接口仍返回 200，未校验授权状态" },
   { run_id: "run_5c1e", case_id: "tc_8f2a1c0e04", auto_type: "environment", source: "rule", reason: "确定性规则判定" },
 ];
+
+const mockRuns = [
+  { id: "run_9a7b", env: "test", mode: "regression", started_at: "2026-11-10T15:12:04+08:00", framework: "playwright" as const, total: 28, passed: 25, failed: 3, skipped: 0, pass_rate: 0.893, html_report: "/Users/demo/aitest/feature-center/reports/ui-1/html" },
+  { id: "run_8d2f", env: "test", mode: "regression", started_at: "2026-11-10T15:05:41+08:00", framework: "pytest" as const, total: 35, passed: 33, failed: 2, skipped: 0, pass_rate: 0.943, junit: "/Users/demo/aitest/feature-center/reports/run_8d2f.xml" },
+  { id: "run_77c1", env: "test", mode: "regression", started_at: "2026-11-09T18:20:13+08:00", framework: "playwright" as const, total: 28, passed: 28, failed: 0, skipped: 0, pass_rate: 1, html_report: "/Users/demo/aitest/feature-center/reports/ui-0/html" },
+  { id: "run_5c1e", env: "test", mode: "regression", started_at: "2026-11-09T10:02:55+08:00", framework: "pytest" as const, total: 35, passed: 35, failed: 0, skipped: 0, pass_rate: 1 },
+];
+
+const mockDetail = (id: string) => {
+  const run = mockRuns.find((r) => r.id === id) ?? mockRuns[0];
+  const failed = run.failed ? [
+    { case_id: "tc_8f2a1c0e01", title: "标签管理-停用标签", module: "特征中心 / 标签管理", priority: "P0", status: "failed", duration: 8.2,
+      message: 'locator.click: Timeout 5000ms exceeded.\nCall log:\n  - waiting for getByTestId("disable-TAG-1001")',
+      failure_type: "script_error", attribution_confirmed: false, attribution_reason: "按钮 testid 变更，属于页面改版",
+      evidence_paths: ["reports/ui-1/artifacts/trace.zip"], reviews: [] },
+    { case_id: "tc_8f2a1c0e08", title: "服务接口-授权停用", module: "特征中心 / 服务接口", priority: "P1", status: "failed", duration: 0.4,
+      message: "状态码 200 不在预期 [403] 中；响应：{\"ok\":true}", failure_type: "product_bug", attribution_confirmed: true,
+      attribution_reason: "停用后接口仍返回 200，未校验授权状态", evidence_paths: [], reviews: [] },
+    { case_id: "tc_8f2a1c0e04", title: "推荐配置-接口越权", module: "特征中心 / 推荐配置", priority: "P0", status: "error", duration: 30,
+      message: "page.goto: net::ERR_CONNECTION_REFUSED", failure_type: "environment", attribution_confirmed: false,
+      attribution_reason: "确定性规则判定", evidence_paths: [], reviews: [] },
+  ].slice(0, run.failed) : [];
+  const passed = Array.from({ length: Math.min(run.passed, 12) }, (_, i) => ({
+    case_id: `tc_pass_${i}`, title: cases[i % cases.length].title, module: cases[i % cases.length].module_path.join(" / "),
+    priority: cases[i % cases.length].priority, status: "passed", duration: 1 + (i % 5) * 0.7, message: "", failure_type: undefined,
+    attribution_confirmed: false, attribution_reason: "", evidence_paths: [],
+    reviews: i === 2 ? [{ description: "缺失值显示为灰色「--」", ai_verdict: "pass", status: "pending" }] : [],
+  }));
+  return {
+    run: { ...run, base_url: "https://feature-test.example.com" },
+    project: projects[0],
+    summary: { total: run.total, passed: run.passed, failed: run.failed, skipped: 0, pass_rate: run.pass_rate, duration: 214.6,
+      failure_types: Object.fromEntries(failed.map((f) => [f.failure_type, 1])), pending_reviews: run.framework === "playwright" ? 1 : 0 },
+    results: [...failed, ...passed],
+  };
+};
 
 let globalSettings: GlobalSettings = {
   version: 2,
@@ -348,6 +388,25 @@ const mockApi: AitestApi = {
   // 预览时模拟内嵌浏览器：界面收窄到左半屏
   openTestPage: async () => listeners.view?.({ visible: true }),
   hideTestView: async () => listeners.view?.({ visible: false }),
+  saveDatabase: () => delay({}),
+  removeDatabase: () => delay({}),
+  testDatabase: (_p, _e, name) => name === "main" ? delay({ ok: true, elapsed_ms: 23.4 }, 400)
+    : new Promise((_, rej) => setTimeout(() => rej(new Error("无法连接 analytics（postgresql）：timeout")), 600)),
+  queryDatabase: () => delay({
+    columns: ["code", "name", "status", "updated_at", "updated_by"],
+    rows: [
+      { code: "TAG-1001", name: "高价值用户", status: "disabled", updated_at: "2026-11-10T15:12:09", updated_by: "admin" },
+      { code: "TAG-1002", name: "沉睡用户", status: "active", updated_at: "2026-11-08T10:01:44", updated_by: null },
+    ],
+    row_count: 2, truncated: false, elapsed_ms: 18.6,
+  }, 400),
+  hasDbPassword: () => delay(true),
+  listRuns: (_p, framework) => delay(mockRuns.filter((r) => !framework || r.framework === framework)),
+  runDetail: (id) => delay(mockDetail(id)),
+  exportReport: (ids, format) => delay({ path: `/Users/demo/Documents/测试报告-${ids[0]}.${format}` }, 500),
+  exportCasesExcel: (_p, name) => delay({ path: `/Users/demo/Documents/${name}-用例.xlsx`, cases: 349 }, 500),
+  openPath: () => delay(undefined),
+  showInFolder: () => delay(undefined),
   onApprovalRequest: (cb) => {
     listeners.approval = cb;
     return () => (listeners.approval = undefined);

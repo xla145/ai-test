@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import yaml from "js-yaml";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
-import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
+import { evaluateCommand, evaluateFileChange, isInside, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
@@ -289,6 +289,23 @@ async function openTestPage(url: string): Promise<void> {
   await view.webContents.loadURL(url);
 }
 
+/** 只允许打开项目 workspace 内的文件，或用户刚通过保存对话框导出的文件 */
+const exportedFiles = new Set<string>();
+async function assertOpenable(orch: Orchestrator, target: string): Promise<string> {
+  const p = resolve(target);
+  if (exportedFiles.has(p)) return p;
+  const projects = await orch.listProjects();
+  if (projects.some((x) => isInside(x.workspace_path, p))) return p;
+  throw new Error("只能打开项目 workspace 内的文件");
+}
+
+async function saveAs(defaultName: string, filters: { name: string; extensions: string[] }[]): Promise<string | null> {
+  const r = await dialog.showSaveDialog(mainWindow!, { defaultPath: join(app.getPath("documents"), defaultName), filters });
+  if (r.canceled || !r.filePath) return null;
+  exportedFiles.add(resolve(r.filePath));
+  return r.filePath;
+}
+
 function registerIpc(orch: Orchestrator): void {
   const handlers: Record<string, (...a: any[]) => unknown> = {
     listProjects: async () => rememberParents(await orch.listProjects()),
@@ -439,6 +456,42 @@ function registerIpc(orch: Orchestrator): void {
     },
     openTestPage: (url: string) => openTestPage(url),
     hideTestView: () => hideTestView(),
+    // ---- 被测系统数据库 ----
+    saveDatabase: async (p: string, env: string, name: string, cfg, password?: string) => {
+      const out = await orch.saveDatabase(p, env, name, cfg);
+      // 与连接配置存在同一个项目上（继承来的环境存到大项目）
+      if (password) secretStore.setDbPassword(out.ownerId, env, name, password);
+      return out;
+    },
+    removeDatabase: (p: string, env: string, name: string) => orch.removeDatabase(p, env, name),
+    testDatabase: (p: string, env: string, name: string) => orch.testDatabase(p, env, name),
+    queryDatabase: (p: string, env: string, name: string, sql: string, params?: Record<string, unknown>) =>
+      orch.queryDatabase(p, env, name, sql, params ?? {}),
+    hasDbPassword: (p: string, env: string, name: string) => {
+      const parent = projectParents.get(p);
+      return name in { ...(parent ? secretStore.dbPasswords(parent, env) : {}), ...secretStore.dbPasswords(p, env) };
+    },
+    // ---- 测试报告 ----
+    listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
+    runDetail: (runId: string) => orch.runDetail(runId),
+    exportReport: async (runIds: string[], format: "html" | "xlsx") => {
+      const ext = format === "html" ? "html" : "xlsx";
+      const out = await saveAs(`测试报告-${runIds[0]}.${ext}`, [{ name: format === "html" ? "HTML 报告" : "Excel", extensions: [ext] }]);
+      return out ? orch.exportReport(runIds, format, out) : null;
+    },
+    exportCasesExcel: async (p: string, name: string) => {
+      const out = await saveAs(`${name}-用例.xlsx`, [{ name: "Excel", extensions: ["xlsx"] }]);
+      return out ? orch.exportCasesExcel(p, out) : null;
+    },
+    openPath: async (target: string) => {
+      const p = await assertOpenable(orch, target);
+      // Playwright 报告是目录，打开其中的 index.html
+      const file = existsSync(join(p, "index.html")) ? join(p, "index.html") : p;
+      if (!existsSync(file)) throw new Error(`文件不存在：${file}`);
+      const err = await shell.openPath(file);
+      if (err) throw new Error(err);
+    },
+    showInFolder: async (target: string) => shell.showItemInFolder(await assertOpenable(orch, target)),
   };
   ipcMain.handle(CHANNELS.invoke, async (_e, method: string, ...args: unknown[]) => {
     const fn = handlers[method];

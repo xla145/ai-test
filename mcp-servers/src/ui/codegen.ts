@@ -27,7 +27,18 @@ export type Step = Base &
     | { action: "installClock"; time: string }
     | { action: "fastForward"; ms: number }
     | { action: "visualCheck"; description: string }
+    | { action: "expectDb"; check: DbCheck }
   );
+
+/** 数据库断言（与引擎 db.check 的 spec 一致） */
+export interface DbCheck {
+  db?: string;
+  sql: string;
+  params?: Record<string, unknown>;
+  expect?: Record<string, unknown>;
+  timeout_ms?: number;
+  description?: string;
+}
 
 export interface SpecInput {
   caseId: string;
@@ -120,6 +131,10 @@ export function generateSpec(input: SpecInput): string {
         break;
       case "fastForward":
         body.push(`await ${p}.clock.fastForward(${st.ms});`);
+        break;
+      case "expectDb":
+        helpers.add("expectDb");
+        body.push(`await expectDb(${s(st.check)});${st.check.description ? ` // ${st.check.description.replace(/\n/g, " ")}` : ""}`);
         break;
       case "visualCheck":
         helpers.add("visualCheck");
