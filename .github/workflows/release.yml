@@ -204,7 +204,7 @@ jobs:
       AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
       AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
       R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || '8f6229ee5588cc2e3ea0b886d5c7d96e' }}
-      R2_BUCKET: ${{ vars.R2_BUCKET || 'aiprobe' }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || 'oss' }}
       R2_PREFIX: ${{ vars.R2_PREFIX || 'aitest-desktop' }}
     steps:
       - uses: actions/download-artifact@v4
