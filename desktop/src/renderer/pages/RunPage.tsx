@@ -6,10 +6,10 @@ import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { ApiLoginCard } from "../components/ApiLogin";
 import { EnvCredentials } from "../components/EnvCredentials";
 import { RoleAccounts } from "../components/RoleAccounts";
-import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
+import { EnvSelect, RunButton, useEnvChoice, NoEnvironment } from "../components/EnvPicker";
 import { FAILURE, LabelTag } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction } from "../hooks";
+import { useAction, notifyProjectChanged } from "../hooks";
 
 interface RunResult {
   run: { run_id: string; total: number; passed: number; failed: number; error: number; skipped: number; pass_rate: number };
@@ -22,7 +22,7 @@ export function RunPage({ project }: { project: Project }) {
   const [result, setResult] = useState<RunResult>();
   const { busy, run } = useAction();
 
-  if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
+  if (!envs.length) return <NoEnvironment project={project} purpose="执行接口回归" />;
   const failed = result ? result.run.failed + result.run.error : 0;
 
   return (
@@ -34,7 +34,10 @@ export function RunPage({ project }: { project: Project }) {
           <EnvSelect project={project} value={env} onChange={setEnv} showUrl />
           <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</Button>
           <RunButton project={project} env={env} loading={busy}
-            onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env, { confirmProduction })) as RunResult))}>
+            onRun={(confirmProduction) => run(async () => {
+              setResult((await api().runRegression(project.id, env, { confirmProduction })) as RunResult);
+              notifyProjectChanged(project.id);
+            })}>
             执行回归
           </RunButton>
         </>}

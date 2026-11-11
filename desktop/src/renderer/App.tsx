@@ -43,9 +43,11 @@ import {
   Typography,
   theme,
 } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { InputRef } from "antd";
 import type { ApprovalRequest } from "../shared/ipc";
 import { api, isGroup, type Project } from "./api";
+import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
 import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad } from "./hooks";
@@ -107,7 +109,8 @@ export function App() {
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
   const [showSettings, setShowSettings] = useState(false);
-  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  /** 项目设置抽屉；addEnv 表示打开时直接弹出「添加环境」 */
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState<false | { addEnv?: boolean }>(false);
   const { data: user } = useLoad(() => api().getUserInfo(), []);
   const update = useUpdateState();
   const { notification } = AntApp.useApp();
@@ -125,7 +128,11 @@ export function App() {
   const current = projects.find((p) => p.id === currentId) ?? projects[0];
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
   const compact = viewVisible;
-  const projectsCtx = useMemo(() => ({ reload, projects }), [reload, projects]);
+  const projectsCtx = useMemo(() => ({
+    reload, projects,
+    goTab: (key: string) => setTab(key),
+    openSettings: (opts?: { addEnv?: boolean }) => setProjectSettingsOpen(opts ?? {}),
+  }), [reload, projects]);
   const groups = projects.filter(isGroup);
   const parentOf = (p?: Project) => (p?.parent_id ? projects.find((x) => x.id === p.parent_id) : undefined);
   // 侧栏树：大项目 → 概览 + 子项目 + 新建子项目；独立项目在后
@@ -265,7 +272,7 @@ export function App() {
                 <Typography.Text strong ellipsis style={{ fontSize: 16, minWidth: 0 }}>{current.name}</Typography.Text>
                 {isGroup(current) && <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>大项目</Tag>}
                 <Tooltip title="项目设置：名称、执行环境">
-                  <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen(true)} />
+                  <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
                 </Tooltip>
                 {!compact && current.workspace_path && (
                   <Tooltip title={current.workspace_path}>
@@ -299,7 +306,13 @@ export function App() {
             <Tabs
               activeKey={tab}
               onChange={setTab}
-              items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: <div className="page">{t.children}</div> }))}
+              items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: (
+                <div className="page">
+                  {/* 半屏（内嵌浏览器打开）时不占用高度 */}
+                  {!compact && <ProjectGuide key={current.id} project={current} />}
+                  {t.children}
+                </div>
+              ) }))}
               tabBarStyle={{ padding: "0 24px", marginBottom: 0 }}
               className="project-tabs"
               style={{ height: "100%" }}
@@ -319,11 +332,21 @@ export function App() {
       </Layout>
 
       {current && (
-        <ProjectSettings project={current} open={projectSettingsOpen} onClose={() => setProjectSettingsOpen(false)}
+        <ProjectSettings project={current} open={!!projectSettingsOpen} addEnv={projectSettingsOpen ? projectSettingsOpen.addEnv : false} onClose={() => setProjectSettingsOpen(false)}
           onDeleted={() => setCurrentId(undefined)} />
       )}
 
-      <NewProjectModal open={!!creating} preset={creating || NO_PRESET} groups={groups} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); setCurrentId(p.id); setShowSettings(false); }} />
+      <NewProjectModal open={!!creating} preset={creating || NO_PRESET} groups={groups} onClose={() => setCreating(false)} onCreated={async (p) => {
+        await reload();
+        setCurrentId(p.id);
+        setShowSettings(false);
+        // 新项目从第一步开始；所属大项目在侧栏展开，能看到新建的子项目
+        setTab("import");
+        if (p.parent_id) setOpenGroups((keys) => {
+          const all = keys ?? groups.map((g) => `group:${g.id}`);
+          return all.includes(`group:${p.parent_id}`) ? all : [...all, `group:${p.parent_id}`];
+        });
+      }} />
 
       <Modal
         open={!!approval}
@@ -383,6 +406,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const kind = Form.useWatch("kind", form);
   const parent = Form.useWatch("parent", form);
   const { busy, run } = useAction();
+  const nameRef = useRef<InputRef>(null);
   useEffect(() => {
     if (open) form.setFieldsValue({ kind: preset.kind ?? "project", parent: preset.parent, env: "test" });
   }, [open, preset, form]);
@@ -396,7 +420,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
     const envs = v.baseUrl ? { [v.env || "test"]: { base_url: v.baseUrl } } : {};
     const p = await run(() => api().createProject(v.name, v.workspace ?? "", envs,
       { kind: v.kind, parent: v.kind === "project" ? v.parent : undefined }) as Promise<Project>,
-      v.kind === "group" ? "大项目已创建，可以在其下新建子项目" : "项目已创建");
+      v.kind === "group" ? "大项目已创建，可以在其下新建子项目" : "项目已创建，按「快速开始」完成配置");
     if (p) {
       form.resetFields();
       onClose();
@@ -406,7 +430,9 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const group = kind === "group";
   return (
     <Modal open={open} title={group ? "新建大项目" : parent ? "新建子项目" : "新建项目"} onCancel={onClose} onOk={submit}
-      okText="创建" confirmLoading={busy} destroyOnHidden>
+      okText="创建" confirmLoading={busy} destroyOnHidden
+      // 打开动画结束后再聚焦（Modal 打开时会把焦点放在对话框本身）
+      afterOpenChange={(v) => v && nameRef.current?.focus()}>
       <Form form={form} layout="vertical" initialValues={{ env: "test", kind: "project" }} preserve={false}>
         <Form.Item name="kind" label="类型" extra={group
           ? "大项目不含用例，只存放执行环境、凭据、角色账号与预算，其下的子项目自动继承"
@@ -419,7 +445,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
           </Form.Item>
         )}
         <Form.Item name="name" label={group ? "大项目名" : "项目名"} rules={[{ required: true, whitespace: true, message: "请输入名称" }]}>
-          <Input placeholder={group ? "如：特征中心" : parent ? "如：v4.4、标签管理" : "如：订单服务"} />
+          <Input ref={nameRef} onPressEnter={submit} placeholder={group ? "如：特征中心" : parent ? "如：v4.4、标签管理" : "如：订单服务"} />
         </Form.Item>
         {!group && (
           <Form.Item label="workspace 目录" required extra="用例、脚本与报告都放在这里，并用 git 管理">
@@ -435,7 +461,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
           <Form.Item name="env" label="环境名" style={{ width: 120 }}><Input /></Form.Item>
           <Form.Item name="baseUrl" label={parent && !group ? "被测地址（留空则继承大项目的环境）" : "被测地址（可稍后配置）"} style={{ flex: 1 }}
             rules={[{ type: "url", message: "请输入完整地址，如 https://test.example.com" }]}>
-            <Input placeholder="https://test.example.com" />
+            <Input onPressEnter={submit} placeholder="https://test.example.com" />
           </Form.Item>
         </Flex>
       </Form>

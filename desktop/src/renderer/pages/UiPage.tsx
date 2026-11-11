@@ -24,12 +24,12 @@ import { useState } from "react";
 import { api, envOwner, type Project, type TestCase } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { DiffView } from "../components/DiffView";
-import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
+import { EnvSelect, RunButton, useEnvChoice, NoEnvironment } from "../components/EnvPicker";
 import { FAILURE, LabelTag, LINT, MODE } from "../components/labels";
 import { useProjects } from "../components/ProjectSettings";
 import { RoleAccounts } from "../components/RoleAccounts";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad, usePaged } from "../hooks";
+import { useAction, useLoad, usePaged, notifyProjectChanged } from "../hooks";
 
 interface Proposal { id: string; case_id: string; script_path: string; diff: string; reason: string; status: string }
 interface Review { id: string; case_id: string; kind: string; description: string; ai_verdict: string; evidence_paths: string[]; status: string }
@@ -58,7 +58,7 @@ export function UiPage({ project }: { project: Project }) {
     (q) => api().pageReviews(project.id, { ...q, status: "pending" }) as Promise<{ items: Review[]; total: number }>,
     [project.id], 10);
 
-  if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
+  if (!envs.length) return <NoEnvironment project={project} purpose="执行 UI 测试" />;
   const failed = result ? result.run.failed + result.run.error : 0;
 
   return (
@@ -72,6 +72,7 @@ export function UiPage({ project }: { project: Project }) {
           <RunButton project={project} env={env} loading={busy}
             onRun={(confirmProduction) => run(async () => {
               setResult((await api().runUiRegression(project.id, env, headed, { confirmProduction })) as UiRunResult);
+              notifyProjectChanged(project.id);
               await Promise.all([proposals.reload(), reviews.reload()]);
             })}>
             执行 UI 回归

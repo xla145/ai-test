@@ -5,7 +5,14 @@ import { api, isGroup, type Project } from "../api";
 import { useAction } from "../hooks";
 
 /** 项目数据变化（改名、改环境、保存登录方式）后刷新项目列表，避免页面拿着旧配置再保存 */
-export const ProjectsContext = createContext<{ reload: () => Promise<void>; projects: Project[] }>({
+export const ProjectsContext = createContext<{
+  reload: () => Promise<void>;
+  projects: Project[];
+  /** 切换到当前项目的某个标签页（如 "import"、"api"） */
+  goTab?: (key: string) => void;
+  /** 打开当前项目的设置抽屉（名称、执行环境）；addEnv 直接弹出「添加环境」 */
+  openSettings?: (opts?: { addEnv?: boolean }) => void;
+}>({
   reload: async () => undefined,
   projects: [],
 });
@@ -34,10 +41,24 @@ interface EnvForm {
  * 执行环境表：大项目 / 独立项目直接管理；子项目显示继承来的环境，可「覆盖」为自己的配置，
  * 删除覆盖即「恢复继承」。
  */
-export function EnvTable({ project }: { project: Project }) {
+export function EnvTable({ project, autoAdd, onAutoAddDone }: {
+  project: Project;
+  /** 挂载时直接弹出「添加环境」 */
+  autoAdd?: boolean;
+  /** 直接弹出的「添加环境」保存或取消后调用（如关闭所在的抽屉，回到原来的页面） */
+  onAutoAddDone?: () => void;
+}) {
   const { reload, projects } = useProjects();
   const { busy, run } = useAction();
-  const [editing, setEditing] = useState<{ name?: string; base?: Env & { name?: string } }>();
+  const [editing, setEditing] = useState<{ name?: string; base?: Env & { name?: string } } | undefined>(autoAdd ? {} : undefined);
+  const [pendingAuto, setPendingAuto] = useState(Boolean(autoAdd));
+  const closeEditor = () => {
+    setEditing(undefined);
+    if (pendingAuto) {
+      setPendingAuto(false);
+      onAutoAddDone?.();
+    }
+  };
   const parent = project.parent_id ? projects.find((p) => p.id === project.parent_id) : undefined;
   const own = (project.own_environments ?? project.environments) as Record<string, Env>;
   const rows: EnvRow[] = Object.entries(project.environments as Record<string, Env>).map(([name, e]) => ({
@@ -59,7 +80,7 @@ export function EnvTable({ project }: { project: Project }) {
     if (!cfg.production) delete cfg.production;
     await api().setEnvironment(project.id, v.name.trim(), cfg);
     await reload();
-    setEditing(undefined);
+    closeEditor();
   }, "环境已保存");
 
   return (
@@ -125,17 +146,20 @@ export function EnvTable({ project }: { project: Project }) {
         base={editing?.base}
         overriding={Boolean(editing && !editing.name && editing.base)}
         existing={rows.filter((r) => !r.inherited).map((r) => r.name)}
+        suggestName={rows.length ? undefined : "test"}
         busy={busy}
-        onCancel={() => setEditing(undefined)}
+        onCancel={closeEditor}
         onSubmit={save}
       />
     </>
   );
 }
 
-export function ProjectSettings({ project, open, onClose, onDeleted }: {
+export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
   project: Project;
   open: boolean;
+  /** 打开时直接弹出「添加环境」（从空状态、快速开始进入） */
+  addEnv?: boolean;
   onClose: () => void;
   onDeleted: () => void;
 }) {
@@ -207,7 +231,7 @@ export function ProjectSettings({ project, open, onClose, onDeleted }: {
       )}
 
       <Card size="small" title={group ? "共享执行环境" : "执行环境"} style={{ marginBottom: 16 }}>
-        <EnvTable project={project} />
+        <EnvTable project={project} autoAdd={addEnv} onAutoAddDone={onClose} />
       </Card>
 
       <Card size="small" title={<Typography.Text type="danger">移除{group ? "大项目" : "项目"}</Typography.Text>}>
@@ -226,7 +250,7 @@ export function ProjectSettings({ project, open, onClose, onDeleted }: {
   );
 }
 
-function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSubmit }: {
+function EnvModal({ open, name, base, overriding, existing, suggestName, busy, onCancel, onSubmit }: {
   open: boolean;
   /** 编辑已有环境时的环境名（不可改） */
   name?: string;
@@ -235,6 +259,8 @@ function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSu
   /** 覆盖继承来的环境：环境名固定为继承的名字 */
   overriding: boolean;
   existing: string[];
+  /** 新增时预填的环境名（第一个环境默认 test） */
+  suggestName?: string;
   busy: boolean;
   onCancel: () => void;
   onSubmit: (v: EnvForm) => void;
@@ -248,8 +274,8 @@ function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSu
           name: name ?? base.name, base_url: base.base_url, production: Boolean(base.production), auth_header: (base.auth_header as string) ?? "",
           app_android: (base.app as { android?: string } | undefined)?.android ?? "", app_ios: (base.app as { ios?: string } | undefined)?.ios ?? "",
         }
-      : { production: false });
-  }, [open, name, base, form]);
+      : { production: false, name: suggestName });
+  }, [open, name, base, suggestName, form]);
   const submit = async () => {
     const v = await form.validateFields().catch(() => undefined);
     if (v) onSubmit(v);

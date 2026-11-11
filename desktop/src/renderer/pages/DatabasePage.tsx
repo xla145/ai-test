@@ -34,6 +34,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Project } from "../api";
+import { NoEnvironment } from "../components/EnvPicker";
 import { PageHeader } from "../components/PageHeader";
 import { useAction } from "../hooks";
 
@@ -46,14 +47,16 @@ const DEFAULT_PORT: Record<string, number> = { mysql: 3306, postgresql: 5432 };
 
 export function DatabasePage({ project, onChanged }: { project: Project; onChanged: () => Promise<void> }) {
   const envs = Object.keys(project.environments);
-  const [env, setEnv] = useState(envs[0]);
+  const [picked, setEnv] = useState(envs[0]);
+  // 第一次添加环境、或所选环境被删除后，回到第一个环境
+  const env = picked && envs.includes(picked) ? picked : envs[0];
   const envCfg = project.environments[env] as { databases?: Record<string, DbConn>; production?: boolean } | undefined;
   const conns = useMemo(() => Object.entries(envCfg?.databases ?? {}), [envCfg]);
   const [editing, setEditing] = useState<{ name?: string; cfg?: DbConn } | null>(null);
   const [status, setStatus] = useState<Record<string, { ok: boolean; text: string }>>({});
   const { busy, run } = useAction();
 
-  if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
+  if (!envs.length) return <NoEnvironment project={project} purpose="配置数据库连接" />;
 
   const test = (name: string) => run(async () => {
     try {

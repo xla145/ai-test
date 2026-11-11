@@ -3,10 +3,10 @@ import { Alert, App, Button, Card, Empty, Input, Segmented, Space, Statistic, Ta
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
-import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
+import { EnvSelect, RunButton, useEnvChoice, NoEnvironment } from "../components/EnvPicker";
 import { FAILURE, LabelTag, LINT } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad, usePaged } from "../hooks";
+import { useAction, useLoad, usePaged, notifyProjectChanged } from "../hooks";
 
 type Platform = "android" | "ios";
 
@@ -32,7 +32,7 @@ export function AppPage({ project }: { project: Project }) {
   const pinkyOn = view.data?.runtime.pinky.enabled ?? false;
   const failed = result ? result.run.failed + result.run.error : 0;
 
-  if (!Object.keys(project.environments).length) return <Empty description="项目还没有配置执行环境" />;
+  if (!Object.keys(project.environments).length) return <NoEnvironment project={project} purpose="执行 App 测试" />;
 
   return (
     <>
@@ -51,6 +51,7 @@ export function AppPage({ project }: { project: Project }) {
           <RunButton project={project} env={env} loading={busy}
             onRun={(confirmProduction) => run(async () => {
               setResult((await api().runAppRegression(project.id, env, platform, { device: device.trim() || undefined, confirmProduction })) as AppRunResult);
+              notifyProjectChanged(project.id);
             })}>
             执行 App 回归
           </RunButton>

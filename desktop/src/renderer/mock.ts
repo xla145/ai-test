@@ -197,6 +197,11 @@ const roleSecrets: Record<string, { account: boolean; token: boolean; inherited:
   运营: { account: true, token: true, inherited: true },
 };
 
+/** 本次预览中新建、还没导入用例的项目：用例、执行记录都为空，用来演示新建后的引导 */
+const fresh = new Set<string>();
+/** 新建后还没执行过回归的项目 */
+const neverRun = new Set<string>();
+
 const listeners: {
   approval?: (r: ApprovalRequest) => void;
   event?: (e: { method: string; params: unknown }) => void;
@@ -216,6 +221,8 @@ const mockApi: AitestApi = {
     const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
       environments, kind: opts?.kind ?? "project", parent_id: opts?.parent ?? "" };
     projects.push(p);
+    fresh.add(p.id);
+    neverRun.add(p.id);
     return delay(view(p));
   },
   moveProject: async (id, parent) => {
@@ -238,10 +245,14 @@ const mockApi: AitestApi = {
     const own = { per_task_token_limit: 200000 };
     return delay({ effective: { ...group, ...own }, own, inherited: group, parent_id: p.parent_id, parent_name: "特征中心" });
   },
-  importExcel: () => delay({ imported: 349 }, 600),
-  lint: () => delay((({ issues: _, ...summary }) => summary)(lint), 400),
+  importExcel: (p) => {
+    fresh.delete(p);
+    return delay({ imported: 349 }, 600);
+  },
+  lint: (p) => delay(fresh.has(p) ? { total: 0, rule_hits: {}, blocked_case_ids: [], stats: {} } : (({ issues: _, ...summary }) => summary)(lint), 400),
   listCases: () => delay(cases),
-  pageCases: (_p, q) => {
+  pageCases: (p, q) => {
+    if (fresh.has(p)) return page([], q);
     const f = q.filters ?? {};
     const text = q.query ?? "";
     return page(cases.filter((c) =>
@@ -249,7 +260,8 @@ const mockApi: AitestApi = {
       matches(c.execution_mode, f.execution_mode) && matches(c.priority, f.priority) &&
       matches(c.status, f.status) && matches(c.lint_status, f.lint_status)), q);
   },
-  pageIssues: (_p, q) => {
+  pageIssues: (p, q) => {
+    if (fresh.has(p)) return page([], q, { levels: {} });
     const levels: Record<string, number> = {};
     for (const i of lint.issues) levels[i.level] = (levels[i.level] ?? 0) + 1;
     return page(lint.issues.filter((i) => matches(i.level, q.level)), q, { levels });
@@ -259,15 +271,15 @@ const mockApi: AitestApi = {
     return delay({});
   },
   applyFix: () => delay({}),
-  generateApiSuite: () => delay({ generated: { generated: 37 }, suite: { cases: 35, skipped: 2, test: "scripts/api/test_api.py", version: "a3f9c21d7e0b" } }, 800),
+  generateApiSuite: (p) => (fresh.delete(p), delay({ generated: { generated: 37 }, suite: { cases: 35, skipped: 2, test: "scripts/api/test_api.py", version: "a3f9c21d7e0b" } }, 800)),
   generateCases: () => delay({ message: "新增 24 条用例：UI 16、接口 6、埋点抓包 2。仍有 3 条警告（预期写成操作）。用例为草稿，等待审核。", tokens: 18420 }, 900),
-  runRegression: (id, env, opts) => requireConfirm(id, env, opts) ?? delay({
+  runRegression: (id, env, opts) => requireConfirm(id, env, opts) ?? (neverRun.delete(id), delay({
     run: { run_id: "run_8d2f", total: 35, passed: 33, failed: 2, error: 0, skipped: 0, pass_rate: 0.943 },
     triage: [
       { case_id: "tc_8f2a1c0e08", failure_type: "product_bug", reason: "停用后接口仍返回 200", suggestion: "提交缺陷：授权停用未生效" },
       { case_id: "tc_api_017", failure_type: "environment", reason: "确定性规则判定" },
     ],
-  }, 900),
+  }, 900)),
   tokenUsage: () => delay({ tokens: 412300 }),
   setEnvSecret: () => delay(undefined),
   setRoleSecret: async (_p, role, username, _password, token) => {
@@ -401,7 +413,7 @@ const mockApi: AitestApi = {
     row_count: 2, truncated: false, elapsed_ms: 18.6,
   }, 400),
   hasDbPassword: () => delay(true),
-  listRuns: (_p, framework) => delay(mockRuns.filter((r) => !framework || r.framework === framework)),
+  listRuns: (p, framework) => delay(neverRun.has(p) ? [] : mockRuns.filter((r) => !framework || r.framework === framework)),
   runDetail: (id) => delay(mockDetail(id)),
   exportReport: (ids, format) => delay({ path: `/Users/demo/Documents/测试报告-${ids[0]}.${format}` }, 500),
   exportCasesExcel: (_p, name) => delay({ path: `/Users/demo/Documents/${name}-用例.xlsx`, cases: 349 }, 500),
