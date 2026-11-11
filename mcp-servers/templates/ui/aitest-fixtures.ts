@@ -1,4 +1,4 @@
-// 由 AI 测试客户端生成：脚本共用的辅助函数。
+// 由 AIProbe 生成：脚本共用的辅助函数。
 import { expect, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";

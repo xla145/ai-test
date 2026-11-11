@@ -163,15 +163,15 @@ jobs:
 
           | 平台 | 文件 |
           | --- | --- |
-          | Windows | `aitest-desktop-*-win-x64.exe` |
-          | macOS（Apple 芯片） | `aitest-desktop-*-mac-arm64.dmg` |
-          | Linux | `aitest-desktop-*-linux-x86_64.AppImage` |
+          | Windows | `AIProbe-*-win-x64.exe` |
+          | macOS（Apple 芯片） | `AIProbe-*-mac-arm64.dmg` |
+          | Linux | `AIProbe-*-linux-x86_64.AppImage` |
 
           桌面端需要本机安装 Python 3.10+（引擎依赖已随安装包附带）。Codex 已内置（锁定版本），
           如需使用其他版本，可用 `AITEST_CODEX_BIN` 指定 codex 路径。
           安装包未使用开发者证书签名（macOS 为 ad-hoc 签名、未公证）：
           - macOS：首次打开被拦截后，到「系统设置 → 隐私与安全性」底部点「仍要打开」；
-            也可在终端执行 `xattr -dr com.apple.quarantine "/Applications/aitest-desktop.app"` 后再打开。
+            也可在终端执行 `xattr -dr com.apple.quarantine "/Applications/AIProbe.app"` 后再打开。
           - Windows：可能出现 SmartScreen 提示，点「更多信息 → 仍要运行」。
 
           ## 其他发布物
@@ -185,7 +185,7 @@ jobs:
           gh release create "$TAG" assets/* \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
-            --title "AI 测试客户端 $TAG" \
+            --title "AIProbe $TAG" \
             --notes-file notes.md \
             --generate-notes
 
@@ -204,7 +204,7 @@ jobs:
       AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
       AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
       R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || '8f6229ee5588cc2e3ea0b886d5c7d96e' }}
-      R2_BUCKET: ${{ vars.R2_BUCKET || 'aiprobe' }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || 'oss' }}
       R2_PREFIX: ${{ vars.R2_PREFIX || 'aitest-desktop' }}
     steps:
       - uses: actions/download-artifact@v4

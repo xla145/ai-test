@@ -189,7 +189,7 @@ export function App() {
         <Flex vertical style={{ height: "100%" }}>
           <div className={`brand ${compact ? "compact" : ""}`}>
             <div className="brand-logo"><BugOutlined /></div>
-            {!compact && "AI 测试客户端"}
+            {!compact && "AIProbe"}
           </div>
           <div className="sider-section">
             <Tooltip title={compact ? "新建项目" : undefined} placement="right">

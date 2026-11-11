@@ -1,4 +1,4 @@
-# 由 AI 测试客户端生成：数据驱动接口测试，用例数据见 data/{{SUITE}}.json
+# 由 AIProbe 生成：数据驱动接口测试，用例数据见 data/{{SUITE}}.json
 # 用例 ID：
 {{CASE_IDS}}
 import json

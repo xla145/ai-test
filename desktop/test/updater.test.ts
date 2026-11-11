@@ -8,12 +8,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Updater, type AutoUpdaterLike } from "../src/main/updater.js";
 import { appBundleOf, isNewer, macInstallScript, parseUpdateInfo, pickMacZip } from "../src/main/updateUtils.js";
 
-const LATEST_MAC = (version: string, zip: Buffer, name = `aitest-desktop-${version}-mac-arm64.zip`) => `version: ${version}
+const LATEST_MAC = (version: string, zip: Buffer, name = `AIProbe-${version}-mac-arm64.zip`) => `version: ${version}
 files:
   - url: ${name}
     sha512: ${createHash("sha512").update(zip).digest("base64")}
     size: ${zip.length}
-  - url: aitest-desktop-${version}-mac-arm64.dmg
+  - url: AIProbe-${version}-mac-arm64.dmg
     sha512: abc
     size: 10
 path: ${name}
@@ -36,14 +36,14 @@ describe("update helpers", () => {
     const info = parseUpdateInfo(LATEST_MAC("0.3.12", Buffer.from("zip")));
     expect(info.version).toBe("0.3.12");
     expect(info.files).toHaveLength(2);
-    expect(pickMacZip(info, "arm64")?.url).toBe("aitest-desktop-0.3.12-mac-arm64.zip");
+    expect(pickMacZip(info, "arm64")?.url).toBe("AIProbe-0.3.12-mac-arm64.zip");
     expect(pickMacZip({ ...info, files: [{ url: "a-mac-arm64.zip", sha512: "x" }, { url: "a-mac-x64.zip", sha512: "y" }] }, "x64")?.url)
       .toBe("a-mac-x64.zip");
     expect(() => parseUpdateInfo("files: []")).toThrow("version");
   });
 
   it("derives the app bundle and builds a restoring install script", () => {
-    expect(appBundleOf("/Applications/aitest-desktop.app/Contents/MacOS/aitest-desktop")).toBe("/Applications/aitest-desktop.app");
+    expect(appBundleOf("/Applications/AIProbe.app/Contents/MacOS/AIProbe")).toBe("/Applications/AIProbe.app");
     expect(appBundleOf("/usr/bin/node")).toBeUndefined();
     const script = macInstallScript();
     expect(script).toContain('kill -0 "$PID"');
@@ -72,15 +72,15 @@ describe("macOS updater", () => {
   function macUpdater(feedUrl: string, overrides: Partial<ConstructorParameters<typeof Updater>[0]> = {}) {
     const dir = mkdtempSync(join(tmpdir(), "upd-"));
     const apps = join(dir, "Applications");
-    mkdirSync(join(apps, "aitest-desktop.app", "Contents", "MacOS"), { recursive: true });
+    mkdirSync(join(apps, "AIProbe.app", "Contents", "MacOS"), { recursive: true });
     const extract = vi.fn(async (_zip: string, dest: string) => {
-      mkdirSync(join(dest, "aitest-desktop.app", "Contents"), { recursive: true });
+      mkdirSync(join(dest, "AIProbe.app", "Contents"), { recursive: true });
     });
     const launchInstaller = vi.fn();
     const quit = vi.fn();
     const u = new Updater({
       currentVersion: "0.3.11", feedUrl, platform: "darwin", arch: "arm64",
-      execPath: join(apps, "aitest-desktop.app", "Contents", "MacOS", "aitest-desktop"),
+      execPath: join(apps, "AIProbe.app", "Contents", "MacOS", "AIProbe"),
       downloadDir: join(dir, "updates"), quit, extract, launchInstaller, ...overrides,
     });
     return { u, extract, launchInstaller, quit, dir, apps };
@@ -88,7 +88,7 @@ describe("macOS updater", () => {
 
   it("downloads, verifies and installs a newer version", async () => {
     const zip = Buffer.alloc(200_000, 7);
-    const feed = await serve({ "latest-mac.yml": LATEST_MAC("0.3.12", zip), "aitest-desktop-0.3.12-mac-arm64.zip": zip });
+    const feed = await serve({ "latest-mac.yml": LATEST_MAC("0.3.12", zip), "AIProbe-0.3.12-mac-arm64.zip": zip });
     const { u, extract, launchInstaller, quit, dir, apps } = macUpdater(feed);
     const states: string[] = [];
     u.on("state", (s) => states.push(s.status));
@@ -103,14 +103,14 @@ describe("macOS updater", () => {
     u.install();
     const [script, args] = launchInstaller.mock.calls[0] as [string, string[]];
     expect(readFileSync(script, "utf8")).toBe(macInstallScript());
-    expect(args[1]).toBe(join(apps, "aitest-desktop.app"));
-    expect(args[2]).toBe(join(dir, "updates", "0.3.12", "app", "aitest-desktop.app"));
+    expect(args[1]).toBe(join(apps, "AIProbe.app"));
+    expect(args[2]).toBe(join(dir, "updates", "0.3.12", "app", "AIProbe.app"));
     expect(quit).toHaveBeenCalledOnce();
   });
 
   it("rejects a package whose sha512 does not match", async () => {
     const zip = Buffer.from("real");
-    const feed = await serve({ "latest-mac.yml": LATEST_MAC("0.3.12", zip), "aitest-desktop-0.3.12-mac-arm64.zip": Buffer.from("tampered") });
+    const feed = await serve({ "latest-mac.yml": LATEST_MAC("0.3.12", zip), "AIProbe-0.3.12-mac-arm64.zip": Buffer.from("tampered") });
     const { u, extract } = macUpdater(feed);
     expect(await u.check()).toMatchObject({ status: "error", error: expect.stringContaining("校验失败") });
     expect(extract).not.toHaveBeenCalled();

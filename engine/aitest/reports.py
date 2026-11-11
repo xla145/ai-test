@@ -237,7 +237,7 @@ def render_html(details: list[dict[str, Any]]) -> str:
             f"<td>{e(r['priority'])}</td><td><span class='tag {e(r['status'])}'>{e(STATUS_LABEL.get(r['status'], r['status']))}</span></td>"
             f"<td style='text-align:right'>{(r['duration'] or 0):.2f}s</td></tr>")
     parts.append("</table>")
-    parts.append(f"<footer>由 AI 测试客户端生成 · {e(datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S'))} · "
+    parts.append(f"<footer>由 AIProbe 生成 · {e(datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S'))} · "
                  "回归执行不调用模型；失败归因中「待归因」的用例需在客户端中处理</footer></div></body></html>")
     return "".join(parts)
 

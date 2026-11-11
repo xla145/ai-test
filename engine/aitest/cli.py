@@ -610,7 +610,7 @@ def cmd_db_runtime_env(store: Store, a: argparse.Namespace) -> Any:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = _Parser(prog="aitest", description="AI 测试客户端引擎")
+    ap = _Parser(prog="aitest", description="AIProbe 引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
     sub = ap.add_subparsers(dest="command", required=True)
 

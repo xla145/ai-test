@@ -5,8 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aitest-engine"
 version = "0.1.0"
-description = "AI 测试客户端确定性执行引擎：用例导入/规范检查、OpenAPI 解析、pytest 脚本生成与执行"
+description = "AIProbe 确定性执行引擎：用例导入/规范检查、OpenAPI 解析、pytest 脚本生成与执行"
 requires-python = ">=3.10"
+keywords = ["ai-testing", "test-automation", "pytest", "openapi"]
 dependencies = [
   "openpyxl>=3.1",
   "pyyaml>=6.0",
@@ -16,6 +17,10 @@ dependencies = [
   "pg8000>=1.30",
 ]
 
+
+[project.urls]
+Homepage = "https://github.com/xla145/ai-test"
+Source = "https://github.com/xla145/ai-test"
 [project.optional-dependencies]
 docs = ["mammoth>=1.6", "pdfplumber>=0.11"]
 
