@@ -22,6 +22,10 @@ body {
 .sider-user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sider-user-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .page { padding: 20px 24px 32px; overflow: auto; height: 100%; }
+/* 项目页签：内容区占满剩余高度并在 .page 内滚动（否则长页面被 Content 裁掉，底部的分页等看不到） */
+.project-tabs > .ant-tabs-content-holder { min-height: 0; }
+.project-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.project-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane { height: 100%; }
 /* 统计卡片与两栏卡片：按内容区宽度换行（内嵌浏览器打开时内容区只有半屏） */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
 .split { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }

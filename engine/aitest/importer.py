@@ -25,6 +25,51 @@ DEFAULT_COLUMN_MAP: dict[str, str] = {
     "用例类型": "category",
 }
 
+# 常见的列名写法（各测试平台导出格式不同）；列名先去掉「*」「(必填)」等标记再匹配
+COLUMN_ALIASES: dict[str, str] = {
+    "用例标题": "title", "用例名称": "title", "名称": "title", "用例名": "title", "测试标题": "title", "case title": "title", "title": "title",
+    "所属模块": "module_path", "模块": "module_path", "功能模块": "module_path", "模块路径": "module_path", "分组": "module_path", "目录": "module_path",
+    "负责人": "owner", "创建人": "owner", "编写人": "owner",
+    "前置": "preconditions", "前提条件": "preconditions", "预置条件": "preconditions",
+    "步骤": "steps", "操作步骤": "steps", "测试步骤": "steps", "用例步骤": "steps", "执行步骤": "steps",
+    "期望结果": "expected", "预期": "expected", "预期输出": "expected",
+    "优先级": "priority", "等级": "priority", "级别": "priority", "重要程度": "priority",
+    "类型": "category", "用例分类": "category", "测试类型": "category",
+}
+
+# 导入必需的列：缺少时导入结果中提示（否则会整批被规范检查阻断）
+REQUIRED_FIELDS = {"title": "标题", "steps": "步骤描述", "expected": "预期结果", "priority": "用例等级"}
+
+_MARK_RE = re.compile(r"[*＊]|[（(]\s*(必填|选填|可选)\s*[)）]|\s+")
+
+
+def normalize_header(name: Any) -> str:
+    return _MARK_RE.sub("", str(name)).strip().lower() if name is not None else ""
+
+
+def match_columns(header: tuple[Any, ...] | list[Any], column_map: dict[str, str] | None = None) -> tuple[dict[str, int], list[str]]:
+    """列名 → 字段的列号；返回 (字段列号, 没有识别的列名)。显式配置的映射优先，其次是常见别名。"""
+    explicit = {normalize_header(k): v for k, v in (column_map or DEFAULT_COLUMN_MAP).items()}
+    aliases = {normalize_header(k): v for k, v in COLUMN_ALIASES.items()}
+    idx: dict[str, int] = {}
+    unknown: list[str] = []
+    # 第一遍只用显式映射，避免别名抢占（如同时有「标题」和「用例名称」时取「标题」）
+    for i, name in enumerate(header):
+        key = explicit.get(normalize_header(name))
+        if key and key not in idx:
+            idx[key] = i
+    for i, name in enumerate(header):
+        n = normalize_header(name)
+        if not n or n in explicit:
+            continue
+        key = aliases.get(n)
+        if key and key not in idx and i not in idx.values():
+            idx[key] = i
+        elif i not in idx.values():
+            unknown.append(str(name).strip())
+    return idx, unknown
+
+
 # 「1. xxx 2. xxx」「1、xxx」「1）xxx」「(1) xxx」等编号
 _NUM_RE = re.compile(r"(?:^|(?<=\s)|(?<=[；;。]))[（(]?(\d{1,2})\s*[.、．)）](?!\d)\s*")
 
@@ -107,19 +152,20 @@ def import_excel(
     project_id: str = "",
     column_map: dict[str, str] | None = None,
     sheet: str | None = None,
+    info: dict[str, Any] | None = None,
 ) -> list[TestCase]:
-    column_map = column_map or DEFAULT_COLUMN_MAP
+    """导入 Excel 用例；传入 info 时写入列识别结果（识别到的列、缺少的必需列、未识别的列）。"""
     wb = load_workbook(str(path), read_only=True, data_only=True)
     ws = wb[sheet] if sheet else wb.worksheets[0]
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
     if header is None:
         return []
-    idx = {}
-    for i, name in enumerate(header):
-        key = column_map.get(str(name).strip()) if name is not None else None
-        if key:
-            idx[key] = i
+    idx, unknown = match_columns(header, column_map)
+    if info is not None:
+        info["columns"] = {field: str(header[i]).strip() for field, i in idx.items()}
+        info["missing_columns"] = [label for field, label in REQUIRED_FIELDS.items() if field not in idx]
+        info["unknown_columns"] = unknown
 
     cases = []
     for n, values in enumerate(rows, start=2):
