@@ -43,6 +43,13 @@ export interface AitestApi {
   getModelSettings(): Promise<any>;
   setModelSettings(models: unknown, keys?: { agent?: string; vision?: string }): Promise<any>;
   checkModel(slot: "agent" | "vision"): Promise<any>;
+  saveDatabase(projectId: string, env: string, name: string, cfg: Record<string, unknown>, password?: string): Promise<unknown>;
+  removeDatabase(projectId: string, env: string, name: string): Promise<unknown>;
+  testDatabase(projectId: string, env: string, name: string): Promise<{ ok: boolean; elapsed_ms: number }>;
+  queryDatabase(projectId: string, env: string, name: string, sql: string, params?: Record<string, unknown>): Promise<{
+    columns: string[]; rows: Record<string, unknown>[]; row_count: number; truncated: boolean; elapsed_ms: number;
+  }>;
+  hasDbPassword(projectId: string, env: string, name: string): Promise<boolean>;
   listRuns(projectId: string, framework?: "pytest" | "playwright"): Promise<any[]>;
   runDetail(runId: string): Promise<any>;
   /** 弹出保存对话框；用户取消返回 null */

@@ -18,6 +18,7 @@ const methods = [
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getModelSettings",
   "setModelSettings", "checkModel", "hideTestView",
+  "saveDatabase", "removeDatabase", "testDatabase", "queryDatabase", "hasDbPassword",
   "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
 ] as const;
 

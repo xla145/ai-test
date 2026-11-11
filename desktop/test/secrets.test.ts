@@ -51,3 +51,18 @@ describe("secrets", () => {
     expect(() => store.set("r", { authToken: "x" })).toThrow("钥匙串");
   });
 });
+
+describe("database passwords", () => {
+  it("are stored per project/env/connection and injected as AITEST_DB_PASSWORDS", async () => {
+    const { secretEnvFor } = await import("../src/main/secrets.js");
+    const file = join(mkdtempSync(join(tmpdir(), "sec-")), "s.json");
+    const store = new SecretStore(file, cipher);
+    store.setDbPassword("p1", "test", "main", "db-pw");
+    store.setDbPassword("p1", "test", "analytics", "an-pw");
+    store.setDbPassword("p1", "prod", "main", "prod-pw");
+    expect(readFileSync(file, "utf8")).not.toContain("db-pw");
+    expect(store.dbPasswords("p1", "test")).toEqual({ main: "db-pw", analytics: "an-pw" });
+    expect(JSON.parse(secretEnvFor(store, "p1", "test").AITEST_DB_PASSWORDS)).toEqual({ main: "db-pw", analytics: "an-pw" });
+    expect(secretEnvFor(store, "p2", "test").AITEST_DB_PASSWORDS).toBeUndefined();
+  });
+});

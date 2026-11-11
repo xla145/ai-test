@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from _aitest_db import assert_check, configs_from_runtime_env, run_setup
 from _aitest_schema import validate
 
 CASES = json.loads((Path(__file__).parent / "data" / "{{SUITE}}.json").read_text(encoding="utf-8"))
@@ -50,6 +51,9 @@ def test_api(case, api_client, aitest_env, shared_vars):
     if case.get("body") is not None:
         kwargs["json"] = _render(case["body"], shared_vars)
 
+    if case.get("db_setup"):
+        run_setup(configs_from_runtime_env(), case["db_setup"], shared_vars)
+
     resp = api_client.request(case["method"], path, **kwargs)
 
     assert resp.status_code in case["expected_status"], (
@@ -66,3 +70,6 @@ def test_api(case, api_client, aitest_env, shared_vars):
         assert actual == _render(expected, shared_vars), f"字段 {dotted} 实际为 {actual!r}，预期 {expected!r}"
     for var, dotted in (case.get("extract") or {}).items():
         shared_vars[var] = _pick(body, dotted)
+    # 入库校验：查询被测系统数据库（只读），可引用前面提取的变量
+    for spec in case.get("db_checks") or []:
+        assert_check(configs_from_runtime_env(), spec, shared_vars)

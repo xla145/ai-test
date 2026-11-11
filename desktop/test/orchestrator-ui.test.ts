@@ -122,3 +122,52 @@ describe("reports", () => {
     expect(save.slice(-2)).toEqual(["--html-report", "/ws/reports/x/html"]);
   });
 });
+
+describe("database connections", () => {
+  function dbEngine(environments: Record<string, unknown>) {
+    const calls: string[][] = [];
+    const engine = vi.fn(async (args: string[], env?: Record<string, string>) => {
+      calls.push([...args, ...(env ? [`ENV=${JSON.stringify(env)}`] : [])]);
+      if (args[0] === "list-projects") return [{ ...project, environments }];
+      if (args[0] === "db-runtime-env") return { AITEST_DATABASES: "{...}" };
+      if (args[0] === "list-scripts") return [{ case_id: "tc_a", path: "scripts/ui/tc_a.spec.ts", framework: "playwright" }];
+      if (args[0] === "list-cases") return [{ id: "tc_a", title: "A", execution_mode: "ui", status: "reviewed", data_refs: [] }];
+      if (args[0] === "list-roles") return [];
+      if (args[0] === "save-run") return { run_id: "r", total: 1, passed: 1, failed: 0, error: 0, skipped: 0, pass_rate: 1, failure_types: {}, needs_agent: [], reviews: 0 };
+      return {};
+    }) as unknown as EngineCall;
+    return { engine, calls };
+  }
+  const secretEnv = () => ({ AITEST_DB_PASSWORDS: '{"main":"pw"}' });
+
+  it("saves connection config without passwords and validates names", async () => {
+    const { engine, calls } = dbEngine({ test: { base_url: "http://t", databases: { old: { type: "sqlite", path: "/x.db" } } } });
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv });
+    await orch.saveDatabase("p1", "test", "main", { type: "mysql", host: "db", database: "app", user: "qa", port: undefined, readonly: true });
+    const saved = JSON.parse(calls.find((a) => a[0] === "set-environment")![6]);
+    expect(saved.databases).toEqual({ old: { type: "sqlite", path: "/x.db" }, main: { type: "mysql", host: "db", database: "app", user: "qa", readonly: true } });
+    expect(JSON.stringify(saved)).not.toContain("pw");
+    await expect(orch.saveDatabase("p1", "test", "bad name", { type: "sqlite" })).rejects.toThrow("连接名");
+    await orch.removeDatabase("p1", "test", "old");
+    expect(JSON.parse(calls.filter((a) => a[0] === "set-environment")[1][6]).databases).toEqual({});
+  });
+
+  it("queries with passwords injected only into the engine process", async () => {
+    const { engine, calls } = dbEngine({ test: { base_url: "http://t" } });
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv });
+    await orch.queryDatabase("p1", "test", "main", "SELECT * FROM t WHERE id = :id", { id: 1 });
+    expect(calls[0]).toEqual(["db-query", "--project", "p1", "--env", "test", "--conn", "main", "--sql", "SELECT * FROM t WHERE id = :id",
+      "--params", '{"id":1}', "--limit", "200", `ENV=${JSON.stringify(secretEnv())}`]);
+  });
+
+  it("injects database runtime config into UI regression only when connections exist", async () => {
+    const ui = { checkData: vi.fn(), seedData: vi.fn(),
+      runUiSuite: vi.fn(async () => ({ exitCode: 0, reportJson: "", htmlReport: "/h", stderr: "", errors: [], results: [] })) } as any;
+    const withDb = dbEngine({ test: { base_url: "http://t", databases: { main: { type: "sqlite", path: "/x.db" } } } });
+    await new Orchestrator({ engine: withDb.engine, ui, agent: vi.fn(), secretEnv }).runUiRegression("p1", "test");
+    expect(ui.runUiSuite.mock.calls[0][0].env.AITEST_DATABASES).toBe("{...}");
+    const noDb = dbEngine({ test: { base_url: "http://t" } });
+    await new Orchestrator({ engine: noDb.engine, ui, agent: vi.fn(), secretEnv }).runUiRegression("p1", "test");
+    expect(noDb.calls.some((a) => a[0] === "db-runtime-env")).toBe(false);
+  });
+});

@@ -10,7 +10,11 @@ const projects = [
   {
     id: "proj_feature", name: "特征中心 v4.4", workspace_path: "/Users/demo/aitest/feature-center",
     environments: {
-      test: { base_url: "https://feature-test.example.com", login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
+      test: { base_url: "https://feature-test.example.com", login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" },
+        databases: {
+          main: { type: "mysql", host: "10.0.3.21", port: 3306, database: "feature_center", user: "qa_readonly", readonly: true },
+          analytics: { type: "postgresql", host: "10.0.3.40", database: "tracking", user: "qa", readonly: false },
+        } },
       prod: { base_url: "https://feature.example.com", production: true },
     },
   },
@@ -192,6 +196,19 @@ const mockApi: AitestApi = {
   pickFile: () => delay("/Users/demo/Downloads/特征中心v4.4用例.xlsx"),
   pickDirectory: () => delay("/Users/demo/aitest/new-project"),
   openTestPage: () => delay(undefined),
+  saveDatabase: () => delay({}),
+  removeDatabase: () => delay({}),
+  testDatabase: (_p, _e, name) => name === "main" ? delay({ ok: true, elapsed_ms: 23.4 }, 400)
+    : new Promise((_, rej) => setTimeout(() => rej(new Error("无法连接 analytics（postgresql）：timeout")), 600)),
+  queryDatabase: () => delay({
+    columns: ["code", "name", "status", "updated_at", "updated_by"],
+    rows: [
+      { code: "TAG-1001", name: "高价值用户", status: "disabled", updated_at: "2026-11-10T15:12:09", updated_by: "admin" },
+      { code: "TAG-1002", name: "沉睡用户", status: "active", updated_at: "2026-11-08T10:01:44", updated_by: null },
+    ],
+    row_count: 2, truncated: false, elapsed_ms: 18.6,
+  }, 400),
+  hasDbPassword: () => delay(true),
   listRuns: (_p, framework) => delay(mockRuns.filter((r) => !framework || r.framework === framework)),
   runDetail: (id) => delay(mockDetail(id)),
   exportReport: (ids, format) => delay({ path: `/Users/demo/Documents/测试报告-${ids[0]}.${format}` }, 500),

@@ -69,7 +69,7 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
   const engineOpts: EngineOptions = {
     python: opts.python ?? secrets.AITEST_PYTHON ?? "python3",
     db: join(mkdtempSync(join(tmpdir(), "aitest-ci-")), "ci.sqlite"),
-    env: pick(secrets, ["AITEST_AUTH_TOKEN", "AITEST_AUTH_HEADER", "PYTHONPATH"]),
+    env: pick(secrets, ["AITEST_AUTH_TOKEN", "AITEST_AUTH_HEADER", "AITEST_DB_PASSWORDS", "PYTHONPATH"]),
   };
   const engine = <T,>(args: string[], env?: Record<string, string>) =>
     runEngine<T>(args, { ...engineOpts, env: { ...engineOpts.env, ...env } });
@@ -105,11 +105,14 @@ export async function runCi(opts: CiOptions): Promise<CiReport> {
     const uiDir = join(workspace, "scripts", "ui");
     const specs = existsSync(uiDir) ? readdirSync(uiDir).filter((f) => f.endsWith(".spec.ts")) : [];
     if (specs.length) {
+      const dbRuntime = await engine<Record<string, string>>(["db-runtime-env", "--project", project.id, "--env", opts.env]);
       const out = await runUiSuite({
         workspace,
         baseUrl,
         env: {
-          ...pick(secrets, ["AITEST_ROLES", "AITEST_CHROMIUM_PATH", "AITEST_AUTH_MAX_AGE_MIN"]),
+          ...pick(secrets, ["AITEST_ROLES", "AITEST_CHROMIUM_PATH", "AITEST_AUTH_MAX_AGE_MIN", "PYTHONPATH"]),
+          ...dbRuntime,
+          AITEST_PYTHON: engineOpts.python ?? "python3",
           ...(envCfg?.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}),
         },
       });
@@ -214,7 +217,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
       path: ".gitlab-ci.yml",
       content: [
         "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
-        "# 在 CI/CD 变量中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）。",
+        "# 在 CI/CD 变量中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
         "aitest-regression:",
         "  image: mcr.microsoft.com/playwright:v1.63.0-noble",
         "  script:",
@@ -235,7 +238,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
     path: ".github/workflows/aitest.yml",
     content: [
       "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
-      "# 在仓库 Secrets 中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）。",
+      "# 在仓库 Secrets 中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
       "name: AI 测试回归",
       "on:",
       "  push:",
@@ -257,6 +260,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
       "        env:",
       "          AITEST_AUTH_TOKEN: ${{ secrets.AITEST_AUTH_TOKEN }}",
       "          AITEST_ROLES: ${{ secrets.AITEST_ROLES }}",
+      "          AITEST_DB_PASSWORDS: ${{ secrets.AITEST_DB_PASSWORDS }}",
       "      - uses: actions/upload-artifact@v4",
       "        if: always()",
       "        with:",

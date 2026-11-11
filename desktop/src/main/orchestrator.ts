@@ -26,8 +26,19 @@ export interface AgentEngine {
   runTurn(threadId: string, text: string, opts?: { tokenLimit?: number }): Promise<TurnResult>;
 }
 
+export interface DatabaseInfo {
+  type: "mysql" | "postgresql" | "sqlite";
+  host?: string;
+  port?: number;
+  database?: string;
+  user?: string;
+  path?: string;
+  readonly?: boolean;
+}
+
 export interface EnvironmentInfo {
   base_url: string;
+  databases?: Record<string, DatabaseInfo>;
   auth_header?: string;
   production?: boolean;
   login?: Record<string, string>;
@@ -218,13 +229,18 @@ export class Orchestrator extends EventEmitter {
     const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
 
     const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    const secretEnv = this.deps.secretEnv(projectId, env, roles);
+    // UI 脚本中的数据库断言需要的连接配置（含密码，只注入脚本进程）
+    const dbRuntime = envCfg.databases && Object.keys(envCfg.databases).length
+      ? await this.deps.engine<Record<string, string>>(["db-runtime-env", "--project", projectId, "--env", env], secretEnv)
+      : {};
     this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
     const out = await ui.runUiSuite({
       workspace: project.workspace_path,
       baseUrl: envCfg.base_url,
       caseIds,
       headed: opts.headed,
-      env: { ...this.deps.secretEnv(projectId, env, roles), ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
+      env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     });
     const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
     writeFileSync(file, JSON.stringify(out.results));
@@ -339,6 +355,35 @@ export class Orchestrator extends EventEmitter {
 
   importWorkspace(workspace: string) {
     return this.deps.engine(["import-workspace", "--workspace", workspace]);
+  }
+
+  // ------------------------------------------------------------------ 被测系统数据库
+
+  /** 保存连接配置（不含密码，密码由调用方存钥匙串） */
+  async saveDatabase(projectId: string, env: string, name: string, cfg: DatabaseInfo) {
+    if (!/^[A-Za-z_][\w-]*$/.test(name)) throw new Error("连接名只能包含字母、数字、下划线和连字符，且以字母开头");
+    const envCfg = (await this.project(projectId)).environments[env];
+    if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    const clean = Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== undefined && v !== "")) as unknown as DatabaseInfo;
+    return this.setEnvironment(projectId, env, { ...envCfg, databases: { ...envCfg.databases, [name]: clean } });
+  }
+
+  async removeDatabase(projectId: string, env: string, name: string) {
+    const envCfg = (await this.project(projectId)).environments[env];
+    const { [name]: _removed, ...rest } = envCfg?.databases ?? {};
+    return this.setEnvironment(projectId, env, { ...envCfg, databases: rest });
+  }
+
+  testDatabase(projectId: string, env: string, name: string) {
+    return this.deps.engine(["db-test", "--project", projectId, "--env", env, "--conn", name], this.deps.secretEnv(projectId, env));
+  }
+
+  /** 只读查询（引擎双重校验：语句类型 + 只读连接） */
+  queryDatabase(projectId: string, env: string, name: string, sql: string, params: Record<string, unknown> = {}, limit = 200) {
+    return this.deps.engine([
+      "db-query", "--project", projectId, "--env", env, "--conn", name, "--sql", sql,
+      "--params", JSON.stringify(params), "--limit", String(limit),
+    ], this.deps.secretEnv(projectId, env));
   }
 
   // ------------------------------------------------------------------ 测试报告

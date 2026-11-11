@@ -10,6 +10,27 @@ on:
 jobs:
   engine:
     runs-on: ubuntu-latest
+    # 数据库校验在真实 PostgreSQL / MySQL 上测试
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: aitest
+          POSTGRES_DB: aitest
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: aitest
+          MYSQL_DATABASE: aitest
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -paitest" --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      AITEST_TEST_PG: "127.0.0.1:5432:postgres:aitest:aitest"
+      AITEST_TEST_MYSQL: "127.0.0.1:3306:root:aitest:aitest"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -310,6 +310,17 @@ function registerIpc(orch: Orchestrator): void {
     },
     openTestPage: (url: string) => openTestPage(url),
     hideTestView: () => hideTestView(),
+    // ---- 被测系统数据库 ----
+    saveDatabase: async (p: string, env: string, name: string, cfg, password?: string) => {
+      const out = await orch.saveDatabase(p, env, name, cfg);
+      if (password) secretStore.setDbPassword(p, env, name, password);
+      return out;
+    },
+    removeDatabase: (p: string, env: string, name: string) => orch.removeDatabase(p, env, name),
+    testDatabase: (p: string, env: string, name: string) => orch.testDatabase(p, env, name),
+    queryDatabase: (p: string, env: string, name: string, sql: string, params?: Record<string, unknown>) =>
+      orch.queryDatabase(p, env, name, sql, params ?? {}),
+    hasDbPassword: (p: string, env: string, name: string) => name in secretStore.dbPasswords(p, env),
     // ---- 测试报告 ----
     listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
     runDetail: (runId: string) => orch.runDetail(runId),

@@ -96,6 +96,9 @@ class ApiSpec:
     expected_fields: dict[str, Any] = field(default_factory=dict)
     # 接口间依赖：从响应中提取变量供后续用例以 ${var} 引用，如 {"user_id": "data.id"}
     extract: dict[str, str] = field(default_factory=dict)
+    # 数据库：请求前的数据准备（仅非生产环境、可写连接），请求后的入库校验（只读，可用 ${var}）
+    db_setup: list[dict[str, Any]] = field(default_factory=list)
+    db_checks: list[dict[str, Any]] = field(default_factory=list)
     operation_id: str = ""
 
 

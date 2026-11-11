@@ -5,6 +5,7 @@ import {
   BugOutlined,
   ChromeOutlined,
   CloseOutlined,
+  DatabaseOutlined,
   FileExcelOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
@@ -39,6 +40,7 @@ import { api, type Project } from "./api";
 import { useAction, useLoad } from "./hooks";
 import { ApiPage } from "./pages/ApiPage";
 import { CasesPage } from "./pages/CasesPage";
+import { DatabasePage } from "./pages/DatabasePage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -106,6 +108,7 @@ export function App() {
         { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
         { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "db", label: "数据库", icon: <DatabaseOutlined />, children: <DatabasePage project={current} onChanged={reload} /> },
         { key: "reports", label: "测试报告", icon: <FileSearchOutlined />, children: <ReportsPage project={current} /> },
         { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
       ]

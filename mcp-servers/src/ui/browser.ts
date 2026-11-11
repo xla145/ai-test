@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { DEFAULT_ROLE, type Step } from "./codegen.js";
+import { DEFAULT_ROLE, type DbCheck, type Step } from "./codegen.js";
 import { candidates, COLLECT_SCRIPT, pickUnique, toLocator, type ElementInfo, type LocatorSpec } from "./locator.js";
 
 /**
@@ -320,6 +320,11 @@ export class BrowserSession {
     if (leaked.length) throw new Error(`上报中带出了敏感字段：${leaked.join(", ")}`);
     this.record({ action: "expectRequest", name, fields, forbidden, role: c.role });
     return { matched: matched.length };
+  }
+
+  /** 数据库断言：由调用方先验证通过（引擎 db-check），这里只录入脚本 */
+  recordDbCheck(check: DbCheck) {
+    this.record({ action: "expectDb", check });
   }
 
   /** 前端计时：Playwright clock，需在 navigate 之前调用 */

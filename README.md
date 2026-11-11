@@ -97,6 +97,21 @@ aitest export-excel --project <项目ID> --out 修复后.xlsx
 命令行 / CI 下 browser 服务会自行启动 Chromium；桌面端则连接内嵌浏览器（`AITEST_CDP_ENDPOINT`）。
 可选启用 Midscene 视觉定位：`npm i @midscene/web`，设置 `AITEST_MIDSCENE=1` 及其模型环境变量。
 
+### 数据库校验（入库校验）
+
+在桌面端「数据库」页为每个环境配置被测系统的数据库连接（MySQL / PostgreSQL / SQLite，密码存钥匙串），
+可直接执行只读查询，并把查询结果一键生成为入库校验断言。
+
+- 接口用例：`api.db_checks`（请求后校验，可引用 `${var}`，如新建记录的 ID）与 `api.db_setup`（请求前准备数据）
+- UI 用例：探索时 agent 用 `browser.expect_db` 录入断言，生成的脚本中为 `await expectDb({...})`
+- 安全：查询与断言只允许单条只读语句，连接本身也设为只读；写操作只用于数据准备，且只在非生产环境、
+  关闭「只读连接」后可用
+- CI：在密钥中配置 `AITEST_DB_PASSWORDS`（JSON：`{"连接名": "密码"}`）
+
+```bash
+aitest db-query --project <项目ID> --env test --conn main --sql "SELECT status FROM tags WHERE code = :c" --params '{"c": "TAG-1001"}'
+```
+
 ### 测试报告与导出
 
 ```bash

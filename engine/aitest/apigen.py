@@ -244,6 +244,7 @@ def write_pytest_suite(cases: list[TestCase], out_dir: str | Path, suite: str = 
     conftest = out / "conftest.py"
     conftest.write_text(_template("conftest.py.tpl"), encoding="utf-8")
     shutil.copyfile(Path(str(resources.files("aitest").joinpath("schema.py"))), out / "_aitest_schema.py")
+    shutil.copyfile(Path(str(resources.files("aitest").joinpath("db.py"))), out / "_aitest_db.py")
 
     header = "\n".join(f"#   {c.id}  {c.title}" for c in api_cases)
     test_file = out / f"test_{suite}.py"
