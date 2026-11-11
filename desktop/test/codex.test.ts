@@ -127,3 +127,34 @@ it("passes the Midscene key by environment name without serializing its value", 
   expect(config).toContain('env_vars = ["MIDSCENE_MODEL_API_KEY"]');
   expect(config).not.toContain('MIDSCENE_MODEL_API_KEY =');
 });
+
+it("interrupts only the cancelled Codex turn and keeps usage accounting", async () => {
+  const controller = new AbortController();
+  const interrupts: unknown[] = [];
+  const transport = fakeCodex((srv) => {
+    srv.onRequest(async (method, params: any) => {
+      if (method === "initialize") return {};
+      if (method === "thread/start") return { thread: { id: "cancel-thread" } };
+      if (method === "turn/start") {
+        setImmediate(() => {
+          srv.notify("thread/tokenUsage/updated", { threadId: "cancel-thread", tokenUsage: { total: { totalTokens: 17 } } });
+          controller.abort();
+        });
+        return { turn: { id: "cancel-turn" } };
+      }
+      if (method === "turn/interrupt") {
+        interrupts.push(params);
+        srv.notify("turn/completed", { threadId: "cancel-thread", turn: { id: "cancel-turn", status: "interrupted" } });
+        return {};
+      }
+      throw new Error(method);
+    });
+  });
+  const codex = new CodexAppServer({ binary: "codex", codexHome: "/tmp", approvals: { command: async () => "accept", fileChange: async () => "accept" } });
+  await codex.start(transport);
+  const result = await codex.runTurn(await codex.startThread({ cwd: "/ws" }), "generate", { signal: controller.signal });
+  expect(result.status).toBe("interrupted_user");
+  expect(result.tokens).toBe(17);
+  expect(interrupts).toEqual([{ threadId: "cancel-thread", turnId: "cancel-turn" }]);
+  await expect(codex.runTurn("cancel-thread", "do not start", { signal: controller.signal })).rejects.toThrow();
+});

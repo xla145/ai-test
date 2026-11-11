@@ -536,6 +536,7 @@ function registerIpc(orch: Orchestrator): void {
     uiDebugStart: (p: string, env: string, id: string, opts?: { confirmProduction?: boolean }) => orch.uiDebugStart(p, env, id, opts),
     uiDebugCommand: (command: UiDebugCommand) => orch.uiDebugCommand(command),
     uiDebugState: () => orch.uiDebugState(),
+    stopUiTask: (p: string, env: string) => orch.stopUiTask(p, env),
     reviseUiScript: async (p: string, env: string, id: string, feedback: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
       return orch.reviseUiScript(p, env, id, feedback, opts);

@@ -303,3 +303,45 @@ describe("App testing", () => {
     expect(prompt).toContain("appId: ${APP_ID}");
   });
 });
+
+it("cancels a UI run, skips saving incomplete results and releases the task lock", async () => {
+  const { engine, ui, secretEnv, calls } = setup([]);
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  ui.runUiSuite = vi.fn(async (opts) => {
+    started();
+    await new Promise<void>(resolve => opts.signal!.addEventListener("abort", () => resolve(), { once: true }));
+    opts.signal!.throwIfAborted();
+    throw new Error("unreachable");
+  });
+  const orch = new Orchestrator({ engine, ui, secretEnv, agent: vi.fn() });
+  const task = orch.runUiRegression("p1", "test", { caseIds: ["tc_a"] });
+  const stopped = expect(task).rejects.toThrow("UI_TASK_STOPPED");
+  await ready;
+  expect(() => orch.stopUiTask("other", "test")).toThrow("不属于");
+  expect(orch.uiBusy()).toBe(true);
+  orch.stopUiTask("p1", "test");
+  await stopped;
+  expect(calls.some(args => args[0] === "save-run")).toBe(false);
+  expect(orch.uiBusy()).toBe(false);
+  expect(() => orch.stopUiTask("p1", "test")).not.toThrow();
+});
+
+it("passes cancellation to the AI task and records consumed tokens before unlocking", async () => {
+  const { engine, ui, secretEnv, calls } = setup([]);
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const runTurn = vi.fn(async (_thread: string, _text: string, opts?: { signal?: AbortSignal }) => {
+    started();
+    await new Promise<void>(resolve => opts!.signal!.addEventListener("abort", () => resolve(), { once: true }));
+    return { threadId: "t", turnId: "turn", status: "interrupted_user", message: "", tokens: 12 };
+  });
+  const orch = new Orchestrator({ engine, ui, secretEnv, agent: async () => ({ startThread: async () => "t", runTurn }) });
+  const task = orch.exploreUiCase("p1", "test", "tc_a");
+  const stopped = expect(task).rejects.toThrow("UI_TASK_STOPPED");
+  await ready;
+  orch.stopUiTask("p1", "test");
+  await stopped;
+  expect(calls.find(args => args[0] === "add-tokens")).toContain("12");
+  expect(orch.uiBusy()).toBe(false);
+});

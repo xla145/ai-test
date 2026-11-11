@@ -1,3 +1,4 @@
+let mockUiStopped = false;
 /**
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
@@ -391,6 +392,7 @@ const mockApi: AitestApi = {
     return state;
   },
   uiDebugState: async () => debugSession?.state() ?? null,
+  stopUiTask: async () => { mockUiStopped = true; },
   openRoleLogin: async () => { setView({ visible: true }); },
   saveRoleLogin: async (_p, _e, role) => { roleSessionTimes[role] = new Date().toISOString(); return delay({ cookies: 3, localStorage: 1, url: "https://feature-test.example.com/index", savedAt: roleSessionTimes[role] }, 300); },
   roleSessions: async () => delay({ ...roleSessionTimes }),
@@ -403,18 +405,23 @@ const mockApi: AitestApi = {
     uiScripts[caseId].status = "confirmed";
   },
   reviseUiScript: async (id, env, caseId, feedback, opts) => {
+    mockUiStopped = false;
     const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
     await delay(null, 500);
+    if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
     proposals.unshift({ id: `proposal_${Date.now()}`, case_id: caseId, script_path: uiScripts[caseId]?.path ?? "", diff: `@@ -1 +1 @@\n-// 原脚本\n+// 修正：${feedback}`, reason: feedback, status: "pending" });
     return { message: "已提交脚本修改建议，请审核差异，应用后重新试跑。" };
   },
   exploreUiCase: async (id, env, caseId, opts) => {
+    mockUiStopped = false;
     const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
     await delay(null, 600);
+    if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
     uiScripts[caseId] = { path: `scripts/ui/${caseId}.spec.ts`, hash: `demo-${Date.now()}`, status: "pending" };
     return { message: "脚本已生成，请在内嵌浏览器中试跑校验。" };
   },
   runUiRegression: async (id, env, _headed, opts) => {
+    mockUiStopped = false;
     const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
     const ids = opts?.caseIds ?? [];
     for (const caseId of ids) {
@@ -422,6 +429,7 @@ const mockApi: AitestApi = {
         const title = `[${st.id}] ${st.description}`;
         listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "running", stepId: st.id, kind: "step" } });
         await delay(null, 260);
+        if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
         listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "passed", stepId: st.id, kind: "step" } });
       }
       if (opts?.mode === "validate" && uiScripts[caseId]) uiScripts[caseId].validatedRunId = "run_demo";

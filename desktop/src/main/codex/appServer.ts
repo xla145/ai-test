@@ -95,7 +95,8 @@ export class CodexAppServer extends EventEmitter {
   }
 
   /** 发送一轮输入并等待完成；tokenLimit 为单次任务上限，超出则中断 */
-  async runTurn(threadId: string, text: string, opts: { tokenLimit?: number } = {}): Promise<TurnResult> {
+  async runTurn(threadId: string, text: string, opts: { tokenLimit?: number; signal?: AbortSignal } = {}): Promise<TurnResult> {
+    opts.signal?.throwIfAborted();
     const startTokens = this.tokens.get(threadId) ?? 0;
     this.messages.set(threadId, "");
     const res = await this.rpc().request(Methods.turnStart, { threadId, input: [{ type: "text", text }] }, 0);
@@ -118,18 +119,24 @@ export class CodexAppServer extends EventEmitter {
         void this.rpc().request(Methods.turnInterrupt, { threadId, turnId }).catch(() => undefined);
       }
     };
+    const onAbort = () => {
+      void this.rpc().request(Methods.turnInterrupt, { threadId, turnId }).catch((error) => this.emit("log", `停止任务失败：${String(error)}`));
+    };
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+    if (opts.signal?.aborted) onAbort();
     this.on("tokens", onUsage);
     try {
       const status = await done;
       return {
         threadId,
         turnId,
-        status: interrupted ? "interrupted_budget" : status,
+        status: opts.signal?.aborted ? "interrupted_user" : interrupted ? "interrupted_budget" : status,
         message: this.messages.get(threadId) ?? "",
         tokens: (this.tokens.get(threadId) ?? 0) - startTokens,
       };
     } finally {
       this.off("tokens", onUsage);
+      opts.signal?.removeEventListener("abort", onAbort);
     }
   }
 

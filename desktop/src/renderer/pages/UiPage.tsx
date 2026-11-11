@@ -229,7 +229,28 @@ function UiWorkbench({ project, env, onWorking, onUpdated, onProposals }: {
   const [stepStates, setStepStates] = useState<Record<string, StepRunState>>({});
   /** 单步调试会话（主进程持有，页面重新进入时恢复） */
   const [debug, setDebug] = useState<UiDebugState | null>(null);
-  const { busy, activeKey, run } = useKeyedAction();
+  const { busy, activeKey, run: runAction } = useKeyedAction();
+  const [stopping, setStopping] = useState(false);
+  const run = <T,>(key: string, action: () => Promise<T>, success?: string) => runAction(key, async () => {
+    try { return await action(); }
+    catch (error) {
+      if (!(error as Error).message.includes("UI_TASK_STOPPED")) throw error;
+      setLogs(old => old.map(log => log.status === "running" ? { ...log, status: "stopped" } : log));
+      setStepStates(old => Object.fromEntries(Object.entries(old).filter(([, state]) => state.status !== "running")));
+      setConclusionFailed(false);
+      setConclusion("任务已停止，可继续操作。已保存的脚本会保留，请校验后再确认。");
+      await refresh();
+      return undefined;
+    } finally { setStopping(false); }
+  }, success);
+  const stopAction = useAction();
+  const stoppable = ["generate", "validate", "regression", "revise"].includes(activeKey ?? "");
+  useEffect(() => { if (!stoppable) setStopping(false); }, [stoppable]);
+  const stop = () => stopAction.run(async () => {
+    setStopping(true);
+    try { await api().stopUiTask(project.id, env); }
+    catch (error) { setStopping(false); throw error; }
+  });
   const locked = busy || Boolean(debug);
   const { modal } = App.useApp();
   const script = current && scripts.data?.[current.id];
@@ -307,6 +328,9 @@ function UiWorkbench({ project, env, onWorking, onUpdated, onProposals }: {
     <Steps size="small" current={step} style={{ marginBottom: 16 }} items={[
       { title: "AI 生成" }, { title: "内嵌校验" }, { title: "确认脚本" }, { title: "执行回归" },
     ]} />
+    {stoppable && <div style={{ marginBottom: 12, textAlign: "right" }}>
+      <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止当前任务</Button>
+    </div>}
     <div ref={benchRef} className={`ui-workbench ${listCollapsed ? "list-collapsed" : ""} ${narrow ? "narrow" : ""}`}>
       {listCollapsed ? (
         <div className="ui-case-rail">
@@ -405,7 +429,7 @@ function UiWorkbench({ project, env, onWorking, onUpdated, onProposals }: {
       </div>
     </div>
     {logs.length > 0 && <Card size="small" title={busy ? "执行过程" : "最近执行过程"} style={{ marginTop: 16 }}>
-      <div className="ui-execution-log">{logs.map((log, i) => <div key={i}><Tag color={log.status === "failed" ? "red" : log.status === "passed" ? "green" : "blue"}>{log.status === "failed" ? "失败" : log.status === "passed" ? "通过" : "执行中"}</Tag><Typography.Text className="mono">{log.title}</Typography.Text></div>)}</div>
+      <div className="ui-execution-log">{logs.map((log, i) => <div key={i}><Tag color={log.status === "failed" ? "red" : log.status === "passed" ? "green" : "blue"}>{log.status === "failed" ? "失败" : log.status === "passed" ? "通过" : log.status === "stopped" ? "已停止" : "执行中"}</Tag><Typography.Text className="mono">{log.title}</Typography.Text></div>)}</div>
     </Card>}
     {result && <Card size="small" title={`最近执行 · ${result.run.run_id}`} style={{ marginTop: 16 }}>
       <Space wrap size="large"><Statistic title="执行用例" value={result.run.total} /><Statistic title="通过" value={result.run.passed} /><Statistic title="失败 / 出错" value={result.run.failed + result.run.error} /><Statistic title="待人工复核" value={result.run.reviews} /></Space>

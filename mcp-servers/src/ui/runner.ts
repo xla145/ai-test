@@ -14,6 +14,7 @@ const require = createRequire(import.meta.url);
 
 export interface UiRunOptions {
   workspace: string;
+  signal?: AbortSignal;
   baseUrl: string;
   /** 只跑指定用例（用例 ID 即 spec 文件名） */
   caseIds?: string[];
@@ -63,6 +64,7 @@ function nodePath(): string {
 }
 
 export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
+  opts.signal?.throwIfAborted();
   const dir = ensureUiScaffold(opts.workspace);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = join(opts.workspace, "reports", `ui-${stamp}`);
@@ -110,7 +112,18 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
   }
   let execution: { code: number | null; stderr: string };
   try { execution = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
-    const child = spawn(process.execPath, args, { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, args, { cwd: dir, env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const stop = () => {
+      if (!child.pid) return;
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true });
+        killer.on("error", () => child.kill("SIGKILL"));
+      } else {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+      }
+    };
+    opts.signal?.addEventListener("abort", stop, { once: true });
+    if (opts.signal?.aborted) stop();
     let err = "";
     let pending = "";
     child.stdout.on("data", (data) => {
@@ -129,13 +142,15 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
       }
     });
     child.stderr.on("data", (d) => (err += d));
-    const timer = setTimeout(() => child.kill("SIGKILL"), opts.timeoutMs ?? 30 * 60_000);
-    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    const timer = setTimeout(stop, opts.timeoutMs ?? 30 * 60_000);
+    child.on("error", (e) => { clearTimeout(timer); opts.signal?.removeEventListener("abort", stop); reject(e); });
     child.on("close", (c) => {
       clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", stop);
       resolve({ code: c, stderr: err });
     });
   }); } finally { for (const file of copies) rmSync(join(dir, file), { force: true }); }
+  opts.signal?.throwIfAborted();
   const { code, stderr } = execution;
   const raw = existsSync(reportJson) ? readFileSync(reportJson, "utf8") : "";
   const results = raw ? parseReport(raw, opts.workspace) : [];
