@@ -154,9 +154,22 @@ aitest metrics      --project <项目ID>
 - **模型**：可添加多个模型（OpenAI、百炼、DeepSeek、方舟或私有化部署的 OpenAI 兼容服务），分别指定 agent 与视觉定位使用哪一个，并测试连通；API key 存系统钥匙串。
 - **运行环境**：Python 与 Codex 路径（默认 python3 与内置 Codex）、agent 单次任务 token 上限。环境变量 `AITEST_PYTHON`、`AITEST_CODEX_BIN`、`AITEST_TOKEN_LIMIT` 优先于这里的配置。
 - **外观**：跟随系统 / 浅色 / 深色。
-- **数据与关于**：版本号、数据目录与数据库位置。
+- **更新与关于**：当前版本、检查更新、自动检查开关；数据目录与数据库位置。
 
 配置保存在数据目录的 `settings.json`，旧版本的模型配置会自动迁移。
+
+### 自动更新
+
+装过一次带更新功能的版本后，之后的新版本会自动更新，不需要重新下载安装：
+启动 15 秒后与每 4 小时检查一次，有新版本就在后台下载，下载完成后弹出提示，点「重启并更新」即可（也可在「全局设置 → 更新与关于」手动检查）。
+
+- 更新地址：`https://download.classktv.com/aitest-desktop/`（Cloudflare R2 桶 `aiprobe`，前缀 `aitest-desktop`）。
+- Windows（NSIS）与 Linux（AppImage）使用 electron-updater，Windows 只下载变化的部分。
+- macOS 没有开发者证书时无法使用系统的更新框架，由客户端自己下载 zip、校验 sha512、解压，退出时替换 `.app` 后重新打开；
+  应用需要放在「应用程序」等可写目录中，在磁盘映像里直接运行时无法更新。
+- 发布流水线的 `update-feed` 任务把安装包和 `latest*.yml` 上传到 R2。需要仓库 Secrets `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`；
+  可选仓库变量 `UPDATE_URL`、`R2_BUCKET`、`R2_PREFIX`、`R2_ACCOUNT_ID` 覆盖默认值。没有配置 Secrets 时跳过上传，不影响 GitHub Release。
+- 开发模式默认不检查更新；设置环境变量 `AITEST_UPDATE_URL` 可指定其他更新地址，用于测试。
 
 ## 当前进度
 

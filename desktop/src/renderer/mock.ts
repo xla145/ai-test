@@ -2,7 +2,7 @@
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
  */
-import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery } from "../shared/ipc";
+import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -161,7 +161,14 @@ const listeners: {
   approval?: (r: ApprovalRequest) => void;
   event?: (e: { method: string; params: unknown }) => void;
   view?: (v: { visible: boolean }) => void;
+  update?: (s: UpdateState) => void;
 } = {};
+
+let updateState: UpdateState = { status: "idle", current: "0.3.11", feedUrl: "https://download.classktv.com/aitest-desktop" };
+const setUpdate = (next: Partial<UpdateState>) => {
+  updateState = { ...updateState, ...next };
+  listeners.update?.(updateState);
+};
 
 const mockApi: AitestApi = {
   listProjects: () => delay(projects.map(view)),
@@ -349,6 +356,27 @@ const mockApi: AitestApi = {
   onEvent: (cb) => {
     listeners.event = cb;
     return () => (listeners.event = undefined);
+  },
+  getUpdateState: () => delay(updateState),
+  checkForUpdates: async () => {
+    // 演示：发现新版本 → 后台下载 → 下载完成
+    setUpdate({ status: "checking" });
+    await delay(null, 600);
+    setUpdate({ status: "downloading", version: "0.3.12", progress: 0 });
+    for (const p of [18, 42, 67, 90]) {
+      await delay(null, 350);
+      setUpdate({ progress: p });
+    }
+    await delay(null, 350);
+    setUpdate({ status: "downloaded", progress: 100, checkedAt: new Date().toISOString() });
+    return updateState;
+  },
+  installUpdate: async () => {
+    setUpdate({ status: "idle", current: updateState.version ?? updateState.current, version: undefined });
+  },
+  onUpdate: (cb) => {
+    listeners.update = cb;
+    return () => (listeners.update = undefined);
   },
   onViewChange: (cb) => {
     listeners.view = cb;

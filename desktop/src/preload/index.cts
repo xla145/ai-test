@@ -19,6 +19,7 @@ const methods = [
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",
   "saveGlobalSettings", "checkModel", "checkRuntime", "getUserInfo", "openDataDir", "hideTestView",
   "runAppRegression", "exploreAppCase",
+  "getUpdateState", "checkForUpdates", "installUpdate",
   "moveProject", "projectOverview", "getSettingsDetail",
   "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
@@ -29,5 +30,6 @@ api.onApprovalRequest = (cb: (v: unknown) => void) => subscribe("aitest:approval
 api.respondApproval = (id: string, accept: boolean) => ipcRenderer.send("aitest:approval-response", id, accept);
 api.onEvent = (cb: (v: unknown) => void) => subscribe("aitest:event", cb);
 api.onViewChange = (cb: (v: unknown) => void) => subscribe("aitest:view", cb);
+api.onUpdate = (cb: (v: unknown) => void) => subscribe("aitest:update", cb);
 
 contextBridge.exposeInMainWorld("aitest", api);

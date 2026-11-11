@@ -32,6 +32,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { GlobalSettings, GlobalSettingsView, ModelCheckResult, ModelEntry, ModelPresetInfo, RuntimeCheck } from "../../shared/ipc";
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
+import { UpdateCard } from "../components/UpdateCard";
 import { useAction, useLoad, useNarrow } from "../hooks";
 
 /** 全局设置保存后广播（detail 为 GlobalSettingsView）：主题、侧栏当前模型据此立即刷新 */
@@ -64,7 +65,12 @@ export function SettingsPage() {
           { key: "models", label: "模型", children: <Models {...props} /> },
           { key: "runtime", label: "运行环境", children: <Runtime {...props} /> },
           { key: "appearance", label: "外观", children: <Appearance {...props} /> },
-          { key: "about", label: "数据与关于", children: <About view={view.data} /> },
+          { key: "about", label: "更新与关于", children: (
+            <>
+              <UpdateCard settings={view.data.settings} onSave={(s) => save(s, undefined, "已保存")} />
+              <About view={view.data} />
+            </>
+          ) },
         ]}
       />
     </div>

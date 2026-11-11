@@ -18,6 +18,7 @@ import {
   ToolOutlined,
 } from "@ant-design/icons";
 import {
+  App as AntApp,
   Avatar,
   Badge,
   Button,
@@ -44,6 +45,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApprovalRequest } from "../shared/ipc";
 import { api, isGroup, type Project } from "./api";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
+import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad } from "./hooks";
 import { ApiPage } from "./pages/ApiPage";
 import { AppPage } from "./pages/AppPage";
@@ -103,6 +105,19 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const { data: user } = useLoad(() => api().getUserInfo(), []);
+  const update = useUpdateState();
+  const { notification } = AntApp.useApp();
+  // 新版本下载完成：提示一次，可直接重启更新
+  useEffect(() => {
+    if (update?.status !== "downloaded" || !update.version) return;
+    const key = `update-${update.version}`;
+    notification.info({
+      key, duration: 0, placement: "bottomRight",
+      message: `新版本 ${update.version} 已下载`,
+      description: "重启后完成更新，正在进行的任务请先等待结束。",
+      btn: <Button type="primary" size="small" onClick={() => { notification.destroy(key); void api().installUpdate(); }}>重启并更新</Button>,
+    });
+  }, [update?.status, update?.version, notification]);
   const current = projects.find((p) => p.id === currentId) ?? projects[0];
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
   const compact = viewVisible;
@@ -211,8 +226,9 @@ export function App() {
                 )}
               </div>
             </Tooltip>
-            <Tooltip title="全局设置" placement={compact ? "right" : "top"}>
-              <Button type="text" className="sider-action" aria-label="全局设置" icon={<SettingOutlined />}
+            <Tooltip title={update?.status === "downloaded" ? `全局设置（新版本 ${update.version} 已下载）` : "全局设置"} placement={compact ? "right" : "top"}>
+              <Button type="text" className="sider-action" aria-label="全局设置"
+                icon={<Badge dot={update?.status === "downloaded"} offset={[-1, 2]}><SettingOutlined /></Badge>}
                 style={showSettings ? { background: token.colorPrimaryBg, color: token.colorPrimary } : undefined}
                 onClick={() => setShowSettings(true)} />
             </Tooltip>

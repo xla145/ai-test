@@ -58,6 +58,24 @@ export interface GeneralSettings {
   pinkyEnabled?: boolean;
   /** pinkyctl 可执行文件，空表示 PATH 上的 pinkyctl */
   pinkyPath?: string;
+  /** 自动检查更新（默认开启）：启动后与每隔 4 小时检查一次，有新版本时后台下载 */
+  autoUpdate?: boolean;
+}
+
+/** 自动更新的状态 */
+export interface UpdateState {
+  status: "disabled" | "idle" | "checking" | "not-available" | "available" | "downloading" | "downloaded" | "error";
+  /** 当前版本 */
+  current: string;
+  /** 新版本 */
+  version?: string;
+  /** 下载进度 0–100 */
+  progress?: number;
+  error?: string;
+  /** status 为 disabled 时的原因 */
+  reason?: string;
+  checkedAt?: string;
+  feedUrl?: string;
 }
 
 export interface GlobalSettings {
@@ -224,6 +242,13 @@ export interface AitestApi {
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;
   /** 内嵌浏览器视图显示 / 隐藏（界面据此收窄到左半屏） */
   onViewChange?(cb: (v: { visible: boolean }) => void): () => void;
+  // ---- 自动更新 ----
+  getUpdateState(): Promise<UpdateState>;
+  /** 立即检查；有新版本时自动后台下载 */
+  checkForUpdates(): Promise<UpdateState>;
+  /** 退出并安装已下载的更新，安装后自动重新打开 */
+  installUpdate(): Promise<void>;
+  onUpdate(cb: (state: UpdateState) => void): () => void;
   hideTestView?(): Promise<void>;
 }
 
@@ -233,4 +258,5 @@ export const CHANNELS = {
   approvalResponse: "aitest:approval-response",
   event: "aitest:event",
   view: "aitest:view",
+  update: "aitest:update",
 } as const;

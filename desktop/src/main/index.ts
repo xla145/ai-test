@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import yaml from "js-yaml";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
@@ -23,6 +24,7 @@ import {
   type GlobalSettings,
 } from "./settings.js";
 import { Orchestrator } from "./orchestrator.js";
+import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
 import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo } from "../shared/ipc.js";
 
@@ -95,6 +97,7 @@ const paths = {
 };
 
 let mainWindow: BrowserWindow | undefined;
+let updater: Updater | undefined;
 /** 被测页面视图：每个「项目 + 角色」一个独立 session partition，Playwright 经 CDP 连接后按 URL 标记找到它 */
 const testViews = new Map<string, WebContentsView>();
 let visibleView: WebContentsView | undefined;
@@ -420,6 +423,9 @@ function registerIpc(orch: Orchestrator): void {
     },
     openDataDir: () => shell.openPath(paths.data()),
     getUserInfo: () => localUser(),
+    getUpdateState: () => updater?.current,
+    checkForUpdates: () => updater?.check(),
+    installUpdate: () => updater?.install(),
     resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
     listReviews: (status?: string) => orch.listReviews(status),
     resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
@@ -483,6 +489,40 @@ async function refreshParents(orch: Orchestrator): Promise<void> {
   rememberParents(await orch.listProjects());
 }
 
+/**
+ * 更新地址：AITEST_UPDATE_URL 优先，否则读安装包内 electron-builder 写入的 app-update.yml（publish.url）。
+ * 开发模式、非 AppImage 的 Linux 不启用。
+ */
+function createUpdater(): Updater {
+  let feedUrl = process.env.AITEST_UPDATE_URL;
+  let disabledReason: string | undefined;
+  if (!feedUrl) {
+    try {
+      const cfg = yaml.load(readFileSync(join(process.resourcesPath, "app-update.yml"), "utf8")) as { url?: string } | undefined;
+      feedUrl = cfg?.url;
+    } catch {
+      // 开发模式或旧安装包没有 app-update.yml
+    }
+  }
+  if (!app.isPackaged && !process.env.AITEST_UPDATE_URL) disabledReason = "开发模式不检查更新";
+  else if (process.platform === "linux" && !process.env.APPIMAGE) disabledReason = "Linux 仅 AppImage 支持自动更新";
+  const u = new Updater({
+    currentVersion: app.getVersion(), feedUrl, disabledReason,
+    platform: process.platform, arch: process.arch, execPath: process.execPath,
+    downloadDir: join(app.getPath("userData"), "updates"),
+    quit: () => app.quit(),
+  });
+  u.on("state", (s) => mainWindow?.webContents.send(CHANNELS.update, s));
+  return u;
+}
+
+/** 启动 15 秒后检查一次，之后每 4 小时一次（全局设置可关闭） */
+function scheduleUpdateChecks(u: Updater): void {
+  const auto = () => loadSettings().general.autoUpdate !== false;
+  setTimeout(() => auto() && void u.check(), 15_000);
+  setInterval(() => auto() && void u.check(), 4 * 60 * 60_000);
+}
+
 async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
   const p = await orch.project(projectId);
   const hosts = (prod: boolean) =>
@@ -510,6 +550,8 @@ app.whenReady().then(async () => {
   orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));
   registerIpc(orch);
   createWindow();
+  updater = createUpdater();
+  scheduleUpdateChecks(updater);
 });
 
 app.on("window-all-closed", () => {
