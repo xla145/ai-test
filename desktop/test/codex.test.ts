@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CodexAppServer } from "../src/main/codex/appServer.js";
 import { buildCodexConfig } from "../src/main/codex/config.js";
 import { JsonRpcPeer } from "../src/main/codex/jsonrpc.js";
+import { totalTokensOf } from "../src/main/codex/protocol.js";
 
 /** 用两对内存流模拟 codex app-server 子进程 */
 function fakeCodex(script: (server: JsonRpcPeer) => void) {
@@ -37,7 +38,8 @@ describe("JsonRpcPeer", () => {
 
 describe("CodexAppServer", () => {
   it("runs a turn, streams the message, tracks tokens and answers approvals", async () => {
-    const approvals = { command: vi.fn(async () => "accept" as const), fileChange: vi.fn(async () => "decline" as const) };
+    const approvals = { command: vi.fn(async () => "accept" as const), fileChange: vi.fn(async () => "decline" as const),
+      mcpElicitation: vi.fn(async (p: { serverName: string }) => (p.serverName === "case-store" ? "accept" as const : "decline" as const)) };
     const decisions: unknown[] = [];
     const transport = fakeCodex((srv) => {
       srv.onRequest(async (method, params: any) => {
@@ -47,6 +49,8 @@ describe("CodexAppServer", () => {
           setImmediate(async () => {
             decisions.push(await srv.request("item/commandExecution/requestApproval", { threadId: "th_1", turnId: "tu_1", itemId: "i1", command: "pytest" }));
             decisions.push(await srv.request("item/fileChange/requestApproval", { threadId: "th_1", turnId: "tu_1", itemId: "i2" }));
+            decisions.push(await srv.request("mcpServer/elicitation/request", { threadId: "th_1", turnId: "tu_1", serverName: "case-store", mode: "form", message: "允许调用 list_cases？", requestedSchema: { type: "object", properties: {} }, _meta: null }));
+            decisions.push(await srv.request("mcpServer/elicitation/request", { threadId: "th_1", turnId: "tu_1", serverName: "other", mode: "url", url: "https://x", elicitationId: "e", _meta: null }));
             srv.notify("item/agentMessage/delta", { threadId: params.threadId, delta: "完成" });
             srv.notify("item/agentMessage/delta", { threadId: params.threadId, delta: "了" });
             srv.notify("thread/tokenUsage/updated", { threadId: "th_1", tokenUsage: { total: { totalTokens: 321 } } });
@@ -62,7 +66,8 @@ describe("CodexAppServer", () => {
     const thread = await codex.startThread({ cwd: "/ws" });
     const result = await codex.runTurn(thread, "生成用例");
     expect(result).toMatchObject({ threadId: "th_1", turnId: "tu_1", status: "completed", message: "完成了", tokens: 321 });
-    expect(decisions).toEqual([{ decision: "accept" }, { decision: "decline" }]);
+    expect(decisions).toEqual([{ decision: "accept" }, { decision: "decline" },
+      { action: "accept", content: {}, _meta: null }, { action: "decline", content: null, _meta: null }]);
   });
 
   it("interrupts a turn that exceeds the token budget", async () => {
@@ -91,6 +96,15 @@ describe("CodexAppServer", () => {
   });
 });
 
+describe("token usage", () => {
+  it("does not count cached input against budgets", () => {
+    // 真实数据：一次探索 206,075 token，其中 201,728 是缓存命中的输入
+    expect(totalTokensOf({ tokenUsage: { total: { totalTokens: 206075, inputTokens: 204768, cachedInputTokens: 201728, outputTokens: 1307 } } })).toBe(4347);
+    expect(totalTokensOf({ tokenUsage: { total: { totalTokens: 321 } } })).toBe(321);
+    expect(totalTokensOf({ usage: { total: { total_tokens: 900, cached_input_tokens: 600 } } })).toBe(300);
+  });
+});
+
 describe("buildCodexConfig", () => {
   it("registers MCP servers and an OpenAI-compatible provider without secrets", () => {
     const toml = buildCodexConfig({
@@ -105,4 +119,11 @@ describe("buildCodexConfig", () => {
     expect(toml).toContain('wire_api = "responses"');
     expect(toml).not.toContain('wire_api = "chat"');
   });
+});
+
+it("passes the Midscene key by environment name without serializing its value", () => {
+  const config = buildCodexConfig({ mcpServers: [{ name: "browser", command: "node", args: [],
+    envVars: ["MIDSCENE_MODEL_API_KEY"], env: { AITEST_MIDSCENE: "1" } }] });
+  expect(config).toContain('env_vars = ["MIDSCENE_MODEL_API_KEY"]');
+  expect(config).not.toContain('MIDSCENE_MODEL_API_KEY =');
 });

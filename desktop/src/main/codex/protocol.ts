@@ -27,7 +27,21 @@ export const Notifications = {
 export const ServerRequests = {
   commandApproval: "item/commandExecution/requestApproval",
   fileChangeApproval: "item/fileChange/requestApproval",
+  /** 新版 Codex 调用 MCP 工具前通过 MCP elicitation 请求审批 */
+  mcpElicitation: "mcpServer/elicitation/request",
 } as const;
+
+/** mcpServer/elicitation/request 的参数（只取审批需要的字段） */
+export interface McpElicitationParams {
+  threadId: string;
+  turnId: string | null;
+  serverName: string;
+  mode: string;
+  message?: string;
+  url?: string;
+  requestedSchema?: { properties?: Record<string, unknown>; required?: string[] } | unknown;
+  _meta?: unknown;
+}
 
 export type Decision = "accept" | "decline";
 
@@ -72,12 +86,17 @@ export function turnIdOf(result: unknown): string {
   return id;
 }
 
-/** 从 tokenUsage 通知中取线程累计 token 数（兼容不同字段名） */
+/**
+ * 从 tokenUsage 通知中取线程累计的「实际消耗」token 数（兼容不同字段名）。
+ * 不计缓存命中的输入：每次调用模型都会重复带上之前的上下文，这部分命中缓存、按很低的价格计费，
+ * 全额计入会让单任务上限在几次工具调用后就触发（一次探索 20 万 token 里 98% 是缓存）。
+ */
 export function totalTokensOf(params: unknown): number {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const p = params as any;
   const usage = p?.tokenUsage ?? p?.usage ?? p;
   const total = usage?.total ?? usage;
   const value = total?.totalTokens ?? total?.total_tokens ?? (total?.inputTokens ?? 0) + (total?.outputTokens ?? 0);
-  return Number(value) || 0;
+  const cached = total?.cachedInputTokens ?? total?.cached_input_tokens ?? 0;
+  return Math.max(0, (Number(value) || 0) - (Number(cached) || 0));
 }

@@ -68,3 +68,50 @@ body {
 .todo-item + .todo-item { border-top: 1px solid rgba(128,128,128,.12); }
 /* 收起为图标栏时，分组标题换成细分隔线 */
 .ant-menu-inline-collapsed .ant-menu-item-group-title { font-size: 0; height: 1px; padding: 0 !important; margin: 8px 16px; background: rgba(128,128,128,.2); }
+/* UI 测试工作台：用例列表（可收起）｜步骤与校验｜内嵌浏览器停靠区 */
+.ui-workbench { display: grid; grid-template-columns: minmax(240px, 300px) minmax(340px, 1fr) minmax(400px, 1.15fr); gap: 12px; align-items: stretch;
+  height: calc(100vh - 270px); min-height: 520px; }
+.ui-workbench.list-collapsed { grid-template-columns: 36px minmax(340px, 1fr) minmax(400px, 1.3fr); }
+.ui-workbench > .ant-card { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.ui-workbench > .ant-card > .ant-card-body { flex: 1; min-height: 0; overflow: auto; }
+.ui-case-rail { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 8px; border-radius: 8px; border: 1px solid rgba(128,128,128,.18); }
+.ui-case-rail-label { writing-mode: vertical-rl; font-size: 12px; }
+.ui-browser-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+.browser-dock { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid rgba(128,128,128,.22); border-radius: 8px; overflow: hidden; }
+.browser-dock-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid rgba(128,128,128,.18); }
+.browser-dock-view { flex: 1; min-height: 0; display: grid; place-items: center; background: rgba(128,128,128,.04); }
+.ui-workbench.narrow { grid-template-columns: minmax(200px, 240px) minmax(260px, 1fr) minmax(300px, 1fr); }
+.ui-workbench.narrow.list-collapsed { grid-template-columns: 36px minmax(280px, 1fr) minmax(320px, 1.1fr); }
+.script-steps-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-width: 0; }
+.script-code { margin: 0; padding: 10px 12px; font-size: 12px; line-height: 1.6; background: rgba(128,128,128,.07); border-radius: 6px; overflow: auto; white-space: pre; max-height: 520px; }
+.case-group { margin-bottom: 10px; border: 1px solid rgba(128,128,128,.16); border-radius: 8px; overflow: hidden; }
+.case-group-head { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: rgba(128,128,128,.05); }
+.case-group-index { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 600; flex-shrink: 0;
+  background: rgba(59,110,245,.12); color: #3b6ef5; margin-top: 1px; }
+.script-step { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-top: 1px solid rgba(128,128,128,.1); }
+.script-step.running { background: rgba(59,110,245,.06); }
+.script-step.failed { background: rgba(255,77,79,.06); }
+.script-step-id { font-size: 12px; opacity: .55; width: 26px; flex-shrink: 0; margin-top: 2px; }
+.script-step-body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.step-icon { margin-top: 4px; flex-shrink: 0; }
+.step-icon.idle { opacity: .3; }
+.step-icon.running { color: #3b6ef5; }
+.step-icon.passed { color: #52c41a; }
+.step-icon.failed { color: #ff4d4f; }
+.step-icon.skipped { opacity: .45; }
+.step-icon.cursor { color: #faad14; }
+.script-step { position: relative; }
+.script-step.cursor { background: rgba(250,173,20,.10); box-shadow: inset 3px 0 0 #faad14; }
+.step-breakpoint { width: 12px; height: 12px; margin-top: 5px; flex-shrink: 0; border-radius: 50%; border: 1px dashed rgba(128,128,128,.45);
+  background: transparent; padding: 0; cursor: pointer; }
+.step-breakpoint:hover { border-style: solid; border-color: #ff4d4f; }
+.step-breakpoint.on { background: #ff4d4f; border: 1px solid #ff4d4f; }
+.script-step-actions { display: none; flex-shrink: 0; margin: -2px -6px 0 0; }
+.script-step:hover .script-step-actions { display: flex; }
+.script-step-actions .ant-btn { padding: 0 4px; font-size: 12px; height: 22px; }
+.debug-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; margin-bottom: 10px; border-radius: 8px;
+  background: rgba(250,173,20,.08); border: 1px solid rgba(250,173,20,.3); }
+.ui-case-active > td { background: rgba(59,110,245,.08) !important; }
+.ui-execution-log { max-height: 240px; overflow: auto; }
+.ui-execution-log > div { padding: 4px 0; overflow-wrap: anywhere; }
+.app-shell.with-view { min-width: 0; }

@@ -1,14 +1,14 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import { BrowserSession, checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import yaml from "js-yaml";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
-import { evaluateCommand, evaluateFileChange, isInside, type ApprovalContext, type Verdict } from "./approval.js";
+import { evaluateCommand, evaluateFileChange, evaluateMcpElicitation, isInside, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
 import type { Decision } from "./codex/protocol.js";
@@ -26,7 +26,8 @@ import {
 import { Orchestrator } from "./orchestrator.js";
 import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
-import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo } from "../shared/ipc.js";
+import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo, type UiDebugCommand, type ViewDock } from "../shared/ipc.js";
+import type { UiRunOptions } from "../shared/ipc.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -103,6 +104,10 @@ let updater: Updater | undefined;
 /** 被测页面视图：每个「项目 + 角色」一个独立 session partition，Playwright 经 CDP 连接后按 URL 标记找到它 */
 const testViews = new Map<string, WebContentsView>();
 let visibleView: WebContentsView | undefined;
+/** 页面提供的停靠区域（UI 测试工作台）；为空时视图占右半屏，界面收窄到左半屏 */
+let viewDock: ViewDock | null = null;
+/** 视图实际是否在显示（停靠区被遮挡或过小时为 false），变化时通知界面 */
+let viewShown = false;
 let broker: Broker | undefined;
 let codex: CodexAppServer | undefined;
 let secretStore: SecretStore;
@@ -186,6 +191,7 @@ async function getCodex(): Promise<CodexAppServer> {
   const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support", "app"];
   const models = loadModelSettings();
   const vision = models.vision ? midsceneEnv(models, modelKey("vision")) : {};
+  const { MIDSCENE_MODEL_API_KEY: visionKey, ...visionConfig } = vision;
   const mcpEnv: Record<string, string> = {
     // browser 服务经 CDP 连接内嵌浏览器；AITEST_MIDSCENE=1 时启用 Midscene 视觉工具
     AITEST_CDP_ENDPOINT: `http://127.0.0.1:${CDP_PORT}`,
@@ -206,7 +212,8 @@ async function getCodex(): Promise<CodexAppServer> {
       mcpServers: [
         ...servers.map((name) => ({
           name, command: process.execPath, args: [paths.mcpEntry(), name],
-          env: name === "browser" ? { ...mcpEnv, ...vision } : name === "app" ? { ...mcpEnv, AITEST_MAESTRO: maestroBin().path } : mcpEnv,
+          ...(name === "browser" ? { envVars: ["MIDSCENE_MODEL_API_KEY"] } : {}),
+          env: name === "browser" ? { ...mcpEnv, ...visionConfig, MIDSCENE_RUN_DIR: join(paths.data(), "midscene") } : name === "app" ? { ...mcpEnv, AITEST_MAESTRO: maestroBin().path } : mcpEnv,
         })),
         // App 探索：Pinky 操作手机，关键步骤在 Pinky 中由用户确认
         ...(pinky().enabled ? [{ name: "pinky", command: pinky().path, args: ["mcp"] }] : []),
@@ -217,10 +224,12 @@ async function getCodex(): Promise<CodexAppServer> {
     binary: paths.codexBin(),
     codexHome,
     // agent 模型的 key 只注入 Codex 进程（对应配置中的 env_key）
-    env: modelKey("agent") ? { [AGENT_KEY_ENV]: modelKey("agent") } : {},
+    env: { ...(modelKey("agent") ? { [AGENT_KEY_ENV]: modelKey("agent") } : {}),
+      ...(visionKey !== undefined ? { MIDSCENE_MODEL_API_KEY: visionKey } : {}) },
     approvals: {
       command: (p) => decide("command", evaluateCommand(p, approvalContext), p),
       fileChange: (p) => decide("fileChange", evaluateFileChange(p, approvalContext), p),
+      mcpElicitation: (p) => decide("mcp", evaluateMcpElicitation(p, new Set(servers)), { 服务: p.serverName, 说明: p.message ?? p.url ?? "" }),
     },
   });
   codex.on("event", (evt) => mainWindow?.webContents.send(CHANNELS.event, evt));
@@ -243,36 +252,87 @@ function createWindow(): void {
 }
 
 /** 被测页面放在独立的 WebContentsView 中，用户可实时看到 agent / 脚本的操作 */
+/**
+ * 被测页面按桌面宽度渲染：视图比 1280 窄时整体缩小显示，页面仍按 1280 宽布局。
+ * 否则后台系统会切成手机布局（菜单收起），AI 探索绕路，录下的定位也和无头回归（默认 1280 宽）不一致。
+ */
+const DESKTOP_WIDTH = 1280;
+const viewZoom = new WeakMap<WebContentsView, number>();
+
+function applyZoom(view: WebContentsView, width: number): void {
+  if (width <= 0) return;
+  const zoom = Math.max(0.25, Math.min(1, width / DESKTOP_WIDTH));
+  if (viewZoom.get(view) === zoom) return;
+  viewZoom.set(view, zoom);
+  view.webContents.setZoomFactor(zoom);
+}
+
+/** 缩放按站点记忆：跳到新站点后重新应用 */
+function keepZoom(view: WebContentsView): void {
+  view.webContents.on("did-navigate", () => {
+    const zoom = viewZoom.get(view);
+    if (zoom) view.webContents.setZoomFactor(zoom);
+  });
+}
+
 function layoutTestView(): void {
   if (!mainWindow || !visibleView) return;
+  const before = viewShown;
   const [w, h] = mainWindow.getContentSize();
-  visibleView.setBounds({ x: Math.floor(w * 0.5), y: 0, width: Math.ceil(w * 0.5), height: h });
+  if (viewDock) {
+    const x = Math.max(0, Math.round(viewDock.x)), y = Math.max(0, Math.round(viewDock.y));
+    const width = Math.max(0, Math.min(Math.round(viewDock.width), w - x)), height = Math.max(0, Math.min(Math.round(viewDock.height), h - y));
+    // 停靠区被弹窗遮挡或过小时暂时隐藏，避免视图盖住界面
+    viewShown = !viewDock.suspended && width >= 120 && height >= 80;
+    visibleView.setBounds({ x, y, width, height });
+    applyZoom(visibleView, width);
+  } else {
+    viewShown = true;
+    visibleView.setBounds({ x: Math.floor(w * 0.5), y: 0, width: Math.ceil(w * 0.5), height: h });
+    applyZoom(visibleView, Math.ceil(w * 0.5));
+  }
+  visibleView.setVisible(viewShown);
+  if (before !== viewShown) notifyView();
+}
+
+function notifyView(): void {
+  mainWindow?.webContents.send(CHANNELS.view, { visible: Boolean(visibleView), docked: Boolean(viewDock), shown: Boolean(visibleView) && viewShown });
 }
 
 function showView(view: WebContentsView): void {
   if (!mainWindow) return;
-  for (const v of testViews.values()) v.setVisible(v === view);
+  for (const v of testViews.values()) if (v !== view) v.setVisible(false);
   if (!mainWindow.contentView.children.includes(view)) mainWindow.contentView.addChildView(view);
+  const changed = visibleView !== view;
   visibleView = view;
   layoutTestView();
-  mainWindow.webContents.send(CHANNELS.view, { visible: true });
+  if (changed) notifyView();
 }
 
 function hideTestView(): void {
   for (const v of testViews.values()) v.setVisible(false);
   visibleView = undefined;
-  mainWindow?.webContents.send(CHANNELS.view, { visible: false });
+  viewShown = false;
+  notifyView();
+}
+
+function dockTestView(dock: ViewDock | null): void {
+  const wasDocked = Boolean(viewDock);
+  viewDock = dock;
+  layoutTestView();
+  if (wasDocked !== Boolean(dock)) notifyView();
 }
 
 /** 为角色准备视图（多角色：Electron session partition 隔离登录态），返回初始 URL 中的标记 */
-async function openRoleView(projectId: string, role: string): Promise<string> {
+async function openRoleView(projectId: string, role: string, env?: string): Promise<string> {
   if (!mainWindow) throw new Error("主窗口未就绪");
-  const key = `${projectId}:${role}`;
+  const key = env ? `${projectId}:${env}:${role}` : `${projectId}:${role}`;
   let view = testViews.get(key);
   const marker = `aitest-view=${randomUUID()}`;
   if (!view) {
-    const partition = `persist:aitest-${projectId}-${Buffer.from(role).toString("hex")}`;
+    const partition = `persist:aitest-${Buffer.from(key).toString("hex")}`;
     view = new WebContentsView({ webPreferences: { partition, sandbox: true } });
+    keepZoom(view);
     testViews.set(key, view);
   }
   showView(view);
@@ -280,11 +340,69 @@ async function openRoleView(projectId: string, role: string): Promise<string> {
   return marker;
 }
 
+// ---- 手动登录：用户在角色视图里亲自登录（验证码、扫码等），登录态供探索 / 调试 / 试跑 / 回归复用 ----
+
+const ROLE_NAME = /^(?!\.{1,2}$)[^\\/:*?"<>|\u0000-\u001f]{1,64}$/;
+
+async function roleLoginTarget(orch: Orchestrator, projectId: string, env: string, role: string) {
+  if (!ROLE_NAME.test(role) || role === "default") throw new Error("角色名不合法");
+  const project = (await orch.listProjects()).find((p) => p.id === projectId);
+  const cfg = project?.environments[env];
+  if (!project || !cfg) throw new Error("项目或环境不存在");
+  return { project, cfg, key: `${projectId}:${env}:${role}`, file: join(project.workspace_path, "scripts", "ui", ".auth", `${role}.json`) };
+}
+
+async function openRoleLogin(orch: Orchestrator, projectId: string, env: string, role: string): Promise<void> {
+  if (orch.uiBusy()) throw new Error("内嵌浏览器正在执行 UI 任务或调试，请结束后再登录");
+  const { cfg } = await roleLoginTarget(orch, projectId, env, role);
+  await openRoleView(projectId, role, env);
+  const view = testViews.get(`${projectId}:${env}:${role}`)!;
+  // 已登录时打开首页即可看到登录结果；配置了登录页地址时直接打开登录页
+  await view.webContents.loadURL(new URL(cfg.login?.url ?? "/", cfg.base_url).href).catch(() => undefined);
+}
+
+const SAME_SITE = { no_restriction: "None", lax: "Lax", strict: "Strict", unspecified: "Lax" } as const;
+
+/** 把角色视图的 cookie 与当前页面的 localStorage 导出为 Playwright storageState（无头回归使用） */
+async function saveRoleLogin(orch: Orchestrator, projectId: string, env: string, role: string) {
+  if (orch.uiBusy()) throw new Error("内嵌浏览器正在执行 UI 任务或调试，请结束后再保存");
+  const { key, file } = await roleLoginTarget(orch, projectId, env, role);
+  const view = testViews.get(key);
+  const url = view?.webContents.getURL() ?? "";
+  if (!view || !/^https?:/.test(url)) throw new Error("请先点击「打开登录页」并在内嵌浏览器中完成登录");
+  const cookies = await view.webContents.session.cookies.get({});
+  const local = JSON.parse(await view.webContents.executeJavaScript("JSON.stringify(Object.entries(localStorage))")) as [string, string][];
+  const state = {
+    cookies: cookies.map((c) => ({
+      name: c.name, value: c.value, domain: c.domain ?? new URL(url).hostname, path: c.path ?? "/",
+      expires: c.expirationDate ?? -1, httpOnly: Boolean(c.httpOnly), secure: Boolean(c.secure), sameSite: SAME_SITE[c.sameSite ?? "unspecified"],
+    })),
+    origins: local.length ? [{ origin: new URL(url).origin, localStorage: local.map(([name, value]) => ({ name, value })) }] : [],
+  };
+  if (!state.cookies.length && !state.origins.length) throw new Error("没有检测到登录信息（cookie 和 localStorage 都为空），请确认已登录成功");
+  mkdirSync(dirname(file), { recursive: true });
+  // 登录态等同凭据：无论 workspace 的 .gitignore 怎么写，都不能被脚本登记时的 git add 提交
+  const ignore = join(dirname(file), ".gitignore");
+  if (!existsSync(ignore)) writeFileSync(ignore, "*\n");
+  writeFileSync(file, JSON.stringify(state, null, 2), { mode: 0o600 });
+  return { cookies: state.cookies.length, localStorage: local.length, url, savedAt: new Date().toISOString() };
+}
+
+/** 各角色手动登录保存的时间 */
+async function roleSessions(orch: Orchestrator, projectId: string): Promise<Record<string, string>> {
+  const project = (await orch.listProjects()).find((p) => p.id === projectId);
+  const dir = project && join(project.workspace_path, "scripts", "ui", ".auth");
+  if (!dir || !existsSync(dir)) return {};
+  return Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith(".json"))
+    .map((f) => [f.slice(0, -5), statSync(join(dir, f)).mtime.toISOString()]));
+}
+
 async function openTestPage(url: string): Promise<void> {
   const key = "manual:default";
   let view = testViews.get(key);
   if (!view) {
     view = new WebContentsView({ webPreferences: { partition: "persist:aitest-manual", sandbox: true } });
+    keepZoom(view);
     testViews.set(key, view);
   }
   showView(view);
@@ -360,7 +478,8 @@ function registerIpc(orch: Orchestrator): void {
         password: password || prev?.password || "",
         ...(token !== undefined ? (token ? { token } : {}) : prev?.token ? { token: prev.token } : {}),
       };
-      if (!next.username && !next.token) throw new Error("请填写账号密码或接口 token");
+      // 只登记角色名（用于手动登录的角色）：不存空凭据，脚本也不会用空账号去登录
+      if (!next.username && !next.token) return;
       secretStore.set(SecretStore.roleRef(p, role), next);
     },
     /** 各角色已保存哪些凭据（不返回明文）：账号密码 / 接口 token，以及是否继承自大项目 */
@@ -395,9 +514,9 @@ function registerIpc(orch: Orchestrator): void {
     getCase: (c: string) => orch.getCase(c),
     scriptMap: (framework: string) => orch.scriptMap(framework),
     caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
-    exploreUiCase: async (p: string, env: string, caseId: string) => {
+    exploreUiCase: async (p: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
-      return orch.exploreUiCase(p, env, caseId);
+      return orch.exploreUiCase(p, env, caseId, opts);
     },
     runAppRegression: async (p: string, env: string, platform: "android" | "ios", opts?: { device?: string; confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
@@ -407,9 +526,19 @@ function registerIpc(orch: Orchestrator): void {
       await setApprovalContext(orch, p);
       return orch.exploreAppCase(p, env, platform, caseId, opts ?? {});
     },
-    runUiRegression: async (p: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }) => {
+    runUiRegression: async (p: string, env: string, headed: boolean, opts?: UiRunOptions) => {
       await setApprovalContext(orch, p);
-      return orch.runUiRegression(p, env, { headed, confirmProduction: opts?.confirmProduction });
+      return orch.runUiRegression(p, env, { ...opts, headed });
+    },
+    uiScriptStates: (p: string, env: string) => orch.uiScriptStates(p, env),
+    confirmUiScript: (p: string, env: string, id: string, hash: string) => orch.confirmUiScript(p, env, id, hash),
+    uiScriptDetail: (p: string, env: string, id: string) => orch.uiScriptDetail(p, env, id),
+    uiDebugStart: (p: string, env: string, id: string, opts?: { confirmProduction?: boolean }) => orch.uiDebugStart(p, env, id, opts),
+    uiDebugCommand: (command: UiDebugCommand) => orch.uiDebugCommand(command),
+    uiDebugState: () => orch.uiDebugState(),
+    reviseUiScript: async (p: string, env: string, id: string, feedback: string, opts?: { confirmProduction?: boolean }) => {
+      await setApprovalContext(orch, p);
+      return orch.reviseUiScript(p, env, id, feedback, opts);
     },
     listProposals: (status?: string) => orch.listProposals(status),
     // ---- 三期 ----
@@ -462,6 +591,10 @@ function registerIpc(orch: Orchestrator): void {
       return r.canceled ? null : r.filePaths[0];
     },
     openTestPage: (url: string) => openTestPage(url),
+    dockTestView: (dock: ViewDock | null) => dockTestView(dock),
+    openRoleLogin: (p: string, env: string, role: string) => openRoleLogin(orch, p, env, role),
+    saveRoleLogin: (p: string, env: string, role: string) => saveRoleLogin(orch, p, env, role),
+    roleSessions: (p: string) => roleSessions(orch, p),
     hideTestView: () => hideTestView(),
     // ---- 被测系统数据库 ----
     saveDatabase: async (p: string, env: string, name: string, cfg, password?: string) => {
@@ -599,7 +732,14 @@ app.whenReady().then(async () => {
     engine,
     agent: getCodex,
     secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles, projectParents.get(projectId)),
-    ui: { runUiSuite, checkData, seedData },
+    ui: { runUiSuite, checkData, seedData, prepareEmbedded: async (projectId, env, roles) => {
+      const viewMarkers: Record<string, string> = {};
+      for (const role of [...new Set(["default", ...roles])]) viewMarkers[role] = await openRoleView(projectId, role, env);
+      showView(testViews.get(`${projectId}:${env}:default`)!);
+      return { cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, viewMarkers };
+    }, createDebugBrowser: (projectId, env, opts) => new BrowserSession({
+      cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, openView: (role) => openRoleView(projectId, role, env), ...opts,
+    }) },
     app: { runAppSuite, maestroBin: () => maestroBin().path, pinkyEnabled: () => pinky().enabled },
     // 每次 agent 任务时读取，全局配置修改后立即生效
     get tokenLimit() {
@@ -607,7 +747,13 @@ app.whenReady().then(async () => {
     },
   });
   await refreshParents(orch).catch(() => undefined);
-  orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));
+  orch.on("progress", (p) => {
+    if ((p.stage === "ui-step" || p.stage === "ui-debug") && p.role) {
+      const view = testViews.get(`${p.projectId}:${p.env}:${p.role}`);
+      if (view) showView(view);
+    }
+    mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p });
+  });
   registerIpc(orch);
   createWindow();
   updater = createUpdater();

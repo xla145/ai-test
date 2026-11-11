@@ -34,7 +34,10 @@ export const PRESETS: ModelPreset[] = [
     note: "如 vLLM / SGLang 部署的 Qwen3、Qwen3-VL；地址与模型名按部署填写" },
 ];
 
+export const VISION_FAMILIES = ["qwen2.5-vl", "qwen3-vl", "qwen3", "doubao-vision", "doubao-seed", "gpt-5", "gpt-6", "gemini", "glm-v", "kimi"] as const;
+
 export interface ModelSlot {
+  visionFamily?: string;
   preset: string;
   baseUrl?: string;
   model?: string;
@@ -82,25 +85,35 @@ export function codexProvider(s: ModelSettings): { provider?: ModelProvider; mod
   return { provider: { id: `aitest_${preset.id}`, name: preset.name, baseUrl, envKey: AGENT_KEY_ENV, model } };
 }
 
-/**
- * Midscene 的环境变量。不同版本的变量名有差异，这里同时设置新旧两套；
- * 升级 Midscene 时按其文档核对（集中在本函数）。
- */
+/** 模型名可推断常见模型族；方舟接入点等不透明名称可手动指定。 */
+export function visionFamilyOf(slot: ModelSlot): string {
+  if (slot.visionFamily) return slot.visionFamily;
+  const { model, preset } = resolveSlot(slot, "vision");
+  const name = model.toLowerCase();
+  if (/qwen3[.-][56]/.test(name)) return "qwen3";
+  if (/qwen3.*vl/.test(name)) return "qwen3-vl";
+  if (/qwen/.test(name)) return "qwen2.5-vl";
+  if (/doubao.*seed/.test(name)) return "doubao-seed";
+  if (/gpt-6/.test(name)) return "gpt-6";
+  if (/gpt-5/.test(name)) return "gpt-5";
+  if (/gemini/.test(name)) return "gemini";
+  if (/glm/.test(name)) return "glm-v";
+  if (/kimi/.test(name)) return "kimi";
+  return preset.visionFamily === "doubao-vision" ? "doubao-vision"
+    : preset.visionFamily === "openai" ? "gpt-5" : "qwen3-vl";
+}
+
 export function midsceneEnv(s: ModelSettings, apiKey: string): Record<string, string> {
   if (!s.vision) return {};
-  const { baseUrl, model, preset } = resolveSlot(s.vision, "vision");
-  const env: Record<string, string> = {
+  const { baseUrl, model } = resolveSlot(s.vision, "vision");
+  return {
     AITEST_MIDSCENE: "1",
     MIDSCENE_MODEL_NAME: model,
     MIDSCENE_MODEL_BASE_URL: baseUrl,
     MIDSCENE_MODEL_API_KEY: apiKey,
-    OPENAI_BASE_URL: baseUrl,
-    OPENAI_API_KEY: apiKey,
-    MIDSCENE_CACHE: "1",
+    MIDSCENE_MODEL_FAMILY: visionFamilyOf(s.vision),
+    MIDSCENE_REPORT_QUIET: "1",
   };
-  if (preset.visionFamily === "qwen-vl") Object.assign(env, { MIDSCENE_USE_QWEN_VL: "1", MIDSCENE_MODEL_FAMILY: "qwen2.5-vl" });
-  if (preset.visionFamily === "doubao-vision") Object.assign(env, { MIDSCENE_USE_DOUBAO_VISION: "1", MIDSCENE_MODEL_FAMILY: "doubao-vision" });
-  return env;
 }
 
 export interface ModelCheck {

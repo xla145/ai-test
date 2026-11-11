@@ -126,6 +126,7 @@ export function App() {
   const [unread, setUnread] = useState(0);
   /** 新建项目弹窗：parent 为预选的大项目 */
   const [creating, setCreating] = useState<false | { parent?: string; kind?: "project" | "group" }>(false);
+  // 浮在右半屏的内嵌浏览器（停靠在页面内时不需要收窄界面）
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
   const [showSettings, setShowSettings] = useState(false);
@@ -185,7 +186,7 @@ export function App() {
       setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
       setUnread((n) => n + 1);
     });
-    const offView = api().onViewChange?.((v) => setViewVisible(v.visible));
+    const offView = api().onViewChange?.((v) => setViewVisible(v.visible && !v.docked));
     return () => {
       offApproval();
       offEvent();
@@ -407,7 +408,7 @@ export function App() {
           <>
             <Typography.Paragraph strong>{approval.reason}</Typography.Paragraph>
             <Descriptions size="small" column={1} bordered items={[
-              { key: "kind", label: "类型", children: approval.kind === "command" ? "执行命令" : "修改文件" },
+              { key: "kind", label: "类型", children: approval.kind === "command" ? "执行命令" : approval.kind === "mcp" ? "调用 MCP 工具" : "修改文件" },
               ...Object.entries((approval.detail ?? {}) as Record<string, unknown>)
                 .filter(([k]) => ["command", "cwd", "reason", "grantRoot", "changes"].includes(k))
                 .map(([k, v]) => ({ key: k, label: k, children: <span className="mono">{typeof v === "string" ? v : JSON.stringify(v)}</span> })),

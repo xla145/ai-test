@@ -40,14 +40,18 @@ export function triagePrompt(projectId: string, runId: string, failures: Failure
   ].join("\n");
 }
 
-export function explorePrompt(projectId: string, env: string, caseId: string): string {
+export function explorePrompt(projectId: string, env: string, caseId: string, roles: string[] = []): string {
   return [
     `任务：探索模式。为项目 ${projectId} 的 UI 用例 ${caseId} 在内嵌浏览器中生成确定性 Playwright 脚本。执行环境：${env}。`,
     "按 .agents/skills/ui-explore.md：",
     `1. case-store.list_cases 读取该用例；env-support.check_data 检查依赖数据，缺失则 seed_data。`,
     `2. browser.open_project（project_id=${projectId}, env=${env}）；需要登录时 browser.new_role_context 只传角色名。`,
-    "3. 逐步操作并把每个预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
+    `   已配置的角色：${roles.length ? roles.join("、") : "（无）"}。用例里描述的身份（如「运营管理员」）选最接近的已配置角色传给 new_role_context，不要自造角色名；不需要登录的页面不用建角色会话。`,
+    "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
+    "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始），再逐步操作并把该步的预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
     `4. browser.save_ui_script（case_id=${caseId}），再 browser.run_playwright_script 试跑，失败则修正后重新保存。`,
+    "   脚本只能由 save_ui_script 生成，不要手工编辑 scripts/ui 下的 spec 或 steps 文件；缺断言就继续录制（输入框、下拉框取值用 expect_value，不应出现的内容用 expect_no_text），再以 append=true 保存。",
+    "   试跑因环境缺失失败（如浏览器未安装）时不要安装任何软件，在结论中说明，用户会在内嵌浏览器中试跑校验。",
     "最后输出：脚本路径、试跑结果、仍需人工处理的步骤。",
   ].join("\n");
 }

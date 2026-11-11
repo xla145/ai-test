@@ -1,6 +1,6 @@
 import { CheckOutlined, ClearOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
 import { App, Button, Card, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
 import { LabelTag, LINT, MODE, STATUS } from "../components/labels";
@@ -13,7 +13,21 @@ export function CasesPage({ project }: { project: Project }) {
   const [filters, setFilters] = useState<{ mode?: string; priority?: string; status?: string; lint?: string }>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<TestCase>();
-  const { busy, run } = useAction();
+  const { run } = useAction();
+  const [activeAction, setActiveAction] = useState<string>();
+  const actionRef = useRef<string>();
+  const busy = activeAction !== undefined;
+  const runAction = async (action: string, fn: () => Promise<void>, success?: string) => {
+    if (actionRef.current) return;
+    actionRef.current = action;
+    setActiveAction(action);
+    try {
+      await run(fn, success);
+    } finally {
+      actionRef.current = undefined;
+      setActiveAction(undefined);
+    }
+  };
   const { modal } = App.useApp();
   const q = useDebounced(query.trim());
   // 搜索与筛选在引擎端执行，按页读取
@@ -25,7 +39,7 @@ export function CasesPage({ project }: { project: Project }) {
     [project.id, q, filters],
   );
 
-  const setStatus = (ids: string[], status: string) => run(async () => {
+  const setStatus = (ids: string[], status: string, source = "selection") => runAction(`${status}:${source}`, async () => {
     for (const id of ids) await api().updateCase(id, { status }, "human");
     notifyProjectChanged(project.id);
     setSelected([]);
@@ -48,7 +62,7 @@ export function CasesPage({ project }: { project: Project }) {
     okButtonProps: { danger: true },
     cancelText: "取消",
     autoFocusButton: "cancel",
-    onOk: () => run(async () => {
+    onOk: () => runAction("clear", async () => {
       await api().clearCases(project.id);
       setSelected([]);
       await reload();
@@ -62,12 +76,12 @@ export function CasesPage({ project }: { project: Project }) {
     <>
       <PageHeader title="用例库" description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。"
         extra={<>
-          <Button icon={<FileExcelOutlined />} loading={busy}
-          onClick={() => run(async () => {
+          <Button icon={<FileExcelOutlined />} loading={activeAction === "export"} disabled={busy && activeAction !== "export"}
+          onClick={() => runAction("export", async () => {
             const out = await api().exportCasesExcel(project.id, project.name);
             if (out) await api().showInFolder(out.path).catch(() => undefined);
           })}>导出 Excel</Button>
-          <Button danger icon={<ClearOutlined />} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
+          <Button danger icon={<ClearOutlined />} loading={activeAction === "clear"} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
         </>} />
       <Card size="small" style={{ marginBottom: 12 }}>
         <Flex gap={8} wrap align="center">
@@ -81,9 +95,9 @@ export function CasesPage({ project }: { project: Project }) {
           {selected.length > 0 && (
             <Space>
               <Typography.Text type="secondary">已选 {selected.length} 条</Typography.Text>
-              <Button type="primary" icon={<CheckOutlined />} loading={busy} onClick={() => setStatus(selected, "reviewed")}>审核通过</Button>
-              <Popconfirm title="确定废弃选中的用例？" onConfirm={() => setStatus(selected, "deprecated")}>
-                <Button danger icon={<StopOutlined />} loading={busy}>废弃</Button>
+              <Button type="primary" icon={<CheckOutlined />} loading={activeAction === "reviewed:selection"} disabled={busy && activeAction !== "reviewed:selection"} onClick={() => setStatus(selected, "reviewed")}>审核通过</Button>
+              <Popconfirm title="确定废弃选中的用例？" disabled={busy} onConfirm={() => setStatus(selected, "deprecated")}>
+                <Button danger icon={<StopOutlined />} loading={activeAction === "deprecated:selection"} disabled={busy && activeAction !== "deprecated:selection"}>废弃</Button>
               </Popconfirm>
             </Space>
           )}
@@ -109,13 +123,13 @@ export function CasesPage({ project }: { project: Project }) {
           { title: "规范检查", dataIndex: "lint_status", width: 100, render: (v: string) => <LabelTag map={LINT} value={v} /> },
           { title: "状态", dataIndex: "status", width: 80, render: (v: string) => <LabelTag map={STATUS} value={v} /> },
           { title: "", width: 100, render: (_: unknown, r: TestCase) => r.status === "draft" && (
-            <Button size="small" type="link" disabled={busy || r.lint_status === "blocked"} onClick={() => setStatus([r.id], "reviewed")}>审核通过</Button>
+            <Button size="small" type="link" loading={activeAction === `reviewed:${r.id}`} disabled={busy || r.lint_status === "blocked"} onClick={() => setStatus([r.id], "reviewed", r.id)}>审核通过</Button>
           ) },
         ]}
       />
       <CaseDrawer caseId={detail?.id} data={detail} onClose={() => setDetail(undefined)}
         extra={(c) => c.status === "draft" && (
-          <Button type="primary" disabled={c.lint_status === "blocked"} onClick={() => setStatus([c.id], "reviewed").then(() => setDetail(undefined))}>审核通过</Button>
+          <Button type="primary" loading={activeAction === `reviewed:drawer:${c.id}`} disabled={busy || c.lint_status === "blocked"} onClick={() => setStatus([c.id], "reviewed", `drawer:${c.id}`).then(() => setDetail(undefined))}>审核通过</Button>
         )} />
     </>
   );

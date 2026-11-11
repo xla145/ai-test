@@ -49,7 +49,7 @@ describe("UI regression orchestration", () => {
       prompt,
     }));
     const orch = new Orchestrator({ engine, ui, secretEnv, agent: async () => ({ startThread: async () => "th", runTurn }) });
-    const out = await orch.runUiRegression("p1", "test");
+    const out = await orch.runUiRegression("p1", "test", { autoHeal: true });
 
     expect(ui.seedData).toHaveBeenCalledWith(project.environments.test, ["DEM-1002", "U1003"], [], "/ws", expect.anything());
     expect(out.degraded).toEqual(["tc_c"]);
@@ -197,7 +197,7 @@ describe("production guard and UI failure details", () => {
     }) as unknown as EngineCall;
     const orch = new Orchestrator({ engine: withResults, ui, secretEnv, agent: vi.fn() });
     vi.spyOn(orch, "healUi").mockResolvedValue([{ case_id: "tc_b", failure_type: "script_error", reason: "testid 变更" }]);
-    const out = await orch.runUiRegression("p1", "test");
+    const out = await orch.runUiRegression("p1", "test", { autoHeal: true });
     expect(out.failures).toEqual([
       { case_id: "tc_b", status: "failed", message: "Timeout waiting for locator", failure_type: "script_error", reason: "testid 变更" },
       { case_id: "tc_c", status: "error", message: "ERR_CONNECTION_REFUSED", failure_type: "environment" },

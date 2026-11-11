@@ -11,6 +11,7 @@ import {
   totalTokensOf,
   turnIdOf,
   type CommandApprovalParams,
+  type McpElicitationParams,
   type Decision,
   type FileChangeApprovalParams,
   type ThreadStartParams,
@@ -23,6 +24,8 @@ import {
 export interface ApprovalHandler {
   command(p: CommandApprovalParams): Promise<Decision>;
   fileChange(p: FileChangeApprovalParams): Promise<Decision>;
+  /** MCP 工具调用审批；未提供时一律拒绝 */
+  mcpElicitation?(p: McpElicitationParams): Promise<Decision>;
 }
 
 export interface AppServerOptions {
@@ -185,6 +188,12 @@ export class CodexAppServer extends EventEmitter {
     }
     if (method === ServerRequests.fileChangeApproval) {
       return { decision: await this.opts.approvals.fileChange(params as FileChangeApprovalParams) };
+    }
+    if (method === ServerRequests.mcpElicitation) {
+      const p = params as McpElicitationParams;
+      const decision = this.opts.approvals.mcpElicitation ? await this.opts.approvals.mcpElicitation(p) : "decline";
+      // 只是审批（表单没有要填写的字段）：接受时返回空内容
+      return { action: decision, content: decision === "accept" && p.mode !== "url" ? {} : null, _meta: null };
     }
     throw Object.assign(new Error(`不支持的服务端请求：${method}`), { code: -32601 });
   }

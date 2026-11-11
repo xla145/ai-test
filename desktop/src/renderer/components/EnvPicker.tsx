@@ -17,15 +17,16 @@ export function useEnvChoice(project: Project): [string, (env: string) => void] 
 }
 
 /** 环境下拉：生产环境带红色标记 */
-export function EnvSelect({ project, value, onChange, showUrl, width = 220 }: {
+export function EnvSelect({ project, value, onChange, showUrl, width = 220, disabled }: {
   project: Project;
   value: string;
   onChange: (env: string) => void;
   showUrl?: boolean;
   width?: number;
+  disabled?: boolean;
 }) {
   return (
-    <Select value={value} onChange={onChange} style={{ width }} popupMatchSelectWidth={false}
+    <Select value={value} onChange={onChange} disabled={disabled} style={{ width }} popupMatchSelectWidth={false}
       options={Object.entries(project.environments).map(([name, e]) => ({
         value: name,
         label: (
@@ -43,11 +44,12 @@ export function EnvSelect({ project, value, onChange, showUrl, width = 220 }: {
  * 执行按钮：生产环境显示为危险按钮，点击后二次确认，确认后以 confirmProduction 调用。
  * 主进程同样会拒绝未确认的生产环境执行。
  */
-export function RunButton({ project, env, loading, disabled, onRun, children }: {
+export function RunButton({ project, env, loading, disabled, block, onRun, children }: {
   project: Project;
   env: string;
   loading: boolean;
   disabled?: boolean;
+  block?: boolean;
   onRun: (confirmProduction: boolean) => void;
   children: ReactNode;
 }) {
@@ -72,7 +74,7 @@ export function RunButton({ project, env, loading, disabled, onRun, children }: 
     });
   };
   return (
-    <Button type="primary" danger={production} disabled={disabled} icon={production ? <WarningFilled /> : <CaretRightOutlined />} loading={loading} onClick={click}>
+    <Button type="primary" block={block} danger={production} disabled={disabled} icon={production ? <WarningFilled /> : <CaretRightOutlined />} loading={loading} onClick={click}>
       {production ? <>{children}（生产）</> : children}
     </Button>
   );

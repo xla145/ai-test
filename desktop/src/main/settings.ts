@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { presetOf, PRESETS, type ModelSettings, type ModelSlot } from "./models.js";
+import { presetOf, PRESETS, VISION_FAMILIES, type ModelSettings, type ModelSlot } from "./models.js";
 import type { GlobalSettings, ModelEntry } from "../shared/ipc.js";
 
 export type { GeneralSettings, GlobalSettings, ModelEntry } from "../shared/ipc.js";
@@ -54,8 +54,8 @@ export function migrate(raw: unknown): GlobalSettings {
   };
 }
 
-const slotOf = ({ preset, baseUrl, model }: ModelEntry): ModelSlot => ({
-  preset, ...(baseUrl ? { baseUrl } : {}), ...(model ? { model } : {}),
+const slotOf = ({ preset, baseUrl, model, visionFamily }: ModelEntry): ModelSlot => ({
+  preset, ...(visionFamily ? { visionFamily } : {}), ...(baseUrl ? { baseUrl } : {}), ...(model ? { model } : {}),
 });
 
 /** 当前生效的 agent / 视觉模型，交给 Codex 与 Midscene 配置 */
@@ -87,6 +87,7 @@ export function validateGlobal(s: GlobalSettings): string[] {
       errors.push(`${label}：未知的模型服务 ${m.preset}`);
       continue;
     }
+    if (m.visionFamily && !(VISION_FAMILIES as readonly string[]).includes(m.visionFamily)) errors.push(`${label}：无效的视觉模型族`);
     const baseUrl = m.baseUrl || preset.baseUrl;
     if (!baseUrl) errors.push(`${label}：缺少服务地址`);
     else if (!/^https?:\/\//.test(baseUrl)) errors.push(`${label}：服务地址应以 http(s):// 开头`);

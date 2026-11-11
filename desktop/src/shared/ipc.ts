@@ -1,7 +1,7 @@
 /** 渲染进程可调用的 API（preload 通过 contextBridge 暴露为 window.aitest） */
 export interface ApprovalRequest {
   id: string;
-  kind: "command" | "fileChange";
+  kind: "command" | "fileChange" | "mcp";
   reason: string;
   detail: unknown;
 }
@@ -25,7 +25,7 @@ export interface Page<T> {
 export interface CaseQuery extends PageQuery {
   /** 匹配标题、用例 ID、模块路径 */
   query?: string;
-  /** execution_mode / priority / status / lint_status / type；值可用逗号分隔多个 */
+  /** execution_mode / priority / status / lint_status / type / ids / exclude_ids；值可用逗号分隔多个 */
   filters?: Record<string, string | undefined>;
 }
 
@@ -40,6 +40,8 @@ export interface ModelEntry {
   preset: string;
   /** 留空用预设地址 */
   baseUrl?: string;
+  /** Midscene 模型族；留空按模型名推断 */
+  visionFamily?: string;
   /** 留空用预设的默认模型 */
   model?: string;
 }
@@ -174,6 +176,68 @@ export interface ApiRunOptions {
 
 export type ProjectType = "web" | "app" | "api" | "multi";
 
+export interface UiRunOptions {
+  confirmProduction?: boolean;
+  caseIds?: string[];
+  mode?: "validate" | "regression";
+  embedded?: boolean;
+}
+
+/** 界面展示用的脚本步骤（来自 scripts/ui/<case>.steps.json） */
+export interface UiStepView {
+  id: string;
+  action: string;
+  /** 人可读的描述，如「点击 button「停用」」 */
+  description: string;
+  /** 对应用例第几步（从 1 开始）；旧脚本或未声明时为空 */
+  caseStep?: number;
+  role?: string;
+  source?: "ai" | "user" | "pick";
+}
+
+export interface UiScriptDetail {
+  path: string;
+  code: string;
+  /** 结构化步骤；旧脚本没有 steps.json 时为空 */
+  steps?: UiStepView[];
+  /** spec 与 steps.json 一致；为 false 表示脚本被手工或 AI 修改过，步骤仅供参考 */
+  synced: boolean;
+}
+
+export interface UiDebugStepState {
+  status: "running" | "passed" | "failed" | "skipped";
+  error?: string;
+  /** 例如视觉判定只截图不判定、调试模式跳过的数据库断言 */
+  note?: string;
+  durationMs?: number;
+}
+
+/** 单步调试会话状态：phase=paused 时游标指向下一步（失败时为失败步骤） */
+export interface UiDebugState {
+  projectId: string;
+  env: string;
+  caseId: string;
+  phase: "running" | "paused" | "finished" | "stopped";
+  cursor?: string;
+  statuses: Record<string, UiDebugStepState>;
+  breakpoints: string[];
+  message?: string;
+}
+
+export type UiDebugCommand =
+  | { type: "step" } | { type: "continue" } | { type: "pause" } | { type: "skip" } | { type: "restart" } | { type: "stop" }
+  | { type: "runTo"; stepId: string } | { type: "seek"; stepId: string } | { type: "breakpoint"; stepId: string };
+
+/** 内嵌浏览器停靠区域（窗口内 CSS 像素）；suspended 表示暂时隐藏（例如弹窗遮挡） */
+export interface ViewDock { x: number; y: number; width: number; height: number; suspended?: boolean }
+
+export interface UiScriptState {
+  path: string;
+  hash: string;
+  status: "pending" | "confirmed";
+  validatedRunId?: string;
+}
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
   /** opts.kind="group" 创建大项目（不需要 workspace）；opts.parent 为所属大项目 */
@@ -219,8 +283,17 @@ export interface AitestApi {
   /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
   scriptMap(framework: string): Promise<Record<string, string>>;
   caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
-  exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
-  runUiRegression(projectId: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  runUiRegression(projectId: string, env: string, headed: boolean, opts?: UiRunOptions): Promise<unknown>;
+  uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>>;
+  confirmUiScript(projectId: string, env: string, caseId: string, hash: string): Promise<void>;
+  uiScriptDetail(projectId: string, env: string, caseId: string): Promise<UiScriptDetail | null>;
+  /** 开始单步调试（停在第一步之前）；进度通过 aitest/progress（stage=ui-debug）推送 */
+  uiDebugStart(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }): Promise<UiDebugState>;
+  uiDebugCommand(command: UiDebugCommand): Promise<UiDebugState>;
+  /** 当前调试会话（没有则为 null），页面重新进入时恢复 */
+  uiDebugState(): Promise<UiDebugState | null>;
+  reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */
   runAppRegression(projectId: string, env: string, platform: "android" | "ios",
     opts?: { device?: string; confirmProduction?: boolean }): Promise<unknown>;
@@ -274,8 +347,17 @@ export interface AitestApi {
   onApprovalRequest(cb: (req: ApprovalRequest) => void): () => void;
   respondApproval(id: string, accept: boolean): void;
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;
-  /** 内嵌浏览器视图显示 / 隐藏（界面据此收窄到左半屏） */
-  onViewChange?(cb: (v: { visible: boolean }) => void): () => void;
+  /** 内嵌浏览器视图显示 / 隐藏；docked 时视图嵌在页面占位区域内，界面不必收窄到左半屏 */
+  /** shown：视图此刻是否真的在显示（停靠区被弹窗遮挡时为 false） */
+  onViewChange?(cb: (v: { visible: boolean; docked?: boolean; shown?: boolean }) => void): () => void;
+  /** 手动登录：在该角色的内嵌浏览器视图中打开登录页，由用户亲自登录（验证码、扫码等） */
+  openRoleLogin(projectId: string, env: string, role: string): Promise<void>;
+  /** 保存该角色视图的登录态到 scripts/ui/.auth/<角色>.json，供无头回归复用 */
+  saveRoleLogin(projectId: string, env: string, role: string): Promise<{ cookies: number; localStorage: number; url: string; savedAt: string }>;
+  /** 各角色手动登录保存的时间（ISO） */
+  roleSessions(projectId: string): Promise<Record<string, string>>;
+  /** 页面提供停靠区域后，内嵌浏览器嵌入该区域；传 null 恢复为右半屏 */
+  dockTestView?(dock: ViewDock | null): Promise<void>;
   // ---- 自动更新 ----
   getUpdateState(): Promise<UpdateState>;
   /** 立即检查；有新版本时自动后台下载 */

@@ -24,6 +24,25 @@ export function useAction() {
   return { busy, run };
 }
 
+/** 多个操作共用互斥锁，但只有当前操作的按钮显示加载状态。 */
+export function useKeyedAction() {
+  const { run } = useAction();
+  const [activeKey, setActiveKey] = useState<string>();
+  const activeRef = useRef<string>();
+  const runKeyed = useCallback(async <T,>(key: string, fn: () => Promise<T>, success?: string): Promise<T | undefined> => {
+    if (activeRef.current !== undefined) return undefined;
+    activeRef.current = key;
+    setActiveKey(key);
+    try {
+      return await run(fn, success);
+    } finally {
+      activeRef.current = undefined;
+      setActiveKey(undefined);
+    }
+  }, [run]);
+  return { activeKey, busy: activeKey !== undefined, run: runKeyed };
+}
+
 /** 加载数据：依赖变化时重新加载，返回 reload */
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[]) {
   const [data, setData] = useState<T>();

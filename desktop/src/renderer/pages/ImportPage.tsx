@@ -102,7 +102,6 @@ export function ImportPage({ project }: { project: Project }) {
   });
 
   const recheck = () => { void refresh(); };
-  const loading = busy || checking;
   const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
@@ -111,15 +110,15 @@ export function ImportPage({ project }: { project: Project }) {
         title="用例导入与规范检查"
         description="导入团队已有的 Excel 用例。结构类规则由代码检查、不耗模型；阻断级问题修复前不会生成脚本。"
         extra={<>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={recheck}>重新检查</Button>
-          <Button type="primary" icon={<UploadOutlined />} loading={loading} onClick={importExcel}>导入 Excel</Button>
+          <Button icon={<ReloadOutlined />} loading={checking} disabled={busy} onClick={recheck}>重新检查</Button>
+          <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
         </>}
       />
       {!report || report.total === 0 ? (
         <Card loading={checking}>
           {!report ? (
             <Empty description="未能获取规范检查结果，请重新检查">
-              <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={recheck}>重新检查</Button>
+              <Button type="primary" icon={<ReloadOutlined />} loading={checking} disabled={busy} onClick={recheck}>重新检查</Button>
             </Empty>
           ) : (
             <Empty description={
@@ -131,7 +130,7 @@ export function ImportPage({ project }: { project: Project }) {
               </Space>
             }>
               <Space wrap style={{ justifyContent: "center" }}>
-                <Button type="primary" icon={<UploadOutlined />} loading={loading} onClick={importExcel}>导入 Excel</Button>
+                <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
                 {goTab && <Button icon={<ApiOutlined />} onClick={() => goTab("api")}>从 OpenAPI / 需求文档生成</Button>}
               </Space>
             </Empty>
