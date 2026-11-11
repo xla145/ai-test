@@ -3,51 +3,373 @@
   "$id": "https://ai-test.local/schemas/testcase.schema.json",
   "title": "TestCase",
   "type": "object",
-  "required": ["id", "title", "type", "priority", "execution_mode", "steps", "expected", "status"],
+  "required": [
+    "id",
+    "title",
+    "type",
+    "priority",
+    "execution_mode",
+    "steps",
+    "expected",
+    "status"
+  ],
   "properties": {
-    "id": {"type": "string", "minLength": 1},
-    "project_id": {"type": "string"},
-    "title": {"type": "string", "minLength": 1, "maxLength": 200},
-    "requirement_ids": {"type": "array", "items": {"type": "string"}},
-    "type": {"enum": ["api", "ui"]},
-    "priority": {"enum": ["P0", "P1", "P2", "P3"]},
-    "category": {"enum": ["功能测试", "安全相关", "兼容性", "其它"]},
-    "module_path": {"type": "array", "items": {"type": "string"}},
-    "execution_mode": {"enum": ["ui", "api", "capture", "doc", "manual"]},
-    "owner": {"type": "string"},
-    "preconditions": {"type": "array", "items": {"type": "string"}},
-    "data_refs": {"type": "array", "items": {"type": "string"}},
-    "steps": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-    "expected": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-    "lint_status": {"enum": ["unchecked", "passed", "warned", "blocked"]},
-    "status": {"enum": ["draft", "reviewed", "deprecated"]},
-    "source_row": {"type": ["integer", "null"]},
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "requirement_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "type": {
+      "enum": [
+        "api",
+        "ui",
+        "app"
+      ]
+    },
+    "priority": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3"
+      ]
+    },
+    "category": {
+      "enum": [
+        "功能测试",
+        "安全相关",
+        "兼容性",
+        "其它"
+      ]
+    },
+    "module_path": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution_mode": {
+      "enum": [
+        "ui",
+        "api",
+        "capture",
+        "doc",
+        "manual",
+        "app"
+      ]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "data_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "expected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "lint_status": {
+      "enum": [
+        "unchecked",
+        "passed",
+        "warned",
+        "blocked"
+      ]
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "reviewed",
+        "deprecated"
+      ]
+    },
+    "source_row": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "api": {
       "anyOf": [
-        {"type": "null"},
+        {
+          "type": "null"
+        },
         {
           "type": "object",
-          "required": ["method", "path", "expected_status"],
+          "required": [
+            "method",
+            "path",
+            "expected_status"
+          ],
           "properties": {
-            "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]},
-            "path": {"type": "string", "pattern": "^/"},
-            "path_params": {"type": "object"},
-            "query": {"type": "object"},
-            "headers": {"type": "object"},
-            "auth": {"type": "boolean"},
-            "expected_status": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
-            "response_schema": {"type": ["object", "null"]},
-            "expected_fields": {"type": "object"},
-            "extract": {"type": "object", "additionalProperties": {"type": "string"}},
-            "db_setup": {"type": "array", "items": {"type": "object", "required": ["sql"],
-              "properties": {"db": {"type": "string"}, "sql": {"type": "string", "minLength": 1}, "params": {"type": "object"}}}},
-            "db_checks": {"type": "array", "items": {"type": "object", "required": ["sql"],
-              "properties": {"db": {"type": "string"}, "sql": {"type": "string", "minLength": 1}, "params": {"type": "object"},
-                "expect": {"type": "object"}, "timeout_ms": {"type": "integer", "minimum": 0}, "description": {"type": "string"}}}},
-            "operation_id": {"type": "string"}
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "HEAD",
+                "OPTIONS"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/"
+            },
+            "path_params": {
+              "type": "object"
+            },
+            "query": {
+              "type": "object"
+            },
+            "headers": {
+              "type": "object"
+            },
+            "auth": {
+              "type": "boolean"
+            },
+            "expected_status": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              },
+              "minItems": 1
+            },
+            "response_schema": {
+              "type": [
+                "object",
+                "null"
+              ]
+            },
+            "expected_fields": {
+              "type": "object"
+            },
+            "extract": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "operation_id": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "db_setup": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sql"
+                ],
+                "properties": {
+                  "db": {
+                    "type": "string"
+                  },
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "db_checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sql"
+                ],
+                "properties": {
+                  "db": {
+                    "type": "string"
+                  },
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "params": {
+                    "type": "object"
+                  },
+                  "expect": {
+                    "type": "object"
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       ]
+    },
+    "api_flow": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "method",
+          "path",
+          "expected_status"
+        ],
+        "properties": {
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "path_params": {
+            "type": "object"
+          },
+          "query": {
+            "type": "object"
+          },
+          "headers": {
+            "type": "object"
+          },
+          "auth": {
+            "type": "boolean"
+          },
+          "expected_status": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 1
+          },
+          "response_schema": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "expected_fields": {
+            "type": "object"
+          },
+          "extract": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "db_setup": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "db_checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                },
+                "expect": {
+                  "type": "object"
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

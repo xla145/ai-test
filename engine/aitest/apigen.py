@@ -228,13 +228,17 @@ def write_pytest_suite(cases: list[TestCase], out_dir: str | Path, suite: str = 
         out_dir/
           conftest.py          # httpx client、环境与鉴权注入、项目 hook
           _aitest_schema.py    # JSON Schema 断言（无依赖）
+          _aitest_api.py       # 请求执行：变量替换、按角色鉴权、断言与提取
           data/<suite>.json    # 用例数据
           test_<suite>.py      # 参数化脚本，文件头注释列出用例 ID
     """
     out = Path(out_dir)
     (out / "data").mkdir(parents=True, exist_ok=True)
-    api_cases = [c for c in cases if c.api is not None]
+    api_cases = [c for c in cases if c.is_api_executable]
     data = [
+        # 流程用例：steps 依次执行；单个请求的用例保持原有的扁平结构
+        {"case_id": c.id, "title": c.title, "priority": c.priority, "steps": c.to_dict()["api_flow"]}
+        if c.api_flow else
         {"case_id": c.id, "title": c.title, "priority": c.priority, **c.to_dict()["api"]}
         for c in api_cases
     ]
@@ -245,6 +249,7 @@ def write_pytest_suite(cases: list[TestCase], out_dir: str | Path, suite: str = 
     conftest.write_text(_template("conftest.py.tpl"), encoding="utf-8")
     shutil.copyfile(Path(str(resources.files("aitest").joinpath("schema.py"))), out / "_aitest_schema.py")
     shutil.copyfile(Path(str(resources.files("aitest").joinpath("db.py"))), out / "_aitest_db.py")
+    (out / "_aitest_api.py").write_text(_template("_aitest_api.py.tpl"), encoding="utf-8")
 
     header = "\n".join(f"#   {c.id}  {c.title}" for c in api_cases)
     test_file = out / f"test_{suite}.py"

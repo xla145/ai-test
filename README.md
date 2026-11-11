@@ -146,6 +146,27 @@ aitest metrics      --project <项目ID>
 
 桌面端「工程化」页集中展示这些内容（按项目）。
 
+### 接口多账号流程
+
+下单 → 支付 → 审核 → 退款这类多个角色配合的流程，写成一条用例的 `api_flow`：每步一个请求，按顺序执行，
+每步用 `role` 指定调用者，步骤间用 `extract` + `${var}` 传值，任一步失败整条用例失败（报告指出第几步、哪个角色）。
+
+- 角色凭据在「接口回归 → 多账号」中维护，存系统钥匙串：可以给角色保存固定的接口 token，
+  也可以只保存账号密码，并为环境配置「接口登录」（登录接口、请求体模板、响应中 token 的路径），执行时每个角色登录一次换取 token。
+- 子项目继承大项目的角色与接口登录配置；CI 中通过 `AITEST_ROLES` / `AITEST_ROLE_TOKENS`（JSON）注入。
+- agent 生成接口用例时按 `.agents/skills/api-script.md` 写多账号流程，用例里只写角色名。
+
+### App 测试（Android / iOS）
+
+与 Web UI 测试同一思路：agent 探索一次生成确定性脚本，回归直接执行，不调用模型。
+
+- **探索**：agent 通过 [Pinky](https://github.com/DIYgod/pinky)（MCP）操作真机或模拟器走通用例，付款、删除等关键步骤在 Pinky 中由你确认；
+  走通后写成 Maestro 脚本 `scripts/app/<用例ID>.yaml`（`appId: ${APP_ID}`，Android 与 iOS 共用），由 `app` MCP 服务保存并试跑。
+- **回归**：「App 测试」页选择平台、环境与设备，用 [Maestro](https://maestro.dev) 执行脚本；失败按规则归因（设备未连接、App 未安装等记为环境问题）。
+- **配置**：在执行环境中填写 Android 包名 / iOS Bundle ID；在「全局设置 → 运行环境」中配置 Maestro 路径并启用 Pinky。
+  Maestro（依赖 Java 17+）与 Pinky 需另行安装；Maestro 暂不支持 iOS 真机，iOS 回归在模拟器上执行（需要 Mac 与 Xcode），Android 真机与模拟器都支持。角色账号在脚本中以变量引用（如 `${ROLE_ADMIN_USERNAME}`，由 `app.app_info` 列出）。
+- 用例类型 `app`，或标题 / 步骤含 App端、Android、iOS 等时自动归为「App」执行方式。
+
 ### 大项目与子项目
 
 项目可以分两层组织，侧栏按树形显示：
@@ -161,9 +182,22 @@ aitest metrics      --project <项目ID>
 - **模型**：可添加多个模型（OpenAI、百炼、DeepSeek、方舟或私有化部署的 OpenAI 兼容服务），分别指定 agent 与视觉定位使用哪一个，并测试连通；API key 存系统钥匙串。
 - **运行环境**：Python 与 Codex 路径（默认 python3 与内置 Codex）、agent 单次任务 token 上限。环境变量 `AITEST_PYTHON`、`AITEST_CODEX_BIN`、`AITEST_TOKEN_LIMIT` 优先于这里的配置。
 - **外观**：跟随系统 / 浅色 / 深色。
-- **数据与关于**：版本号、数据目录与数据库位置。
+- **更新与关于**：当前版本、检查更新、自动检查开关；数据目录与数据库位置。
 
 配置保存在数据目录的 `settings.json`，旧版本的模型配置会自动迁移。
+
+### 自动更新
+
+装过一次带更新功能的版本后，之后的新版本会自动更新，不需要重新下载安装：
+启动 15 秒后与每 4 小时检查一次，有新版本就在后台下载，下载完成后弹出提示，点「重启并更新」即可（也可在「全局设置 → 更新与关于」手动检查）。
+
+- 更新地址：`https://download.classktv.com/aitest-desktop/`（Cloudflare R2 桶 `aiprobe`，前缀 `aitest-desktop`）。
+- Windows（NSIS）与 Linux（AppImage）使用 electron-updater，Windows 只下载变化的部分。
+- macOS 没有开发者证书时无法使用系统的更新框架，由客户端自己下载 zip、校验 sha512、解压，退出时替换 `.app` 后重新打开；
+  应用需要放在「应用程序」等可写目录中，在磁盘映像里直接运行时无法更新。
+- 发布流水线的 `update-feed` 任务把安装包和 `latest*.yml` 上传到 R2。需要仓库 Secrets `R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`；
+  可选仓库变量 `UPDATE_URL`、`R2_BUCKET`、`R2_PREFIX`、`R2_ACCOUNT_ID` 覆盖默认值。没有配置 Secrets 时跳过上传，不影响 GitHub Release。
+- 开发模式默认不检查更新；设置环境变量 `AITEST_UPDATE_URL` 可指定其他更新地址，用于测试。
 
 ## 当前进度
 

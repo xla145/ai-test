@@ -21,6 +21,7 @@ import {
   Radio,
   Select,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -31,6 +32,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { GlobalSettings, GlobalSettingsView, ModelCheckResult, ModelEntry, ModelPresetInfo, RuntimeCheck } from "../../shared/ipc";
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
+import { UpdateCard } from "../components/UpdateCard";
 import { useAction, useLoad, useNarrow } from "../hooks";
 
 /** 全局设置保存后广播（detail 为 GlobalSettingsView）：主题、侧栏当前模型据此立即刷新 */
@@ -63,7 +65,12 @@ export function SettingsPage() {
           { key: "models", label: "模型", children: <Models {...props} /> },
           { key: "runtime", label: "运行环境", children: <Runtime {...props} /> },
           { key: "appearance", label: "外观", children: <Appearance {...props} /> },
-          { key: "about", label: "数据与关于", children: <About view={view.data} /> },
+          { key: "about", label: "更新与关于", children: (
+            <>
+              <UpdateCard settings={view.data.settings} onSave={(s) => save(s, undefined, "已保存")} />
+              <About view={view.data} />
+            </>
+          ) },
         ]}
       />
     </div>
@@ -279,8 +286,9 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
 
 function Runtime({ view, save, busy }: SectionProps) {
   const { settings, runtime } = view;
-  const [form] = Form.useForm<{ pythonPath?: string; codexPath?: string; taskTokenLimit?: number | null }>();
-  const [check, setCheck] = useState<{ python: RuntimeCheck; codex: RuntimeCheck }>();
+  const [form] = Form.useForm<{ pythonPath?: string; codexPath?: string; taskTokenLimit?: number | null;
+    maestroPath?: string; pinkyEnabled?: boolean; pinkyPath?: string }>();
+  const [check, setCheck] = useState<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>();
   const [checking, setChecking] = useState(false);
   useEffect(() => form.setFieldsValue({ ...settings.general }), [settings.general, form]);
 
@@ -292,7 +300,7 @@ function Runtime({ view, save, busy }: SectionProps) {
       setChecking(false);
     }
   };
-  useEffect(() => void runCheck(), [runtime.python.path, runtime.codex.path]);
+  useEffect(() => void runCheck(), [runtime.python.path, runtime.codex.path, runtime.maestro.path, runtime.pinky.path]);
 
   const pythonVersion = check?.python.ok ? /(\d+)\.(\d+)/.exec(check.python.detail) : null;
   const pythonTooOld = pythonVersion && (Number(pythonVersion[1]) < 3 || (Number(pythonVersion[1]) === 3 && Number(pythonVersion[2]) < 10));
@@ -314,6 +322,9 @@ function Runtime({ view, save, busy }: SectionProps) {
           pythonPath: v.pythonPath?.trim() || undefined,
           codexPath: v.codexPath?.trim() || undefined,
           taskTokenLimit: v.taskTokenLimit || undefined,
+          maestroPath: v.maestroPath?.trim() || undefined,
+          pinkyEnabled: Boolean(v.pinkyEnabled),
+          pinkyPath: v.pinkyPath?.trim() || undefined,
         },
       })}>
         <Form.Item label={<Space>Python{envNote("AITEST_PYTHON")}</Space>} name="pythonPath"
@@ -329,6 +340,27 @@ function Runtime({ view, save, busy }: SectionProps) {
             <span>当前：<span className="mono">{runtime.codex.path}</span>（{SOURCE[runtime.codex.source]}） {status(check?.codex)}</span>
           </Space>}>
           <Input className="mono" placeholder="使用内置 Codex" allowClear />
+        </Form.Item>
+        <Typography.Title level={5} style={{ marginTop: 8 }}>App 测试（Android / iOS）</Typography.Title>
+        <Form.Item label={<Space>Maestro{envNote("AITEST_MAESTRO")}</Space>} name="maestroPath"
+          extra={<Space direction="vertical" size={0}>
+            <span>App 回归用 Maestro 执行脚本，不调用模型。需另行安装（maestro.dev，依赖 Java 17+）；iOS 目前只支持模拟器（需要 Mac 与 Xcode），Android 真机与模拟器都支持。留空使用 PATH 上的 maestro。</span>
+            <span>当前：<span className="mono">{runtime.maestro.path}</span>（{SOURCE[runtime.maestro.source]}） {status(check?.maestro)}</span>
+          </Space>}>
+          <Input className="mono" placeholder="maestro" allowClear />
+        </Form.Item>
+        <Form.Item label="Pinky" extra={<Space direction="vertical" size={0}>
+          <span>App 探索时 agent 通过 Pinky 操作手机，付款、删除等关键步骤在 Pinky 中由你确认。需另行安装 Pinky 桌面应用（github.com/DIYgod/pinky）。</span>
+          <span>当前：<span className="mono">{runtime.pinky.path}</span>{runtime.pinky.enabled ? "（已启用）" : "（未启用）"} {status(check?.pinky)}</span>
+        </Space>}>
+          <Space.Compact block>
+            <Form.Item name="pinkyEnabled" valuePropName="checked" noStyle>
+              <Switch checkedChildren="启用" unCheckedChildren="停用" style={{ marginRight: 8, alignSelf: "center" }} />
+            </Form.Item>
+            <Form.Item name="pinkyPath" noStyle>
+              <Input className="mono" placeholder="pinkyctl" allowClear />
+            </Form.Item>
+          </Space.Compact>
         </Form.Item>
         <Form.Item label={<Space>agent 单次任务 token 上限{envNote("AITEST_TOKEN_LIMIT")}</Space>} name="taskTokenLimit"
           extra={`超过后中止该任务。项目可在「工程化 → 用量与预算」中设置更低的值。当前生效：${runtime.taskTokenLimit.value.toLocaleString()}（${SOURCE[runtime.taskTokenLimit.source]}）`}>

@@ -55,21 +55,25 @@ const apiSpec = z.object({
   expected_fields: z.record(z.string(), z.unknown()).optional(),
   extract: z.record(z.string(), z.string()).optional().describe("从响应提取变量，后续用例以 ${var} 引用"),
   operation_id: z.string().optional(),
+  role: z.string().optional().describe("用哪个角色的凭据调用（角色名，如 买家 / 运营）；不填用环境的默认 token"),
+  name: z.string().optional().describe("流程中的步骤名，如「买家下单」"),
 });
 
 const caseInput = z.object({
   title: z.string().describe("「模块-场景」"),
-  type: z.enum(["api", "ui"]),
+  type: z.enum(["api", "ui", "app"]),
   priority: z.enum(["P0", "P1", "P2", "P3"]),
   category: z.enum(["功能测试", "安全相关", "兼容性", "其它"]).optional(),
   module_path: z.array(z.string()).optional(),
-  execution_mode: z.enum(["ui", "api", "capture", "doc", "manual"]).optional(),
+  execution_mode: z.enum(["ui", "api", "capture", "doc", "manual", "app"]).optional(),
   requirement_ids: z.array(z.string()).optional(),
   preconditions: z.array(z.string()).optional(),
   data_refs: z.array(z.string()).optional(),
   steps: z.array(z.string()).min(1),
   expected: z.array(z.string()).min(1).describe("与 steps 按序号一一对应，必须是可判定结果"),
   api: apiSpec.optional(),
+  api_flow: z.array(apiSpec).optional()
+    .describe("接口流程：多个请求按顺序执行，每步可指定 role（如 买家下单 → 买家支付 → 运营审核 → 买家退款），步骤间用 extract + ${var} 传值"),
 });
 
 export const SERVERS: ServerDef[] = [
@@ -119,9 +123,9 @@ export const SERVERS: ServerDef[] = [
         input: {
           project_id: project,
           query: z.string().optional().describe("匹配标题、用例 ID、模块路径"),
-          type: z.enum(["api", "ui"]).optional(),
+          type: z.enum(["api", "ui", "app"]).optional(),
           priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
-          execution_mode: z.enum(["ui", "api", "capture", "doc", "manual"]).optional(),
+          execution_mode: z.enum(["ui", "api", "capture", "doc", "manual", "app"]).optional(),
           status: z.enum(["draft", "reviewed", "deprecated"]).optional(),
           lint_status: z.enum(["unchecked", "passed", "warned", "blocked"]).optional(),
           ...paging,
@@ -324,5 +328,6 @@ export function getServer(name: string): ServerDef {
 export async function engineEnvFor(tool: ToolDef, input: Record<string, unknown>, secrets: SecretResolver) {
   if (!tool.secretScope) return {};
   const [projectId, env] = tool.secretScope(input);
-  return secrets.resolve(projectId, env);
+  // 接口多账号：取该项目全部角色的凭据（账号密码与固定 token），流程中按步骤的角色鉴权
+  return secrets.resolve(projectId, env, { roles: ["*"] });
 }

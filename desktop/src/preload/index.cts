@@ -18,8 +18,10 @@ const methods = [
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",
   "saveGlobalSettings", "checkModel", "checkRuntime", "getUserInfo", "openDataDir", "hideTestView",
+  "runAppRegression", "exploreAppCase",
+  "getUpdateState", "checkForUpdates", "installUpdate",
   "moveProject", "projectOverview", "getSettingsDetail",
-  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles",
+  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
   "saveDatabase", "removeDatabase", "testDatabase", "queryDatabase", "hasDbPassword",
   "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
@@ -30,5 +32,6 @@ api.onApprovalRequest = (cb: (v: unknown) => void) => subscribe("aitest:approval
 api.respondApproval = (id: string, accept: boolean) => ipcRenderer.send("aitest:approval-response", id, accept);
 api.onEvent = (cb: (v: unknown) => void) => subscribe("aitest:event", cb);
 api.onViewChange = (cb: (v: unknown) => void) => subscribe("aitest:view", cb);
+api.onUpdate = (cb: (v: unknown) => void) => subscribe("aitest:update", cb);
 
 contextBridge.exposeInMainWorld("aitest", api);

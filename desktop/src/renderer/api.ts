@@ -13,7 +13,7 @@ export interface Project {
   name: string;
   workspace_path: string;
   /** 生效的环境：子项目含继承自大项目的 */
-  environments: Record<string, { base_url: string; production?: boolean }>;
+  environments: Record<string, { base_url: string; production?: boolean; app?: { android?: string; ios?: string } }>;
   /** 自己定义的环境（子项目覆盖或新增的部分） */
   own_environments?: Record<string, { base_url: string; production?: boolean }>;
   /** 继承来的环境 → 大项目 ID */
@@ -44,6 +44,21 @@ export interface TestCase {
   lint_status: string;
   status: string;
   data_refs?: string[];
+  /** 接口：单个请求 */
+  api?: ApiStep | null;
+  /** 接口流程：多个请求按顺序执行，每步可用不同角色 */
+  api_flow?: ApiStep[];
+}
+
+export interface ApiStep {
+  name?: string;
+  role?: string;
+  method: string;
+  path: string;
+  expected_status: number[];
+  expected_fields?: Record<string, unknown>;
+  extract?: Record<string, string>;
+  auth?: boolean;
 }
 
 export interface LintIssue {
@@ -68,6 +83,7 @@ export const MODE_LABEL: Record<string, string> = {
   capture: "埋点抓包",
   doc: "文档核对",
   manual: "手工",
+  app: "App",
 };
 
 export const STATUS_LABEL: Record<string, string> = { draft: "草稿", reviewed: "已审", deprecated: "废弃" };

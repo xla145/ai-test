@@ -11,7 +11,7 @@ import subprocess
 from importlib import resources
 from pathlib import Path
 
-LAYOUT = ("cases", "requirements", "scripts/api", "scripts/ui", "reports", "evidence", ".agents/skills")
+LAYOUT = ("cases", "requirements", "scripts/api", "scripts/ui", "scripts/app", "reports", "evidence", ".agents/skills")
 
 
 def init_workspace(path: str | Path, project_name: str) -> Path:
@@ -23,7 +23,7 @@ def init_workspace(path: str | Path, project_name: str) -> Path:
     if not agents.exists():
         agents.write_text(tpl.joinpath("AGENTS.md.tpl").read_text(encoding="utf-8").replace("{{PROJECT}}", project_name),
                           encoding="utf-8")
-    for skill in ("test-design.md", "api-script.md", "failure-triage.md", "ui-explore.md", "ui-heal.md"):
+    for skill in ("test-design.md", "api-script.md", "failure-triage.md", "ui-explore.md", "ui-heal.md", "app-explore.md"):
         dst = root / ".agents" / "skills" / skill
         if not dst.exists():
             dst.write_text(tpl.joinpath(f"skills/{skill}").read_text(encoding="utf-8"), encoding="utf-8")

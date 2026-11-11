@@ -1,9 +1,11 @@
 import { ChromeOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Empty, Form, Input, Progress, Space, Statistic, Table, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Empty, Progress, Space, Statistic, Table, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
+import { ApiLoginCard } from "../components/ApiLogin";
 import { EnvCredentials } from "../components/EnvCredentials";
+import { RoleAccounts } from "../components/RoleAccounts";
 import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
 import { FAILURE, LabelTag } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
@@ -38,6 +40,16 @@ export function RunPage({ project }: { project: Project }) {
         </>}
       />
       <EnvCredentials project={project} env={env} />
+      <Collapse size="small" style={{ marginBottom: 16 }} items={[{
+        key: "roles",
+        label: <Space>多账号<Typography.Text type="secondary" style={{ fontSize: 12 }}>流程用例中每步可用不同角色（如 买家下单 → 运营审核 → 买家退款）</Typography.Text></Space>,
+        children: (
+          <div className="split">
+            <div style={{ flex: "1 1 320px" }}><RoleAccounts project={project} purpose="api" /></div>
+            <div style={{ flex: "1 1 360px" }}><ApiLoginCard project={project} env={env} /></div>
+          </div>
+        ),
+      }]} />
       {result && (
         <>
           <div className="stat-grid">

@@ -52,6 +52,30 @@ export interface GeneralSettings {
   codexPath?: string;
   /** agent 单次任务 token 上限；项目可在「工程化」中设置更低的值 */
   taskTokenLimit?: number;
+  /** App 回归：maestro 可执行文件，空表示 PATH 上的 maestro */
+  maestroPath?: string;
+  /** App 探索：启用后把 Pinky 注册给 agent（pinkyctl mcp） */
+  pinkyEnabled?: boolean;
+  /** pinkyctl 可执行文件，空表示 PATH 上的 pinkyctl */
+  pinkyPath?: string;
+  /** 自动检查更新（默认开启）：启动后与每隔 4 小时检查一次，有新版本时后台下载 */
+  autoUpdate?: boolean;
+}
+
+/** 自动更新的状态 */
+export interface UpdateState {
+  status: "disabled" | "idle" | "checking" | "not-available" | "available" | "downloading" | "downloaded" | "error";
+  /** 当前版本 */
+  current: string;
+  /** 新版本 */
+  version?: string;
+  /** 下载进度 0–100 */
+  progress?: number;
+  error?: string;
+  /** status 为 disabled 时的原因 */
+  reason?: string;
+  checkedAt?: string;
+  feedUrl?: string;
 }
 
 export interface GlobalSettings {
@@ -70,6 +94,8 @@ export interface RuntimeInfo {
   python: { path: string; source: "env" | "settings" | "bundled" | "default" };
   codex: { path: string; source: "env" | "settings" | "bundled" | "default" };
   taskTokenLimit: { value: number; source: "env" | "settings" | "bundled" | "default" };
+  maestro: { path: string; source: "env" | "settings" | "bundled" | "default" };
+  pinky: { path: string; enabled: boolean };
   /** 生效中的环境变量覆盖（优先于全局配置） */
   envOverrides: string[];
 }
@@ -157,7 +183,10 @@ export interface AitestApi {
   runRegression(projectId: string, env: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
-  setRoleSecret(projectId: string, role: string, username: string, password: string): Promise<void>;
+  /** 留空的字段保留原值；token 为接口测试用的固定鉴权头值 */
+  setRoleSecret(projectId: string, role: string, username: string, password: string, token?: string): Promise<void>;
+  /** 各角色已保存的凭据种类（不含明文），inherited 表示来自大项目 */
+  roleSecretStatus(projectId: string): Promise<Record<string, { account: boolean; token: boolean; inherited: boolean }>>;
   /** 子项目包含继承自大项目的角色（inherited_from 为大项目 ID） */
   listRoles(projectId: string): Promise<{ role_name: string; inherited_from?: string }[]>;
   setEnvironment(projectId: string, env: string, cfg: Record<string, unknown>): Promise<unknown>;
@@ -167,9 +196,17 @@ export interface AitestApi {
   /** 从客户端移除项目（数据库记录与凭据）；workspace 目录保留 */
   deleteProject(projectId: string): Promise<{ id: string; workspace_path: string }>;
   getCase(caseId: string): Promise<unknown>;
+  /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
+  scriptMap(framework: string): Promise<Record<string, string>>;
   caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
   exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */
+  runAppRegression(projectId: string, env: string, platform: "android" | "ios",
+    opts?: { device?: string; confirmProduction?: boolean }): Promise<unknown>;
+  /** App 探索（agent 通过 Pinky 操作手机，生成 Maestro 脚本） */
+  exploreAppCase(projectId: string, env: string, platform: "android" | "ios", caseId: string,
+    opts?: { confirmProduction?: boolean }): Promise<unknown>;
   listProposals(status?: string): Promise<unknown[]>;
   pageProposals(projectId: string, q: PageQuery & { status?: string }): Promise<Page<unknown>>;
   resolveProposal(projectId: string, id: string, accept: boolean): Promise<unknown>;
@@ -194,7 +231,7 @@ export interface AitestApi {
   saveGlobalSettings(settings: GlobalSettings, keys?: Record<string, string>): Promise<GlobalSettingsView>;
   /** 用已保存的配置测试某个模型的连通性 */
   checkModel(modelId: string): Promise<ModelCheckResult>;
-  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck }>;
+  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>;
   getUserInfo(): Promise<UserInfo>;
   openDataDir(): Promise<string>;
   saveDatabase(projectId: string, env: string, name: string, cfg: Record<string, unknown>, password?: string): Promise<unknown>;
@@ -219,6 +256,13 @@ export interface AitestApi {
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;
   /** 内嵌浏览器视图显示 / 隐藏（界面据此收窄到左半屏） */
   onViewChange?(cb: (v: { visible: boolean }) => void): () => void;
+  // ---- 自动更新 ----
+  getUpdateState(): Promise<UpdateState>;
+  /** 立即检查；有新版本时自动后台下载 */
+  checkForUpdates(): Promise<UpdateState>;
+  /** 退出并安装已下载的更新，安装后自动重新打开 */
+  installUpdate(): Promise<void>;
+  onUpdate(cb: (state: UpdateState) => void): () => void;
   hideTestView?(): Promise<void>;
 }
 
@@ -228,4 +272,5 @@ export const CHANNELS = {
   approvalResponse: "aitest:approval-response",
   event: "aitest:event",
   view: "aitest:view",
+  update: "aitest:update",
 } as const;

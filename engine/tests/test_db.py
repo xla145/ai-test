@@ -167,6 +167,37 @@ def test_api_suite_verifies_persisted_data(tmp_path, capsys, sqlite_db, service)
     assert "数据库校验失败" in msg and "新用户已入库且为启用状态" in msg
 
 
+
+def test_api_flow_steps_run_db_checks(tmp_path, capsys, sqlite_db, service):
+    """流程用例（多步、多账号）中的每一步也可以做入库校验，失败信息带上步骤名。"""
+    dbfile = str(tmp_path / "engine.sqlite")
+
+    def call(*args):
+        assert main(["--db", dbfile, *args]) == 0
+        return json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]
+
+    envs = {"test": {"base_url": service, "databases": {"main": {"type": "sqlite", "path": str(sqlite_db)}}}}
+    pid = call("init-project", "--name", "流程入库", "--workspace", str(tmp_path / "ws"), "--environments", json.dumps(envs))["id"]
+    check = {"description": "用户已入库", "sql": "SELECT name FROM users WHERE id = :id", "params": {"id": "${uid}"},
+             "expect": {"row": {"name": "孙七"}}}
+    case = {"title": "用户-流程入库", "type": "api", "priority": "P0", "steps": ["创建", "再创建"], "expected": ["都已入库"],
+            "api_flow": [
+                {"name": "创建用户", "method": "POST", "path": "/users", "auth": False, "body": {"name": "孙七"},
+                 "expected_status": [201], "extract": {"uid": "id"}, "db_checks": [check]},
+                {"name": "再次创建", "method": "POST", "path": "/users", "auth": False, "body": {"name": "孙七"},
+                 "expected_status": [201], "extract": {"uid": "id"}, "db_checks": [check]},
+            ]}
+    call("create-case", "--project", pid, "--json", json.dumps(case, ensure_ascii=False))
+    call("write-api-suite", "--project", pid)
+    assert call("run-api-suite", "--project", pid, "--env", "test")["passed"] == 1
+
+    Handler.persist = False
+    run = call("run-api-suite", "--project", pid, "--env", "test")
+    assert run["failed"] == 1
+    msg = call("list-run-results", "--run", run["run_id"])[0]["message"]
+    assert "第 1 步「创建用户」" in msg and "用户已入库" in msg
+
+
 # --------------------------------------------------------------------------- 真实 PostgreSQL / MySQL
 
 

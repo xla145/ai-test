@@ -24,8 +24,11 @@ export interface EnvSecret {
 
 /** 角色账号（多角色 UI 测试），用例里只写角色名 */
 export interface RoleSecret {
+  /** 页面登录、接口登录换 token 时使用；只用固定 token 的角色可以为空 */
   username: string;
   password: string;
+  /** 接口测试：该角色固定的鉴权头值（如 "Bearer xxx"），优先于接口登录换取 */
+  token?: string;
 }
 
 export class SecretStore {
@@ -74,6 +77,12 @@ export class SecretStore {
     return this.read<RoleSecret>(SecretStore.roleRef(projectId, role));
   }
 
+  /** 该项目在钥匙串中保存了凭据的角色名 */
+  roleNames(projectId: string): string[] {
+    const prefix = SecretStore.roleRef(projectId, "");
+    return Object.keys(this.data).filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+  }
+
   private read<T>(ref: string): T | undefined {
     const v = this.data[ref];
     return v ? (JSON.parse(this.cipher.decryptString(Buffer.from(v, "base64"))) as T) : undefined;
@@ -103,21 +112,31 @@ export interface Broker {
  * 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES）+ 数据库密码（AITEST_DB_PASSWORDS）。
  * 子项目先找自己的凭据，没有再用大项目（parentId）的——与环境、角色的继承规则一致。
  */
-export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole" | "dbPasswords">, projectId: string, env: string,
-  roles: string[] = [], parentId?: string): Record<string, string> {
+/** roles 传 ["*"] 表示该项目（含大项目）保存了凭据的全部角色，用于接口多账号 */
+export const ALL_ROLES = "*";
+
+export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames" | "dbPasswords">>,
+  projectId: string, env: string, roles: string[] = [], parentId?: string): Record<string, string> {
   const out: Record<string, string> = {};
   const secret = store.get(SecretStore.ref(projectId, env)) ?? (parentId ? store.get(SecretStore.ref(parentId, env)) : undefined);
   if (secret) {
     out.AITEST_AUTH_TOKEN = secret.authToken;
     if (secret.authHeader) out.AITEST_AUTH_HEADER = secret.authHeader;
   }
-  const creds = roles
+  const names = roles.includes(ALL_ROLES)
+    ? [...new Set([...(store.roleNames?.(projectId) ?? []), ...(parentId ? store.roleNames?.(parentId) ?? [] : [])])]
+    : roles;
+  const found = names
     .map((role) => ({ role, cred: store.getRole(projectId, role) ?? (parentId ? store.getRole(parentId, role) : undefined) }))
-    .filter((r) => r.cred)
+    .filter((r) => r.cred);
+  const creds = found.filter((r) => r.cred!.username)
     .map((r) => ({ role: r.role, username: r.cred!.username, password: r.cred!.password }));
   if (creds.length) out.AITEST_ROLES = JSON.stringify(creds);
+  // 接口多账号：角色固定 token
+  const tokens = Object.fromEntries(found.filter((r) => r.cred!.token).map((r) => [r.role, r.cred!.token!]));
+  if (Object.keys(tokens).length) out.AITEST_ROLE_TOKENS = JSON.stringify(tokens);
   // 数据库密码：大项目的为基础，子项目自己设置的覆盖同名连接
-  const dbPasswords = { ...(parentId ? store.dbPasswords(parentId, env) : {}), ...store.dbPasswords(projectId, env) };
+  const dbPasswords = { ...(parentId ? store.dbPasswords?.(parentId, env) ?? {} : {}), ...store.dbPasswords?.(projectId, env) };
   if (Object.keys(dbPasswords).length) out.AITEST_DB_PASSWORDS = JSON.stringify(dbPasswords);
   return out;
 }
@@ -129,7 +148,7 @@ export interface BrokerHandlers {
   openView?: (projectId: string, role: string) => Promise<string>;
 }
 
-export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole" | "dbPasswords">, handlers: BrokerHandlers = {}): Promise<Broker> {
+export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames" | "dbPasswords">>, handlers: BrokerHandlers = {}): Promise<Broker> {
   const token = randomBytes(24).toString("hex");
   const expected = Buffer.from(`Bearer ${token}`);
   const server: Server = createServer((req, res) => {

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -20,7 +21,10 @@ from .models import FailureType, Run, RunMode, RunResult
 
 _ID_RE = re.compile(r"\[(.+)\]$")
 _ENV_PATTERNS = re.compile(
-    r"(ConnectError|ConnectTimeout|ReadTimeout|Name or service not known|Connection refused|net::ERR_|未设置 AITEST_BASE_URL)")
+    r"(ConnectError|ConnectTimeout|ReadTimeout|Name or service not known|Connection refused|net::ERR_|未设置 AITEST_BASE_URL"
+    # 移动端：设备未连接、App 未安装（Maestro / adb）
+    r"|[Nn]o devices? (found|connected)|[Dd]evice .{0,40}not (found|connected)|device offline|[Aa]pp .{0,60}not installed"
+    r"|[Uu]nable to launch app)")
 _SERVER_ERROR = re.compile(r"状态码 5\d\d")
 
 
@@ -30,6 +34,8 @@ class EnvConfig:
     auth_header: str = "Authorization"
     auth_token: str = ""  # 由客户端从钥匙串取出后传入，不落库
     timeout: float = 30
+    # 多账号：环境的接口登录配置（不含凭据），角色账号密码由客户端以 AITEST_ROLES 注入
+    api_login: dict | None = None
 
     def to_env(self) -> dict[str, str]:
         return {
@@ -37,6 +43,7 @@ class EnvConfig:
             "AITEST_AUTH_HEADER": self.auth_header,
             "AITEST_AUTH_TOKEN": self.auth_token,
             "AITEST_TIMEOUT": str(self.timeout),
+            **({"AITEST_API_LOGIN": json.dumps(self.api_login, ensure_ascii=False)} if self.api_login else {}),
         }
 
 

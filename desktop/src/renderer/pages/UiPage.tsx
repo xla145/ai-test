@@ -27,6 +27,7 @@ import { DiffView } from "../components/DiffView";
 import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
 import { FAILURE, LabelTag, LINT, MODE } from "../components/labels";
 import { useProjects } from "../components/ProjectSettings";
+import { RoleAccounts } from "../components/RoleAccounts";
 import { PageHeader } from "../components/PageHeader";
 import { useAction, useLoad, usePaged } from "../hooks";
 
@@ -244,42 +245,18 @@ function UiCases({ project, env }: { project: Project; env: string }) {
 
 /** 角色账号与登录方式。子项目显示继承自大项目的角色；登录方式保存到环境所在的项目（继承的环境保存到大项目） */
 export function Roles({ project, env }: { project: Project; env: string }) {
-  const roles = useLoad(() => api().listRoles(project.id), [project.id]);
-  const [roleForm] = Form.useForm<{ name: string; username: string; password: string }>();
   const [loginForm] = Form.useForm();
   const { busy, run } = useAction();
   const { reload: reloadProjects, projects } = useProjects();
   const owner = env ? envOwner(project, env) : project.id;
   const ownerName = owner !== project.id ? projects.find((p) => p.id === owner)?.name : undefined;
-  const parentName = project.parent_id ? projects.find((p) => p.id === project.parent_id)?.name : undefined;
   const login = (project.environments[env] as { login?: Record<string, string> })?.login ?? {
     url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "",
   };
   return (
     <div className="split">
       <div style={{ flex: "1 1 320px" }}>
-        <Card size="small" title="角色账号" extra={<Typography.Text type="secondary">存入系统钥匙串，用例只写角色名</Typography.Text>}>
-          <Space wrap style={{ marginBottom: 12 }}>
-            {(roles.data ?? []).map((r) => (
-              <Tooltip key={r.role_name} title={r.inherited_from ? `继承自大项目「${parentName}」；在这里保存同名角色可单独设置账号` : undefined}>
-                <Tag color={r.inherited_from ? "default" : "blue"} bordered={false}>{r.role_name}{r.inherited_from ? "（继承）" : ""}</Tag>
-              </Tooltip>
-            ))}
-            {!roles.data?.length && <Typography.Text type="secondary">还没有角色</Typography.Text>}
-          </Space>
-          <Form form={roleForm} layout="vertical" onFinish={(v) => run(async () => {
-            await api().setRoleSecret(project.id, v.name, v.username, v.password);
-            roleForm.resetFields();
-            await roles.reload();
-          }, "角色已保存")}>
-            <Form.Item name="name" label="角色名" rules={[{ required: true }]}><Input placeholder="如：管理员、运营、访客" /></Form.Item>
-            <Row gutter={8}>
-              <Col span={12}><Form.Item name="username" label="账号" rules={[{ required: true }]}><Input /></Form.Item></Col>
-              <Col span={12}><Form.Item name="password" label="密码" rules={[{ required: true }]}><Input.Password /></Form.Item></Col>
-            </Row>
-            <Button htmlType="submit" icon={<UserAddOutlined />} loading={busy}>保存角色</Button>
-          </Form>
-        </Card>
+        <RoleAccounts project={project} />
       </div>
       <div style={{ flex: "1.2 1 380px" }}>
         <Card size="small" title={`登录方式（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`} extra={<Typography.Text type="secondary">填写 CSS 选择器</Typography.Text>}>
