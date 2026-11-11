@@ -131,13 +131,14 @@ def cmd_parse_openapi(store: Store, a: argparse.Namespace) -> Any:
 def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     _leaf(store, a.project)
     column_map = json.loads(a.column_map) if a.column_map else None
-    cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet)
+    info: dict[str, Any] = {}
+    cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet, info=info)
     router.route_all(cases)
     report = linter.lint_cases(cases)
     for c in cases:
         store.upsert_case(c, validate=False)  # 导入的原始用例可能不完整，靠 lint 阻断
     store.replace_lint_issues([c.id for c in cases], report.issues)
-    return {"imported": len(cases), "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
+    return {"imported": len(cases), **info, "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
 
 
 def cmd_lint(store: Store, a: argparse.Namespace) -> Any:

@@ -301,6 +301,7 @@ export function App() {
               onChange={setTab}
               items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: <div className="page">{t.children}</div> }))}
               tabBarStyle={{ padding: "0 24px", marginBottom: 0 }}
+              className="project-tabs"
               style={{ height: "100%" }}
               destroyOnHidden
             />

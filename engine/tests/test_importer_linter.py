@@ -90,3 +90,30 @@ def test_export_roundtrip(tmp_path):
     assert [c.title for c in again] == [c.title for c in cases]
     assert [c.module_path for c in again] == [c.module_path for c in cases]
     assert [c.steps for c in again] == [c.steps for c in cases]
+
+
+def test_import_recognizes_common_header_variants(tmp_path):
+    """各平台导出的列名：带必填星号、「用例名称」「优先级」「操作步骤」等也能识别，缺少的必需列会提示。"""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["*用例名称", "所属模块", "前置条件", "操作步骤", "期望结果", "优先级（必填）", "备注"])
+    ws.append(["特征中心-新建特征", "web|web--后台管理", "", "1. 打开页面 2. 点新建", "1. 创建成功", "P1", "x"])
+    path = tmp_path / "variants.xlsx"
+    wb.save(path)
+
+    info: dict = {}
+    cases = import_excel(path, info=info)
+    c = cases[0]
+    assert c.title == "特征中心-新建特征"
+    assert c.module_path == ["web", "web--后台管理", "特征中心"]
+    assert c.steps == ["打开页面", "点新建"] and c.expected == ["创建成功"] and c.priority == "P1"
+    assert info["missing_columns"] == [] and info["unknown_columns"] == ["备注"]
+    assert info["columns"]["title"] == "*用例名称"
+
+    wb = Workbook()
+    wb.active.append(["所属分组", "步骤描述", "预期结果", "用例等级"])
+    wb.active.append(["a|b", "1. x", "1. y", "P1"])
+    wb.save(path)
+    info = {}
+    import_excel(path, info=info)
+    assert info["missing_columns"] == ["标题"]
