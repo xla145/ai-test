@@ -46,7 +46,11 @@ export interface ProjectInfo {
   id: string;
   name: string;
   workspace_path: string;
+  /** 生效的环境（子项目含继承自大项目的） */
   environments: Record<string, EnvironmentInfo>;
+  /** 两层项目："group" 为大项目，只存放共享配置 */
+  kind?: "project" | "group";
+  parent_id?: string;
 }
 
 /** UI 执行相关依赖（来自 @ai-test/mcp-servers，测试时可替换） */
@@ -74,6 +78,24 @@ export interface RunSummary {
   pass_rate: number;
   failure_types: Record<string, number>;
   needs_agent: string[];
+}
+
+/** UI 回归中失败用例的明细（规则判定 + agent 自愈结论合并） */
+export interface UiFailure {
+  case_id: string;
+  status: string;
+  failure_type: string;
+  message: string;
+  /** agent 给出的判断依据（自愈时） */
+  reason?: string;
+}
+
+/** 生产环境的执行需要界面二次确认 */
+export class ProductionConfirmRequired extends Error {
+  constructor(env: string) {
+    super(`「${env}」是生产环境，需要确认后才能执行`);
+    this.name = "ProductionConfirmRequired";
+  }
 }
 
 export interface TriageItem {
@@ -108,10 +130,21 @@ export class Orchestrator extends EventEmitter {
     return p;
   }
 
-  createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {}) {
+  createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {},
+    opts: { kind?: "project" | "group"; parent?: string } = {}) {
     return this.deps.engine<ProjectInfo>([
-      "init-project", "--name", name, "--workspace", workspace, "--environments", JSON.stringify(environments),
+      "init-project", "--name", name, ...(opts.kind === "group" ? ["--kind", "group"] : ["--workspace", workspace]),
+      "--environments", JSON.stringify(environments), ...(opts.parent ? ["--parent", opts.parent] : []),
     ]);
+  }
+
+  /** 移入大项目；parent 为空字符串表示移出成为独立项目 */
+  moveProject(projectId: string, parent: string) {
+    return this.deps.engine(["update-project", "--project", projectId, "--parent", parent]);
+  }
+
+  projectOverview(groupId: string) {
+    return this.deps.engine(["project-overview", "--project", groupId]);
   }
 
   importExcel(projectId: string, file: string) {
@@ -165,10 +198,11 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 回归：直接跑脚本，不消耗大模型；失败且无法确定类型时才调 agent 归因 */
-  async runRegression(projectId: string, env: string, opts: { autoTriage?: boolean } = {}) {
+  async runRegression(projectId: string, env: string, opts: { autoTriage?: boolean; confirmProduction?: boolean } = {}) {
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
     if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     this.emit("progress", { projectId, stage: "run", env });
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env],
@@ -220,11 +254,13 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** UI 回归：直接跑 Playwright 脚本，不调用模型；失败且无法确定原因时进入自愈 */
-  async runUiRegression(projectId: string, env: string, opts: { autoHeal?: boolean; headed?: boolean } = {}) {
+  async runUiRegression(projectId: string, env: string,
+    opts: { autoHeal?: boolean; headed?: boolean; confirmProduction?: boolean } = {}) {
     const ui = this.requireUi();
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
     if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
     const uiScripts = new Map(scripts.filter((s) => s.framework === "playwright").map((s) => [s.case_id, s.path]));
     const cases = (await this.listCases(projectId)) as CaseRow[];
@@ -251,7 +287,19 @@ export class Orchestrator extends EventEmitter {
     if (opts.autoHeal !== false && run.needs_agent.length) {
       heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts);
     }
-    return { run, heal, degraded, missingData: missing, htmlReport: out.htmlReport };
+    // 失败明细：以引擎保存后的归因为准（含规则判定），agent 结论覆盖类型并补充依据
+    const saved = await this.deps.engine<UiFailure[]>(["list-run-results", "--run", run.run_id]);
+    const judged = new Map((heal ?? []).map((h) => [h.case_id, h]));
+    const failures: UiFailure[] = (Array.isArray(saved) ? saved : [])
+      .filter((r) => r.status === "failed" || r.status === "error")
+      .map((r) => {
+        const h = judged.get(r.case_id);
+        return {
+          case_id: r.case_id, status: r.status, message: (r.message ?? "").slice(0, 500),
+          failure_type: h?.failure_type ?? r.failure_type ?? "unknown", ...(h?.reason ? { reason: h.reason } : {}),
+        };
+      });
+    return { run, heal, failures, degraded, missingData: missing, htmlReport: out.htmlReport };
   }
 
   async healUi(projectId: string, env: string, runId: string, results?: UiCaseResult[], scripts?: Map<string, string>) {
@@ -306,6 +354,31 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["set-environment", "--project", projectId, "--env", env, "--json", JSON.stringify(cfg)]);
   }
 
+  deleteEnvironment(projectId: string, env: string) {
+    return this.deps.engine(["delete-environment", "--project", projectId, "--env", env]);
+  }
+
+  renameProject(projectId: string, name: string) {
+    return this.deps.engine(["update-project", "--project", projectId, "--name", name]);
+  }
+
+  /** 从客户端移除项目：删除数据库记录，workspace 目录保留 */
+  deleteProject(projectId: string) {
+    return this.deps.engine(["delete-project", "--project", projectId]);
+  }
+
+  getCase(caseId: string) {
+    return this.deps.engine(["get-case", "--case", caseId]);
+  }
+
+  /** 按 ID 取用例标题（界面上用标题代替 ID 显示） */
+  async caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>> {
+    const unique = [...new Set(ids.filter(Boolean))];
+    if (!unique.length) return {};
+    const rows = await this.deps.engine<{ id: string; title: string }[]>(["list-cases", "--project", projectId, "--ids", unique.join(",")]);
+    return Object.fromEntries(rows.map((r) => [r.id, r.title]));
+  }
+
   // ------------------------------------------------------------------ 三期：自愈与工程化
 
   /** 归因落库，等待人工确认（用于统计归因准确率）；非法类型忽略 */
@@ -345,10 +418,16 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine<Record<string, unknown>>(["get-settings", "--project", projectId]);
   }
 
+  /** 生效值、本项目设置的值、继承自大项目的值 */
+  getSettingsDetail(projectId: string) {
+    return this.deps.engine(["get-settings", "--project", projectId, "--detail"]);
+  }
+
+  /** null / 空字符串表示清除本项目的设置（子项目恢复继承大项目的值）；undefined 表示不修改 */
   async setSettings(projectId: string, settings: Record<string, string | number | null | undefined>) {
     for (const [key, value] of Object.entries(settings)) {
-      if (value === undefined || value === null || value === "") continue;
-      await this.deps.engine(["set-setting", "--project", projectId, "--key", key, "--value", String(value)]);
+      if (value === undefined) continue;
+      await this.deps.engine(["set-setting", "--project", projectId, "--key", key, "--value", value === null ? "" : String(value)]);
     }
     return this.getSettings(projectId);
   }

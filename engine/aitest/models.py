@@ -69,6 +69,10 @@ class Project:
     workspace_path: str
     environments: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: new_id("proj"))
+    # 两层项目：kind="group" 为大项目（不含用例、无 workspace，只放共享配置）；
+    # 子项目的 parent_id 指向大项目，继承其执行环境、角色账号与设置
+    parent_id: str = ""
+    kind: str = "project"
 
 
 @dataclass

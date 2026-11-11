@@ -118,6 +118,17 @@ aitest metrics      --project <项目ID>
 
 桌面端「工程化」页集中展示这些内容（按项目）。
 
+### 大项目与子项目
+
+项目可以分两层组织，侧栏按树形显示：
+
+- **大项目**：不含用例、没有 workspace，只存放共享配置——执行环境、鉴权 token、角色账号、登录方式、预算与单价。
+  大项目页面汇总各子项目的用例数、最近一次执行与本月 token 用量。
+- **子项目**：有自己的 workspace、用例库、脚本与执行记录；默认继承大项目的上述配置，也可以按环境、角色、设置项单独覆盖
+  （项目设置中「覆盖」/「恢复继承」）。月度预算继承自大项目时，按整个大项目累计用量。
+- 独立项目可以在项目设置中移入大项目，也可以移出。命令行：`aitest init-project --kind group`、`--parent <大项目ID>`、
+  `aitest update-project --parent`、`aitest project-overview`。
+
 侧栏底部的「全局设置」对所有项目生效，不随项目保存：
 - **模型**：可添加多个模型（OpenAI、百炼、DeepSeek、方舟或私有化部署的 OpenAI 兼容服务），分别指定 agent 与视觉定位使用哪一个，并测试连通；API key 存系统钥匙串。
 - **运行环境**：Python 与 Codex 路径（默认 python3 与内置 Codex）、agent 单次任务 token 上限。环境变量 `AITEST_PYTHON`、`AITEST_CODEX_BIN`、`AITEST_TOKEN_LIMIT` 优先于这里的配置。

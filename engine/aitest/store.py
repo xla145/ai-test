@@ -110,6 +110,16 @@ class Store:
         self.conn = sqlite3.connect(str(path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """旧库补列：两层项目（parent_id / kind）。"""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(project)")}
+        if "parent_id" not in cols:
+            self.conn.execute("ALTER TABLE project ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")
+        if "kind" not in cols:
+            self.conn.execute("ALTER TABLE project ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -117,22 +127,59 @@ class Store:
     # ---- project ----
     def add_project(self, p: Project) -> Project:
         self.conn.execute(
-            "INSERT OR REPLACE INTO project VALUES (?,?,?,?)",
-            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO project (id, name, workspace_path, environments, parent_id, kind) VALUES (?,?,?,?,?,?)",
+            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False), p.parent_id or "", p.kind),
         )
         self.conn.commit()
         return p
+
+    def delete_project(self, project_id: str) -> dict[str, int]:
+        """删除项目在数据库中的全部记录（用例、脚本登记、执行记录、建议、复核等）；workspace 目录不动。"""
+        cases = "SELECT id FROM testcase WHERE project_id=?"
+        runs = "SELECT id FROM run WHERE project_id=?"
+        statements = [
+            ("lint_issue", f"DELETE FROM lint_issue WHERE case_id IN ({cases})"),
+            ("case_requirement", f"DELETE FROM case_requirement WHERE case_id IN ({cases})"),
+            ("script", f"DELETE FROM script WHERE case_id IN ({cases})"),
+            ("heal_proposal", f"DELETE FROM heal_proposal WHERE case_id IN ({cases})"),
+            ("review_item", f"DELETE FROM review_item WHERE case_id IN ({cases})"),
+            ("run_result", f"DELETE FROM run_result WHERE run_id IN ({runs})"),
+            ("run", "DELETE FROM run WHERE project_id=?"),
+            ("testcase", "DELETE FROM testcase WHERE project_id=?"),
+            ("requirement", "DELETE FROM requirement WHERE project_id=?"),
+            ("test_data", "DELETE FROM test_data WHERE project_id=?"),
+            ("role_account", "DELETE FROM role_account WHERE project_id=?"),
+            ("agent_session", "DELETE FROM agent_session WHERE project_id=?"),
+        ]
+        # 三期的表由 ops.ensure_schema 创建，可能不存在
+        existing = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        statements += [(t, f"DELETE FROM {t} WHERE project_id=?") for t in ("event_log", "attribution", "project_setting")
+                       if t in existing]
+        counts: dict[str, int] = {}
+        with self.conn:
+            for table, sql in statements:
+                counts[table] = self.conn.execute(sql, (project_id,)).rowcount
+            self.conn.execute("DELETE FROM project WHERE id=?", (project_id,))
+        return counts
 
     def get_project(self, project_id: str) -> Project | None:
         r = self.conn.execute("SELECT * FROM project WHERE id=?", (project_id,)).fetchone()
         if not r:
             return None
         return Project(id=r["id"], name=r["name"], workspace_path=r["workspace_path"],
-                       environments=json.loads(r["environments"]))
+                       environments=json.loads(r["environments"]), parent_id=r["parent_id"] or "",
+                       kind=r["kind"] or "project")
 
     def list_projects(self) -> list[Project]:
         rows = self.conn.execute("SELECT id FROM project ORDER BY name").fetchall()
         return [p for p in (self.get_project(r["id"]) for r in rows) if p]
+
+    def child_ids(self, group_id: str) -> list[str]:
+        return [r["id"] for r in self.conn.execute("SELECT id FROM project WHERE parent_id=? ORDER BY name", (group_id,))]
+
+    def parent_of(self, project_id: str) -> Project | None:
+        p = self.get_project(project_id)
+        return self.get_project(p.parent_id) if p and p.parent_id else None
 
     # ---- requirement ----
     def add_requirements(self, reqs: Iterable[Requirement]) -> None:
@@ -176,6 +223,9 @@ class Store:
             if filters.get(col):
                 s, a = _match(col, filters[col])
                 sql, args = sql + s, args + a
+        if filters.get("ids"):
+            s, a = _match("id", filters["ids"])
+            sql, args = sql + s, args + a
         if query:
             sql += (" AND (title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\'"
                     " OR json_extract(data, '$.module_path') LIKE ? ESCAPE '\\')")

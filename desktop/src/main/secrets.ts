@@ -64,6 +64,14 @@ export class SecretStore {
     return v ? (JSON.parse(this.cipher.decryptString(Buffer.from(v, "base64"))) as T) : undefined;
   }
 
+  /** 删除某个前缀下的全部凭据（移除项目时用） */
+  deletePrefix(prefix: string): number {
+    const keys = Object.keys(this.data).filter((k) => k.startsWith(prefix));
+    for (const k of keys) delete this.data[k];
+    if (keys.length) writeFileSync(this.file, JSON.stringify(this.data), { mode: 0o600 });
+    return keys.length;
+  }
+
   delete(ref: string): void {
     delete this.data[ref];
     writeFileSync(this.file, JSON.stringify(this.data), { mode: 0o600 });
@@ -76,17 +84,20 @@ export interface Broker {
   close(): Promise<void>;
 }
 
-/** 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES） */
+/**
+ * 运行时注入子进程的环境变量：环境 token + 角色账号（AITEST_ROLES）。
+ * 子项目先找自己的凭据，没有再用大项目（parentId）的——与环境、角色的继承规则一致。
+ */
 export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole">, projectId: string, env: string,
-  roles: string[] = []): Record<string, string> {
+  roles: string[] = [], parentId?: string): Record<string, string> {
   const out: Record<string, string> = {};
-  const secret = store.get(SecretStore.ref(projectId, env));
+  const secret = store.get(SecretStore.ref(projectId, env)) ?? (parentId ? store.get(SecretStore.ref(parentId, env)) : undefined);
   if (secret) {
     out.AITEST_AUTH_TOKEN = secret.authToken;
     if (secret.authHeader) out.AITEST_AUTH_HEADER = secret.authHeader;
   }
   const creds = roles
-    .map((role) => ({ role, cred: store.getRole(projectId, role) }))
+    .map((role) => ({ role, cred: store.getRole(projectId, role) ?? (parentId ? store.getRole(parentId, role) : undefined) }))
     .filter((r) => r.cred)
     .map((r) => ({ role: r.role, username: r.cred!.username, password: r.cred!.password }));
   if (creds.length) out.AITEST_ROLES = JSON.stringify(creds);
@@ -94,6 +105,8 @@ export function secretEnvFor(store: Pick<SecretStore, "get" | "getRole">, projec
 }
 
 export interface BrokerHandlers {
+  /** 子项目所属的大项目（凭据继承） */
+  parentOf?: (projectId: string) => string | undefined;
   /** 桌面端为角色准备内嵌浏览器视图，返回视图初始 URL 中的标记 */
   openView?: (projectId: string, role: string) => Promise<string>;
 }
@@ -116,7 +129,7 @@ export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRol
         const payload = JSON.parse(body) as { projectId: string; env?: string; role?: string; roles?: string[] };
         const result = req.url === "/views"
           ? { marker: await handlers.openView!(payload.projectId, String(payload.role)) }
-          : { env: secretEnvFor(store, payload.projectId, String(payload.env), payload.roles ?? []) };
+          : { env: secretEnvFor(store, payload.projectId, String(payload.env), payload.roles ?? [], handlers.parentOf?.(payload.projectId)) };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
       } catch (e) {
         res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: (e as Error).message }));

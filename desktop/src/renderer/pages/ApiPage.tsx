@@ -1,5 +1,5 @@
 import { FileTextOutlined, RobotOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Descriptions, Result, Row, Space, Steps, Switch, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Result, Space, Steps, Switch, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project } from "../api";
 import { PageHeader } from "../components/PageHeader";
@@ -37,8 +37,8 @@ export function ApiPage({ project }: { project: Project }) {
         { title: "生成脚本", description: "pytest + httpx，数据驱动" },
         { title: "回归执行", description: "不调用模型" },
       ]} />
-      <Row gutter={16}>
-        <Col span={12}>
+      <div className="split">
+        <div style={{ flex: "1 1 320px", alignSelf: "stretch" }}>
           <Card title={<Space><ThunderboltOutlined />从 OpenAPI 生成</Space>} style={{ height: "100%" }}>
             <Typography.Paragraph type="secondary">
               确定性生成基线用例与脚本，不耗模型。需要业务场景（先创建再查询等接口依赖）时，可让 agent 在此基础上补充。
@@ -48,16 +48,16 @@ export function ApiPage({ project }: { project: Project }) {
               <Button type="primary" loading={busy} onClick={fromOpenapi}>选择 OpenAPI 文件</Button>
             </Space>
           </Card>
-        </Col>
-        <Col span={12}>
+        </div>
+        <div style={{ flex: "1 1 320px", alignSelf: "stretch" }}>
           <Card title={<Space><RobotOutlined />从需求文档生成（agent）</Space>} style={{ height: "100%" }}>
             <Typography.Paragraph type="secondary">
               agent 读取 Word / PDF / Markdown 需求，按功能点设计用例并关联需求章节，自检规范后以草稿入库，等待人工审核。
             </Typography.Paragraph>
             <Button icon={<FileTextOutlined />} loading={busy} onClick={fromRequirement}>选择需求文档</Button>
           </Card>
-        </Col>
-      </Row>
+        </div>
+      </div>
       {result && (
         <Card style={{ marginTop: 16 }}>
           <Result

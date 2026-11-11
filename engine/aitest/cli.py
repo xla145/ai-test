@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 from datetime import datetime, timezone
 
-from . import apigen, docparser, heal, importer, linter, openapi, ops, router, runner, workspace
+from . import apigen, docparser, heal, hierarchy, importer, linter, openapi, ops, router, runner, workspace
 from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .store import Store
 
@@ -27,6 +27,21 @@ def _project(store: Store, project_id: str) -> Project:
     p = store.get_project(project_id)
     if p is None:
         raise KeyError(f"项目不存在：{project_id}")
+    return p
+
+
+def _leaf(store: Store, project_id: str) -> Project:
+    """用例、脚本、执行相关的命令只能用于（子）项目，大项目只放共享配置。"""
+    p = _project(store, project_id)
+    if hierarchy.is_group(p):
+        raise ValueError(f"「{p.name}」是大项目，只存放共享配置；请在其子项目中操作")
+    return p
+
+
+def _group(store: Store, project_id: str) -> Project:
+    p = _project(store, project_id)
+    if not hierarchy.is_group(p):
+        raise ValueError(f"「{p.name}」不是大项目")
     return p
 
 
@@ -43,17 +58,53 @@ def _paged(a: argparse.Namespace, fetch: Callable[[int | None, int], list], coun
 
 def cmd_init_project(store: Store, a: argparse.Namespace) -> Any:
     envs = json.loads(a.environments) if a.environments else {}
-    p = Project(name=a.name, workspace_path=str(Path(a.workspace).resolve()), environments=envs)
+    if a.kind == hierarchy.GROUP:
+        if a.parent:
+            raise ValueError("大项目不能再挂到其它大项目下（只支持两层）")
+        # 大项目不含用例，没有 workspace
+        p = Project(name=a.name, workspace_path="", environments=envs, kind=hierarchy.GROUP)
+        return hierarchy.project_view(store, store.add_project(p))
+    if not a.workspace:
+        raise ValueError("项目需要 --workspace")
+    parent = _group(store, a.parent) if a.parent else None
+    p = Project(name=a.name, workspace_path=str(Path(a.workspace).resolve()), environments=envs,
+                parent_id=parent.id if parent else "")
     workspace.init_workspace(p.workspace_path, p.name)
-    return asdict(store.add_project(p))
+    return hierarchy.project_view(store, store.add_project(p))
 
 
 def cmd_list_projects(store: Store, a: argparse.Namespace) -> Any:
-    return [asdict(p) for p in store.list_projects()]
+    return [hierarchy.project_view(store, p) for p in store.list_projects()]
+
+
+def cmd_project_overview(store: Store, a: argparse.Namespace) -> Any:
+    """大项目概览：各子项目的用例数、最近一次执行与本月 token 用量。"""
+    g = _group(store, a.project)
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    children = []
+    for cid in store.child_ids(g.id):
+        c = store.get_project(cid)
+        if c is None:
+            continue
+        last = store.conn.execute("SELECT * FROM run WHERE project_id=? ORDER BY started_at DESC LIMIT 1", (cid,)).fetchone()
+        result = json.loads(last["result"] or "{}") if last else {}
+        tokens = sum(int(e["data"].get("tokens", 0)) for e in ops.events(store, cid, {"tokens"}, month_start))
+        children.append({
+            "id": c.id, "name": c.name, "workspace_path": c.workspace_path,
+            "cases": store.count_cases(cid),
+            "reviewed": store.count_cases(cid, status="reviewed"),
+            "blocked": store.count_cases(cid, lint_status="blocked"),
+            "last_run": {"run_id": last["id"], "started_at": last["started_at"], "env": last["env"],
+                         "framework": result.get("framework", "pytest"), "total": result.get("total", 0),
+                         "passed": result.get("passed", 0), "pass_rate": result.get("pass_rate")} if last else None,
+            "month_tokens": tokens,
+        })
+    return {"project": hierarchy.project_view(store, g), "children": children,
+            "budget": ops.check_budget(store, g.id)}
 
 
 def cmd_parse_requirement(store: Store, a: argparse.Namespace) -> Any:
-    _project(store, a.project)
+    _leaf(store, a.project)
     reqs = docparser.parse_requirement(a.file, a.project)
     store.add_requirements(reqs)
     return [{"id": r.id, "section": r.section, "chars": len(r.content)} for r in reqs]
@@ -78,7 +129,7 @@ def cmd_parse_openapi(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
-    _project(store, a.project)
+    _leaf(store, a.project)
     column_map = json.loads(a.column_map) if a.column_map else None
     cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet)
     router.route_all(cases)
@@ -132,6 +183,9 @@ def cmd_export_excel(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_create_case(store: Store, a: argparse.Namespace) -> Any:
+    p = store.get_project(a.project)
+    if p and hierarchy.is_group(p):  # 只拦大项目，不改变原有对项目是否存在的处理
+        raise ValueError(f"「{p.name}」是大项目，只存放共享配置；请在其子项目中操作")
     data = json.loads(a.json)
     data["project_id"] = a.project
     case = TestCase.from_dict(data)
@@ -153,7 +207,7 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_cases(store: Store, a: argparse.Namespace) -> Any:
-    filters = {"query": a.query, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
+    filters = {"query": a.query, "ids": a.ids, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
                "status": a.status, "lint_status": a.lint_status}
     return _paged(a, lambda limit, offset: [c.to_dict() for c in store.list_cases(
                       a.project, limit=limit, offset=offset, **filters)],
@@ -173,7 +227,7 @@ def cmd_route(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_generate_api_cases(store: Store, a: argparse.Namespace) -> Any:
-    _project(store, a.project)
+    _leaf(store, a.project)
     doc = openapi.parse_openapi(a.openapi)
     cases = apigen.generate_suite(doc, a.project)
     if a.operation:
@@ -184,7 +238,7 @@ def cmd_generate_api_cases(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_write_api_suite(store: Store, a: argparse.Namespace) -> Any:
-    p = _project(store, a.project)
+    p = _leaf(store, a.project)
     cases = store.list_cases(a.project, execution_mode="api")
     issues = store.list_lint_issues()
     eligible = [c for c in cases if c.api and c.status != "deprecated" and linter.can_generate_script(c, issues)]
@@ -204,8 +258,8 @@ def cmd_write_api_suite(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
-    p = _project(store, a.project)
-    env_cfg = (p.environments or {}).get(a.env)
+    p = _leaf(store, a.project)
+    env_cfg = hierarchy.effective_environments(store, p).get(a.env)
     if env_cfg is None:
         raise KeyError(f"项目未配置环境：{a.env}")
     env = runner.EnvConfig(
@@ -243,7 +297,7 @@ def cmd_token_usage(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_get_project(store: Store, a: argparse.Namespace) -> Any:
-    return asdict(_project(store, a.project))
+    return hierarchy.project_view(store, _project(store, a.project))
 
 
 def cmd_get_case(store: Store, a: argparse.Namespace) -> Any:
@@ -255,8 +309,40 @@ def cmd_get_case(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_set_environment(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
-    p.environments[a.env] = json.loads(a.json)
+    cfg = json.loads(a.json)
+    if not isinstance(cfg, dict) or not str(cfg.get("base_url", "")).startswith(("http://", "https://")):
+        raise ValueError("环境配置需要以 http(s):// 开头的 base_url")
+    p.environments[a.env] = cfg
     return asdict(store.add_project(p))
+
+
+def cmd_delete_environment(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    if a.env not in p.environments:
+        raise KeyError(f"项目未配置环境：{a.env}")
+    del p.environments[a.env]
+    return asdict(store.add_project(p))
+
+
+def cmd_update_project(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    if a.name is not None:
+        if not a.name.strip():
+            raise ValueError("项目名不能为空")
+        p.name = a.name.strip()
+    if a.parent is not None:  # 移入大项目；空字符串表示移出成为独立项目
+        if hierarchy.is_group(p):
+            raise ValueError("大项目不能挂到其它大项目下（只支持两层）")
+        p.parent_id = _group(store, a.parent).id if a.parent else ""
+    return hierarchy.project_view(store, store.add_project(p))
+
+
+def cmd_delete_project(store: Store, a: argparse.Namespace) -> Any:
+    """从客户端移除项目：删除数据库记录，workspace 目录（用例、脚本、报告与 git 历史）保留，可再导入。"""
+    p = _project(store, a.project)
+    if hierarchy.is_group(p) and store.child_ids(p.id):
+        raise ValueError(f"大项目「{p.name}」下还有 {len(store.child_ids(p.id))} 个子项目，请先移除或移出")
+    return {"id": p.id, "workspace_path": p.workspace_path, "deleted": store.delete_project(p.id)}
 
 
 def cmd_add_role(store: Store, a: argparse.Namespace) -> Any:
@@ -271,7 +357,13 @@ def cmd_add_role(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_roles(store: Store, a: argparse.Namespace) -> Any:
-    return [asdict(r) for r in store.list_role_accounts(a.project)]
+    """子项目的角色 = 大项目的角色 + 自己的角色（同名以自己的为准），继承的带 inherited_from。"""
+    own = [asdict(r) for r in store.list_role_accounts(a.project)]
+    parent = store.parent_of(a.project)
+    names = {r["role_name"] for r in own}
+    inherited = [{**asdict(r), "inherited_from": parent.id} for r in store.list_role_accounts(parent.id)
+                 if r.role_name not in names] if parent else []
+    return sorted(own + inherited, key=lambda r: r["role_name"])
 
 
 def cmd_add_test_data(store: Store, a: argparse.Namespace) -> Any:
@@ -288,7 +380,7 @@ def cmd_list_test_data(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_register_script(store: Store, a: argparse.Namespace) -> Any:
-    p = _project(store, a.project)
+    p = _leaf(store, a.project)
     case = store.get_case(a.case)
     if case is None:
         raise KeyError(a.case)
@@ -309,7 +401,7 @@ def cmd_list_scripts(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
     """保存外部执行器（Playwright 等）的结果。results 文件为 RunResult 字段组成的 JSON 数组。"""
-    _project(store, a.project)
+    _leaf(store, a.project)
     items = json.loads(Path(a.results_file).read_text(encoding="utf-8"))
     run = Run(project_id=a.project, env=a.env, mode=a.mode, started_at=datetime.now(timezone.utc).isoformat())
     results = [RunResult(run_id=run.id, **{k: v for k, v in r.items() if k in RunResult.__dataclass_fields__ and k != "run_id"})
@@ -335,7 +427,7 @@ def cmd_list_run_results(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_propose_fix(store: Store, a: argparse.Namespace) -> Any:
-    p = _project(store, a.project)
+    p = _leaf(store, a.project)
     proposed = Path(a.content_file).read_text(encoding="utf-8")
     return asdict(heal.propose(store, p.workspace_path, a.case, a.script, proposed, reason=a.reason or "",
                                failure_type=a.failure_type, run_id=a.run or ""))
@@ -394,7 +486,7 @@ def cmd_set_setting(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_get_settings(store: Store, a: argparse.Namespace) -> Any:
-    return ops.get_settings(store, a.project)
+    return ops.settings_detail(store, a.project) if a.detail else ops.get_settings(store, a.project)
 
 
 def cmd_usage_report(store: Store, a: argparse.Namespace) -> Any:
@@ -427,7 +519,7 @@ def cmd_stability(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_export_workspace(store: Store, a: argparse.Namespace) -> Any:
-    p = _project(store, a.project)
+    p = _leaf(store, a.project)
     out = ops.export_workspace(store, a.project)
     out["version"] = workspace.commit(p.workspace_path, "导出项目元数据与用例（团队共享）") if a.commit else None
     return out
@@ -470,8 +562,11 @@ def build_parser() -> argparse.ArgumentParser:
     # 列表命令的分页参数：不传 --page-size 时返回完整列表
     paging = ((("--page",), {"type": positive, "default": 1}),
               (("--page-size",), {"type": positive, "help": "每页条数；指定后返回 {items, total, page, page_size}"}))
-    add("init-project", cmd_init_project, (("--name",), req), (("--workspace",), req), (("--environments",), {}))
+    add("init-project", cmd_init_project, (("--name",), req), (("--workspace",), {}), (("--environments",), {}),
+        (("--kind",), {"choices": ["project", "group"], "default": "project"}),
+        (("--parent",), {"help": "所属大项目 ID"}))
     add("list-projects", cmd_list_projects)
+    add("project-overview", cmd_project_overview, (("--project",), req))
     add("parse-requirement", cmd_parse_requirement, (("--project",), req), (("--file",), req))
     add("list-sections", cmd_list_sections, (("--project",), req), (("--query",), {}),
         (("--full",), {"action": "store_true"}))
@@ -487,7 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
         (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))
     # 过滤值可用逗号分隔多个（如 --execution-mode ui,capture）；--query 匹配标题、用例 ID 与模块路径
-    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}),
+    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}), (("--ids",), {"help": "逗号分隔的用例 ID"}),
         *[((f"--{k}",), {}) for k in ("type", "priority", "execution-mode", "status", "lint-status")], *paging)
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
     add("route", cmd_route, (("--project",), req), (("--overwrite",), {"action": "store_true"}))
@@ -505,6 +600,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("get-project", cmd_get_project, (("--project",), req))
     add("get-case", cmd_get_case, (("--case",), req))
     add("set-environment", cmd_set_environment, (("--project",), req), (("--env",), req), (("--json",), req))
+    add("delete-environment", cmd_delete_environment, (("--project",), req), (("--env",), req))
+    add("update-project", cmd_update_project, (("--project",), req), (("--name",), {}),
+        (("--parent",), {"help": "移入的大项目 ID；空字符串表示移出"}))
+    add("delete-project", cmd_delete_project, (("--project",), req))
     add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))
     add("list-roles", cmd_list_roles, (("--project",), req))
     add("add-test-data", cmd_add_test_data, (("--project",), req), (("--key",), req), (("--check-script",), {}),
@@ -529,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
     failure_types = {"choices": sorted(ops.FAILURE_TYPES), "required": True}
     add("set-setting", cmd_set_setting, (("--project",), req), (("--key",), {"choices": sorted(ops.SETTING_KEYS), "required": True}),
         (("--value",), req))
-    add("get-settings", cmd_get_settings, (("--project",), req))
+    add("get-settings", cmd_get_settings, (("--project",), req), (("--detail",), flag))
     add("usage-report", cmd_usage_report, (("--project",), req), (("--days",), {"type": int, "default": 30}))
     add("check-budget", cmd_check_budget, (("--project",), req))
     add("set-attribution", cmd_set_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types),

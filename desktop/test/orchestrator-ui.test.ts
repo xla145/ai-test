@@ -93,3 +93,36 @@ describe("UI regression orchestration", () => {
     expect(startThread).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/ws" }));
   });
 });
+
+describe("production guard and UI failure details", () => {
+  const prodProject = { ...project, environments: { ...project.environments, prod: { base_url: "https://prod", production: true } } };
+
+  it("refuses to run against a production environment without confirmation", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const prodEngine = vi.fn(async (args: string[]) => (args[0] === "list-projects" ? [prodProject] : (engine as any)(args))) as unknown as EngineCall;
+    const orch = new Orchestrator({ engine: prodEngine, ui, secretEnv, agent: vi.fn() });
+    await expect(orch.runRegression("p1", "prod")).rejects.toThrow("生产环境");
+    await expect(orch.runUiRegression("p1", "prod")).rejects.toThrow("生产环境");
+    expect(ui.runUiSuite).not.toHaveBeenCalled();
+    expect((prodEngine as any).mock.calls.some(([a]: [string[]]) => a[0] === "run-api-suite")).toBe(false);
+  });
+
+  it("returns failure details merged with agent conclusions", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const withResults = vi.fn(async (args: string[]) => {
+      if (args[0] === "list-run-results") return [
+        { case_id: "tc_a", status: "passed", failure_type: null, message: "" },
+        { case_id: "tc_b", status: "failed", failure_type: "unknown", message: "Timeout waiting for locator" },
+        { case_id: "tc_c", status: "error", failure_type: "environment", message: "ERR_CONNECTION_REFUSED" },
+      ];
+      return (engine as any)(args);
+    }) as unknown as EngineCall;
+    const orch = new Orchestrator({ engine: withResults, ui, secretEnv, agent: vi.fn() });
+    vi.spyOn(orch, "healUi").mockResolvedValue([{ case_id: "tc_b", failure_type: "script_error", reason: "testid 变更" }]);
+    const out = await orch.runUiRegression("p1", "test");
+    expect(out.failures).toEqual([
+      { case_id: "tc_b", status: "failed", message: "Timeout waiting for locator", failure_type: "script_error", reason: "testid 变更" },
+      { case_id: "tc_c", status: "error", message: "ERR_CONNECTION_REFUSED", failure_type: "environment" },
+    ]);
+  });
+});

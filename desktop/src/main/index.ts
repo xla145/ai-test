@@ -268,8 +268,19 @@ async function openTestPage(url: string): Promise<void> {
 
 function registerIpc(orch: Orchestrator): void {
   const handlers: Record<string, (...a: any[]) => unknown> = {
-    listProjects: () => orch.listProjects(),
-    createProject: (name: string, ws: string, envs) => orch.createProject(name, ws, envs),
+    listProjects: async () => rememberParents(await orch.listProjects()),
+    createProject: async (name: string, ws: string, envs, opts?: { kind?: "project" | "group"; parent?: string }) => {
+      const out = await orch.createProject(name, ws, envs, opts);
+      await refreshParents(orch);
+      return out;
+    },
+    moveProject: async (p: string, parent: string) => {
+      const out = await orch.moveProject(p, parent);
+      await refreshParents(orch);
+      return out;
+    },
+    projectOverview: (g: string) => orch.projectOverview(g),
+    getSettingsDetail: (p: string) => orch.getSettingsDetail(p),
     importExcel: (p: string, f: string) => orch.importExcel(p, f),
     lint: (p: string) => orch.lint(p),
     listCases: (p: string, filters) => orch.listCases(p, filters),
@@ -288,9 +299,9 @@ function registerIpc(orch: Orchestrator): void {
       await setApprovalContext(orch, p);
       return orch.generateCases(p, f);
     },
-    runRegression: async (p: string, env: string) => {
+    runRegression: async (p: string, env: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
-      return orch.runRegression(p, env);
+      return orch.runRegression(p, env, { confirmProduction: opts?.confirmProduction });
     },
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
@@ -301,13 +312,28 @@ function registerIpc(orch: Orchestrator): void {
     },
     listRoles: (p: string) => orch.listRoles(p),
     setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),
+    deleteEnvironment: async (p: string, env: string) => {
+      const out = await orch.deleteEnvironment(p, env);
+      secretStore.delete(SecretStore.ref(p, env));
+      return out;
+    },
+    renameProject: (p: string, name: string) => orch.renameProject(p, name),
+    deleteProject: async (p: string) => {
+      const out = await orch.deleteProject(p);
+      // 该项目的环境 token 与角色账号一并从钥匙串删除
+      secretStore.deletePrefix(`aitest:${p}:`);
+      await refreshParents(orch);
+      return out;
+    },
+    getCase: (c: string) => orch.getCase(c),
+    caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
     exploreUiCase: async (p: string, env: string, caseId: string) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId);
     },
-    runUiRegression: async (p: string, env: string, headed: boolean) => {
+    runUiRegression: async (p: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
-      return orch.runUiRegression(p, env, { headed });
+      return orch.runUiRegression(p, env, { headed, confirmProduction: opts?.confirmProduction });
     },
     listProposals: (status?: string) => orch.listProposals(status),
     // ---- 三期 ----
@@ -393,6 +419,19 @@ function globalSettingsView() {
   };
 }
 
+/** 子项目 → 大项目：凭据按「先子项目、后大项目」查找时使用；项目列表变化时刷新 */
+const projectParents = new Map<string, string>();
+
+function rememberParents<T extends { id: string; parent_id?: string }[]>(projects: T): T {
+  projectParents.clear();
+  for (const p of projects) if (p.parent_id) projectParents.set(p.id, p.parent_id);
+  return projects;
+}
+
+async function refreshParents(orch: Orchestrator): Promise<void> {
+  rememberParents(await orch.listProjects());
+}
+
 async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
   const p = await orch.project(projectId);
   const hosts = (prod: boolean) =>
@@ -404,17 +443,18 @@ async function setApprovalContext(orch: Orchestrator, projectId: string): Promis
 
 app.whenReady().then(async () => {
   secretStore = new SecretStore(join(paths.data(), "secrets.json"), safeStorage);
-  broker = await startSecretBroker(secretStore, { openView: openRoleView });
+  broker = await startSecretBroker(secretStore, { openView: openRoleView, parentOf: (id) => projectParents.get(id) });
   const orch = new Orchestrator({
     engine,
     agent: getCodex,
-    secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles),
+    secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles, projectParents.get(projectId)),
     ui: { runUiSuite, checkData, seedData },
     // 每次 agent 任务时读取，全局配置修改后立即生效
     get tokenLimit() {
       return taskTokenLimit().value;
     },
   });
+  await refreshParents(orch).catch(() => undefined);
   orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));
   registerIpc(orch);
   createWindow();
