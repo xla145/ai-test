@@ -1,5 +1,5 @@
-import { CheckOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
-import { Button, Card, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
+import { CheckOutlined, ClearOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
+import { App, Button, Card, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
@@ -14,6 +14,7 @@ export function CasesPage({ project }: { project: Project }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<TestCase>();
   const { busy, run } = useAction();
+  const { modal } = App.useApp();
   const q = useDebounced(query.trim());
   // 搜索与筛选在引擎端执行，按页读取
   const { items: rows, loading, reload, pagination } = usePaged<TestCase>(
@@ -31,16 +32,43 @@ export function CasesPage({ project }: { project: Project }) {
     await reload();
   }, `已更新 ${ids.length} 条用例`);
 
+  // 一键清空：危险操作，弹窗二次确认，确认按钮为红色
+  const clearAll = () => modal.confirm({
+    title: `清空「${project.name}」的用例库？`,
+    content: (
+      <>
+        <Typography.Paragraph>
+          将删除全部 <Typography.Text strong>{pagination.total ?? 0}</Typography.Text> 条用例，
+          以及它们的规范检查问题、脚本登记、UI 脚本修改建议与人工复核，<Typography.Text type="danger">不可恢复</Typography.Text>。
+        </Typography.Paragraph>
+        <Typography.Text type="secondary">执行记录（测试报告）与 workspace 中已生成的脚本文件会保留。</Typography.Text>
+      </>
+    ),
+    okText: "确认清空",
+    okButtonProps: { danger: true },
+    cancelText: "取消",
+    autoFocusButton: "cancel",
+    onOk: () => run(async () => {
+      await api().clearCases(project.id);
+      setSelected([]);
+      await reload();
+      notifyProjectChanged(project.id);
+    }, "用例库已清空"),
+  });
+
   const options = (map: Record<string, { text: string }>) => Object.entries(map).map(([value, v]) => ({ value, label: v.text }));
 
   return (
     <>
       <PageHeader title="用例库" description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。"
-        extra={<Button icon={<FileExcelOutlined />} loading={busy}
+        extra={<>
+          <Button icon={<FileExcelOutlined />} loading={busy}
           onClick={() => run(async () => {
             const out = await api().exportCasesExcel(project.id, project.name);
             if (out) await api().showInFolder(out.path).catch(() => undefined);
-          })}>导出 Excel</Button>} />
+          })}>导出 Excel</Button>
+          <Button danger icon={<ClearOutlined />} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
+        </>} />
       <Card size="small" style={{ marginBottom: 12 }}>
         <Flex gap={8} wrap align="center">
           <Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID" style={{ width: 260 }}

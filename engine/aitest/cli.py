@@ -380,6 +380,14 @@ def cmd_delete_project(store: Store, a: argparse.Namespace) -> Any:
     return {"id": p.id, "workspace_path": p.workspace_path, "deleted": store.delete_project(p.id)}
 
 
+def cmd_clear_cases(store: Store, a: argparse.Namespace) -> Any:
+    """一键清空用例库；执行记录与 workspace 文件保留。"""
+    p = _project(store, a.project)
+    if hierarchy.is_group(p):
+        raise ValueError("大项目不含用例，请在子项目中清空")
+    return {"id": p.id, "deleted": store.clear_cases(p.id)}
+
+
 def cmd_add_role(store: Store, a: argparse.Namespace) -> Any:
     _project(store, a.project)
     existing = {r.role_name: r for r in store.list_role_accounts(a.project)}
@@ -711,6 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
         (("--project-type",), {"choices": PROJECT_TYPES}),
         (("--parent",), {"help": "移入的大项目 ID；空字符串表示移出"}))
     add("delete-project", cmd_delete_project, (("--project",), req))
+    add("clear-cases", cmd_clear_cases, (("--project",), req))
     add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))
     add("list-roles", cmd_list_roles, (("--project",), req))
     add("add-test-data", cmd_add_test_data, (("--project",), req), (("--key",), req), (("--check-script",), {}),

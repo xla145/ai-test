@@ -384,6 +384,7 @@ function registerIpc(orch: Orchestrator): void {
     },
     renameProject: (p: string, name: string) => orch.renameProject(p, name),
     setProjectType: (p: string, type: Parameters<Orchestrator["setProjectType"]>[1]) => orch.setProjectType(p, type),
+    clearCases: (p: string) => orch.clearCases(p),
     deleteProject: async (p: string) => {
       const out = await orch.deleteProject(p);
       // 该项目的环境 token 与角色账号一并从钥匙串删除

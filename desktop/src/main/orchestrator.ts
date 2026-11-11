@@ -485,6 +485,11 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["update-project", "--project", projectId, "--project-type", projectType]);
   }
 
+  /** 一键清空用例库：执行记录与 workspace 文件保留 */
+  clearCases(projectId: string) {
+    return this.deps.engine(["clear-cases", "--project", projectId]);
+  }
+
   /** 从客户端移除项目：删除数据库记录，workspace 目录保留 */
   deleteProject(projectId: string) {
     return this.deps.engine(["delete-project", "--project", projectId]);

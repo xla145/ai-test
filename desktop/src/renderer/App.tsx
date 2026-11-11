@@ -53,7 +53,7 @@ import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
 import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 import { useUpdateState } from "./components/UpdateCard";
-import { useAction, useLoad } from "./hooks";
+import { useAction, useLoad, useProjectChanged } from "./hooks";
 import { lastNav, NAV_SECTIONS, navLabel, NavContext, rememberNav } from "./nav";
 import { ApiPage } from "./pages/ApiPage";
 import { AppPage } from "./pages/AppPage";
@@ -158,6 +158,8 @@ export function App() {
   const todos = useLoad(async () => current && !group ? { id: current.id, ...(await loadTodos(current)) } : undefined,
     [current?.id, current?.project_type, nav]);
   const currentTodos = todos.data?.id === current?.id ? todos.data : undefined;
+  // 页面上的审核、清空、执行等操作后，侧栏角标立即刷新
+  useProjectChanged(current?.id ?? "", () => void todos.reload());
 
   const go = useCallback((key: string) => {
     if (!current) return;

@@ -23,7 +23,7 @@ const methods = [
   "runAppRegression", "exploreAppCase",
   "getUpdateState", "checkForUpdates", "installUpdate",
   "moveProject", "projectOverview", "getSettingsDetail",
-  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
+  "deleteEnvironment", "renameProject", "deleteProject", "clearCases", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
   "saveDatabase", "removeDatabase", "testDatabase", "queryDatabase", "hasDbPassword",
   "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
