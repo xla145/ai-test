@@ -1,9 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { SecretResolver } from "../secrets.js";
 import { BrowserSession } from "./browser.js";
-import { ensureUiScaffold, generateSpec, specPath } from "./codegen.js";
+import { writeUiScript, type UiStep } from "./codegen.js";
 import { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecord } from "./envSupport.js";
 import type { VisionAgentFactory } from "./midscene.js";
 import { runUiSuite } from "./runner.js";
@@ -47,6 +47,8 @@ interface ActiveProject {
 }
 
 const states = new WeakMap<UiToolContext, ActiveProject>();
+/** 本会话最近一次保存的用例与步骤，供 save_ui_script(append) 追加断言 */
+const savedSteps = new WeakMap<UiToolContext, { caseId: string; steps: UiStep[] }>();
 
 function active(ctx: UiToolContext): ActiveProject {
   const a = states.get(ctx);
@@ -61,6 +63,16 @@ async function loadProject(ctx: UiToolContext, projectId: string, env: string): 
   return { project, envCfg };
 }
 
+/**
+ * 把用例里描述的身份对应到已配置的角色：完全一致优先；否则取名称互相包含的角色
+ * （如「运营管理员」→「管理员」），有多个时取最长的那个；都不匹配时原样返回。
+ */
+export function resolveRole(requested: string, configured: string[]): string {
+  if (configured.includes(requested)) return requested;
+  const close = configured.filter((c) => c && (requested.includes(c) || c.includes(requested)));
+  return close.sort((a, b) => b.length - a.length)[0] ?? requested;
+}
+
 function rolesFromEnv(env: Record<string, string>): { role: string; username: string; password: string }[] {
   return env.AITEST_ROLES ? JSON.parse(env.AITEST_ROLES) : [];
 }
@@ -68,6 +80,12 @@ function rolesFromEnv(env: Record<string, string>): { role: string; username: st
 const ref = z.string().describe("snapshot 返回的元素 ref，如 e12");
 
 function browserTools(ctx: UiToolContext): UiTool[] {
+  const tools = allBrowserTools(ctx);
+  // 未启用 Midscene 时不提供视觉工具，免得 agent 反复尝试
+  return ctx.vision ? tools : tools.filter((t) => !t.name.startsWith("ai_"));
+}
+
+function allBrowserTools(ctx: UiToolContext): UiTool[] {
   const s = ctx.session;
   return [
     {
@@ -81,7 +99,7 @@ function browserTools(ctx: UiToolContext): UiTool[] {
           baseUrl: envCfg.base_url,
           testIdAttribute: envCfg.testid_attribute,
           cdpEndpoint: ctx.cdpEndpoint,
-          openView: ctx.secrets.openView ? (role) => ctx.secrets.openView!(project_id, role) : undefined,
+          openView: ctx.secrets.openView ? (role) => ctx.secrets.openView!(project_id, role, env) : undefined,
         });
         s.resetRecording();
         return { project: project.name, env, base_url: envCfg.base_url, mode: ctx.cdpEndpoint ? "内嵌浏览器" : "独立 Chromium" };
@@ -89,20 +107,34 @@ function browserTools(ctx: UiToolContext): UiTool[] {
     },
     {
       name: "new_role_context",
-      description: "以某个角色打开独立会话（只传角色名，账号由客户端注入；登录态保存为 storageState 复用）。不传角色为匿名会话",
+      description: "以某个角色打开独立会话（只传角色名，账号由客户端注入；登录态保存为 storageState 复用）。不传角色为匿名会话。"
+        + "角色名与已配置的角色名相近时（如「运营管理员」与「管理员」）自动使用已配置的角色，返回值中的 role 为实际使用的角色",
       input: { role: z.string().optional() },
       handler: async ({ role }) => {
         const { project, env } = active(ctx);
-        const name = role || "default";
-        if (name === "default") return s.newRoleContext(name);
+        if (!role || role === "default") return s.newRoleContext("default");
+        const roles = (await ctx.engine<{ role_name: string }[]>(["list-roles", "--project", project.id])).map((r) => r.role_name);
+        const name = resolveRole(role, roles);
+        const mapped = name !== role ? { requestedRole: role, note: `用例中的「${role}」按已配置的角色「${name}」登录` } : {};
         const envCfg = project.environments[env];
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: [name] });
         const cred = rolesFromEnv(secretEnv).find((r) => r.role === name);
-        return s.newRoleContext(name, {
+        const out = await s.newRoleContext(name, {
           storageStatePath: join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`),
           login: envCfg.login as any,
           credentials: cred ? { username: cred.username, password: cred.password } : undefined,
         });
+        if (out.loggedIn || out.reusedState) return { ...out, ...mapped };
+        // 用户在「角色与登录」里手动登录过：内嵌浏览器沿用该角色的登录态（验证码、扫码等无法自动登录的场景）
+        if (existsSync(join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`))) {
+          return { ...out, ...mapped, manualSession: true, note: [mapped.note, "使用在「角色与登录」中手动登录保存的登录态"].filter(Boolean).join("；") };
+        }
+        // 说明为什么没有登录，让 agent 停下来请用户配置，而不是去代码库里找账号
+        const missing = [
+          ...(envCfg.login ? [] : [`环境「${env}」没有配置登录方式`]),
+          ...(cred ? [] : [`角色「${name}」没有配置账号${roles.length ? `（已配置的角色：${roles.join("、")}）` : "（项目还没有配置任何角色）"}`]),
+        ];
+        return { ...out, ...mapped, hint: `未登录：${missing.join("；")}。请在「UI 测试 → 角色与登录」中配置登录方式与账号，或为该角色「手动登录」一次后重试；需要登录的用例不要继续探索。` };
       },
     },
     {
@@ -132,11 +164,11 @@ function browserTools(ctx: UiToolContext): UiTool[] {
     { name: "press", description: "按键，如 Enter", input: { key: z.string() }, handler: ({ key }) => s.press(key) },
     {
       name: "screenshot",
-      description: "截图保存到 workspace/evidence",
-      input: { name: z.string().optional() },
-      handler: async ({ name }) => {
+      description: "截图保存到 workspace/evidence。默认只截当前可见区域（图小、读得快）；确实需要整页时传 full_page=true（内嵌浏览器中始终是可见区域，需要时先滚动）。找元素优先用 snapshot",
+      input: { name: z.string().optional(), full_page: z.boolean().optional() },
+      handler: async ({ name, full_page }) => {
         const { project } = active(ctx);
-        return { path: await s.screenshot(join(project.workspace_path, "evidence", "explore", `${name ?? Date.now()}.png`)) };
+        return { path: await s.screenshot(join(project.workspace_path, "evidence", "explore", `${name ?? Date.now()}.png`), full_page ?? false) };
       },
     },
     {
@@ -146,6 +178,13 @@ function browserTools(ctx: UiToolContext): UiTool[] {
       handler: ({ ref, visible }) => s.expectVisible(ref, visible ?? true),
     },
     { name: "expect_text", description: "断言元素包含文本", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectText(ref, text) },
+    { name: "expect_no_text", description: "断言元素不包含文本（如筛选后列表中不再出现某类记录）", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectNoText(ref, text) },
+    {
+      name: "expect_value",
+      description: "断言输入框 / 下拉框的当前值（下拉框比较 option 的 value；清空的输入框为空字符串）",
+      input: { ref, value: z.string() },
+      handler: ({ ref, value }) => s.expectValue(ref, value),
+    },
     { name: "expect_url", description: "断言当前 URL 包含片段", input: { pattern: z.string() }, handler: ({ pattern }) => s.expectUrl(pattern) },
     {
       name: "start_capture",
@@ -199,24 +238,32 @@ function browserTools(ctx: UiToolContext): UiTool[] {
       input: { description: z.string() },
       handler: ({ description }) => s.visualCheck(description, join(active(ctx).project.workspace_path, "evidence", "explore")),
     },
+    {
+      name: "case_step",
+      description: "声明接下来录制的操作与断言对应用例的第几步（从 1 开始）。每开始一个用例步骤前调用，界面据此把脚本步骤与用例步骤对照显示",
+      input: { index: z.number().int().min(1) },
+      handler: async ({ index }) => { s.currentCaseStep = index; return { case_step: index }; },
+    },
     { name: "recording", description: "查看已录制的步骤", input: {}, handler: async () => s.recording() },
     { name: "undo", description: "撤销最后 n 步录制", input: { n: z.number().int().min(1).optional() }, handler: async ({ n }) => s.undo(n) },
     {
       name: "save_ui_script",
-      description: "把录制的步骤生成为该用例的 Playwright 脚本（一个用例一个 spec），在 workspace git 中提交并清空录制",
-      input: { case_id: z.string() },
-      handler: async ({ case_id }) => {
+      description: "把录制的步骤生成为该用例的 Playwright 脚本（一个用例一个 spec）并清空录制。脚本只能由本工具生成，不要手工编辑 spec；"
+        + "保存后发现缺断言：继续录制，再以 append=true 保存，追加到该用例刚保存的脚本之后",
+      input: { case_id: z.string(), append: z.boolean().optional().describe("追加到本会话中该用例上次保存的步骤之后") },
+      handler: async ({ case_id, append }) => {
         const { project } = active(ctx);
-        const steps = s.recording();
+        const previous = savedSteps.get(ctx);
+        if (append && previous?.caseId !== case_id) throw new Error("本会话中还没有保存过该用例，不能追加");
+        const steps = append ? [...previous!.steps, ...s.recording()] : s.recording();
         if (!steps.length) throw new Error("没有录制的步骤");
         if (!steps.some((st) => st.action.startsWith("expect") || st.action === "visualCheck")) {
           throw new Error("脚本没有任何断言：每个预期结果都要落成 expect_* 断言");
         }
         const c = await ctx.engine<{ id: string; title: string; steps: string[]; expected: string[] }>(["get-case", "--case", case_id]);
-        ensureUiScaffold(project.workspace_path);
-        const { abs, rel } = specPath(project.workspace_path, case_id);
-        writeFileSync(abs, generateSpec({ caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected }));
+        const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected });
         const script = await ctx.engine(["register-script", "--project", project.id, "--case", case_id, "--path", rel]);
+        savedSteps.set(ctx, { caseId: case_id, steps });
         s.resetRecording();
         return { path: rel, script };
       },
@@ -276,7 +323,7 @@ function browserTools(ctx: UiToolContext): UiTool[] {
         const shot = await s.screenshot(join(project.workspace_path, "evidence", "explore", `ai-assert-${Date.now()}.png`));
         const review = await ctx.engine(["add-review", "--case", case_id, "--kind", "ai_assert", "--description", assertion,
           "--evidence", JSON.stringify([shot]), "--ai-verdict", verdict]);
-        return { ai_verdict: verdict, detail, review, note: "AI 判定已进入人工复核队列" };
+        return { ai_verdict: verdict, detail, review, report: agent.reportFile, note: "AI 判定已进入人工复核队列" };
       },
     },
     {

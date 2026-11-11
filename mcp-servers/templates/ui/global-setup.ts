@@ -10,6 +10,7 @@ interface RoleCred { role: string; username: string; password: string }
 interface LoginRecipe { url: string; username: string; password: string; submit: string; success?: string }
 
 export default async function globalSetup(config: FullConfig) {
+  if (process.env.AITEST_EMBEDDED) return;
   const roles: RoleCred[] = JSON.parse(process.env.AITEST_ROLES || "[]");
   const recipe: LoginRecipe | undefined = process.env.AITEST_LOGIN ? JSON.parse(process.env.AITEST_LOGIN) : undefined;
   if (!roles.length || !recipe) return;

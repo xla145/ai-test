@@ -73,7 +73,7 @@ describe("database verification in UI tests", () => {
     await expect(call("expect_db", { sql: "DELETE FROM tags" })).rejects.toThrow("只读");
     const saved = await call("save_ui_script", { case_id: caseId });
     const spec = readFileSync(join(dir, "ws", saved.path), "utf8");
-    const call_ = spec.match(/await expectDb\((\{.*\})\);/)!;
+    const call_ = spec.match(/await expectDb\((\{.*?\})\); \}\);/)!;
     expect(JSON.parse(call_[1])).toEqual({ description: "标签在数据库中已停用", sql: "SELECT status FROM tags WHERE code = :c",
       params: { c: "TAG-1001" }, expect: { value: "disabled" } });
     expect(spec).toContain("// 标签在数据库中已停用");

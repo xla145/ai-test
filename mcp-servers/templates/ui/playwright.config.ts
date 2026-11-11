@@ -12,6 +12,7 @@ export default defineConfig({
   globalSetup: "./global-setup.ts",
   outputDir: process.env.AITEST_OUTPUT_DIR || "test-results",
   reporter: [
+    ["./aitest-reporter.ts"],
     ["json", { outputFile: process.env.AITEST_REPORT_JSON || "test-results/report.json" }],
     ["html", { open: "never", outputFolder: process.env.AITEST_HTML_REPORT || "playwright-report" }],
   ],

@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { DEFAULT_ROLE, type DbCheck, type Step } from "./codegen.js";
+import { chooseBrowser } from "./chromium.js";
+import { DEFAULT_ROLE, type DbCheck, type Step, type UiStep } from "./codegen.js";
 import { candidates, COLLECT_SCRIPT, pickUnique, toLocator, type ElementInfo, type LocatorSpec } from "./locator.js";
 
 /**
@@ -59,14 +60,30 @@ interface CapturedRequest {
   body: unknown;
 }
 
+/** 探索时单个操作的超时 */
+export const EXPLORE_ACTION_TIMEOUT_MS = 10_000;
+
+export interface StepRunOptions {
+  /** 断言与操作的超时（毫秒） */
+  timeoutMs?: number;
+  /** fill 步骤中 secretEnv 对应的值 */
+  secrets?: Record<string, string>;
+  /** 数据库断言由调用方执行（引擎 db-check），失败时抛错 */
+  dbCheck?: (check: DbCheck) => Promise<void>;
+  /** 视觉判定截图目录 */
+  evidenceDir?: string;
+}
+
 export class BrowserSession {
   private browser?: Browser;
   private readonly pages = new Map<string, Page>();
   private readonly contexts = new Map<string, BrowserContext>();
   private refs = new Map<string, RefEntry>();
   private refSeq = 0;
-  private steps: Step[] = [];
-  private captures = new Map<string, { role: string; pattern: string; list: CapturedRequest[] }>();
+  private steps: UiStep[] = [];
+  /** 之后录制的步骤对应用例第几步（从 1 开始），用于界面对照 */
+  currentCaseStep?: number;
+  private captures = new Map<string, { role: string; pattern: string; list: CapturedRequest[]; off?: () => void }>();
   currentRole = DEFAULT_ROLE;
 
   constructor(private opts: BrowserSessionOptions = {}) {
@@ -98,7 +115,8 @@ export class BrowserSession {
     if (this.browser?.isConnected()) return this.browser;
     this.browser = this.opts.cdpEndpoint
       ? await chromium.connectOverCDP(this.opts.cdpEndpoint)
-      : await chromium.launch({ headless: this.opts.headless ?? true, executablePath: this.opts.executablePath });
+      : await chromium.launch({ headless: this.opts.headless ?? true,
+        executablePath: this.opts.executablePath ?? chooseBrowser({ headless: this.opts.headless ?? true }).executablePath });
     return this.browser;
   }
 
@@ -135,6 +153,9 @@ export class BrowserSession {
         this.contexts.set(role, context);
         page = await context.newPage();
       }
+      // 探索时点不到就尽快失败（Playwright 默认 30 秒），页面跳转仍给 30 秒
+      page.setDefaultTimeout(EXPLORE_ACTION_TIMEOUT_MS);
+      page.setDefaultNavigationTimeout(30_000);
       this.pages.set(role, page);
     }
     this.currentRole = role;
@@ -156,7 +177,7 @@ export class BrowserSession {
   }
 
   private record(step: Step): void {
-    this.steps.push({ ...step, role: step.role ?? this.currentRole });
+    this.steps.push({ ...step, role: step.role ?? this.currentRole, ...(this.currentCaseStep ? { caseStep: this.currentCaseStep } : {}), source: "ai" });
   }
 
   private absolute(url: string): string {
@@ -283,6 +304,30 @@ export class BrowserSession {
     return { locator: spec, actual };
   }
 
+  async expectNoText(ref: string, text: string, timeoutMs = 5000) {
+    const { page, spec, role } = await this.target(ref);
+    const loc = toLocator(page, spec);
+    let actual = "";
+    const ok = await poll(async () => {
+      actual = (await loc.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
+      return !actual.includes(text);
+    }, timeoutMs);
+    if (!ok) throw new Error(`断言不成立：元素文本「${actual.slice(0, 200)}」中包含「${text}」`);
+    this.record({ action: "expectNoText", target: spec, text, role });
+    return { locator: spec };
+  }
+
+  /** 输入框 / 下拉框的当前值（下拉框为 option 的 value，如「全部」常为空字符串） */
+  async expectValue(ref: string, value: string, timeoutMs = 5000) {
+    const { page, spec, role } = await this.target(ref);
+    const loc = toLocator(page, spec);
+    let actual = "";
+    const ok = await poll(async () => (actual = await loc.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === value, timeoutMs);
+    if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${value}」`);
+    this.record({ action: "expectValue", target: spec, value, role });
+    return { locator: spec };
+  }
+
   async expectUrl(pattern: string, timeoutMs = 5000) {
     const page = await this.page();
     if (!(await poll(async () => page.url().includes(pattern), timeoutMs))) {
@@ -349,23 +394,154 @@ export class BrowserSession {
   async screenshot(path: string, fullPage = true): Promise<string> {
     const page = await this.page();
     mkdirSync(dirname(path), { recursive: true });
-    await page.screenshot({ path, fullPage });
+    if (this.opts.cdpEndpoint) {
+      // 内嵌浏览器按桌面宽度渲染后缩小显示，Playwright 的截图尺寸不考虑这层缩放（画面只占图的一部分）。
+      // 直接截视图实际显示的画面：与用户看到的一致，图也更小；只能是当前可见区域
+      await writeViewportCapture(page, path);
+      return path;
+    }
+    // 按 CSS 像素截图：Retina 屏上不放大一倍，图更小，模型读得更快
+    await page.screenshot({ path, fullPage, scale: "css" });
     return path;
   }
 
-  recording(): Step[] {
+  recording(): UiStep[] {
     return [...this.steps];
   }
 
   /** 丢弃最后 n 步录制（例如探索中走错的步骤） */
-  undo(n = 1): Step[] {
+  undo(n = 1): UiStep[] {
     this.steps.splice(Math.max(0, this.steps.length - n), n);
     return this.recording();
   }
 
   resetRecording(): void {
     this.steps = [];
+    this.currentCaseStep = undefined;
+    this.resetCaptures();
+  }
+
+  /** 移除抓包监听（调试重新开始时调用，避免旧监听继续累积） */
+  resetCaptures(): void {
+    for (const c of this.captures.values()) c.off?.();
     this.captures.clear();
+  }
+
+  /**
+   * 回放一个已录制的步骤（单步调试用）：直接按定位器执行，不写入录制。
+   * 断言失败时抛错，错误信息用于界面展示；visualCheck 只截图，不判定。
+   */
+  async runStep(step: Step, opts: StepRunOptions = {}): Promise<{ note?: string; evidence?: string }> {
+    const timeout = opts.timeoutMs ?? 5000;
+    const role = step.role ?? DEFAULT_ROLE;
+    const page = await this.page(role);
+    this.currentRole = role;
+    const loc = "target" in step ? toLocator(page, step.target) : undefined;
+    switch (step.action) {
+      case "goto":
+        await page.goto(this.absolute(step.url), { timeout: Math.max(timeout, 30_000) });
+        return {};
+      case "click":
+        await loc!.click({ timeout });
+        return {};
+      case "fill": {
+        const value = step.secretEnv ? opts.secrets?.[step.secretEnv] : step.value;
+        if (step.secretEnv && value === undefined) throw new Error(`缺少敏感值 ${step.secretEnv}，请在「角色与登录」中配置`);
+        await loc!.fill(value ?? "", { timeout });
+        return {};
+      }
+      case "select":
+        await loc!.selectOption(step.value, { timeout });
+        return {};
+      case "check":
+        await loc!.setChecked(step.checked, { timeout });
+        return {};
+      case "press":
+        await page.keyboard.press(step.key);
+        return {};
+      case "expectVisible":
+        await loc!.waitFor({ state: "visible", timeout }).catch(() => { throw new Error("断言不成立：元素在超时内没有出现"); });
+        return {};
+      case "expectHidden":
+        await loc!.waitFor({ state: "hidden", timeout }).catch(() => { throw new Error("断言不成立：元素在超时内仍然可见"); });
+        return {};
+      case "expectText": {
+        let actual = "";
+        const ok = await poll(async () => {
+          actual = (await loc!.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
+          return actual.includes(step.text);
+        }, timeout);
+        if (!ok) throw new Error(`断言不成立：元素文本为「${actual.slice(0, 200)}」，不包含「${step.text}」`);
+        return {};
+      }
+      case "expectNoText": {
+        let actual = "";
+        const ok = await poll(async () => {
+          actual = (await loc!.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
+          return !actual.includes(step.text);
+        }, timeout);
+        if (!ok) throw new Error(`断言不成立：元素文本「${actual.slice(0, 200)}」中包含「${step.text}」`);
+        return {};
+      }
+      case "expectValue": {
+        let actual = "";
+        const ok = await poll(async () => (actual = await loc!.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === step.value, timeout);
+        if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${step.value}」`);
+        return {};
+      }
+      case "expectUrl": {
+        const base = this.opts.baseUrl?.replace(/\/$/, "");
+        const pattern = base && step.pattern.startsWith(base) ? step.pattern.slice(base.length) || "/" : step.pattern;
+        if (!(await poll(async () => page.url().includes(pattern), timeout))) throw new Error(`断言不成立：当前 URL 为 ${page.url()}`);
+        return {};
+      }
+      case "startCapture": {
+        this.captures.get(step.name)?.off?.();
+        const list: CapturedRequest[] = [];
+        const listener = (r: import("playwright-core").Request) => {
+          if (r.url().includes(step.urlPattern)) list.push({ url: r.url(), method: r.method(), body: parseBody(r.postData()) });
+        };
+        page.on("request", listener);
+        this.captures.set(step.name, { role, pattern: step.urlPattern, list, off: () => page.off("request", listener) });
+        return {};
+      }
+      case "expectRequest": {
+        const c = this.captures.get(step.name);
+        if (!c) throw new Error(`未开始抓包：${step.name}（请从开始抓包的步骤起执行）`);
+        let matched: Record<string, unknown>[] = [];
+        await poll(async () => (matched = matchEvents(c.list, step.fields)).length > 0, timeout);
+        if (!matched.length) throw new Error(`断言不成立：未捕获到匹配 ${JSON.stringify(step.fields)} 的上报（共 ${c.list.length} 条）`);
+        const leaked = (step.forbidden ?? []).filter((k) => matched.some((e) => hasKey(e, k)));
+        if (leaked.length) throw new Error(`上报中带出了敏感字段：${leaked.join(", ")}`);
+        return {};
+      }
+      case "installClock":
+        await page.clock.install({ time: new Date(step.time) });
+        return {};
+      case "fastForward":
+        await page.clock.fastForward(step.ms);
+        return {};
+      case "expectDb":
+        if (!opts.dbCheck) return { note: "调试模式未连接数据库，已跳过" };
+        await opts.dbCheck(step.check);
+        return {};
+      case "visualCheck": {
+        if (!opts.evidenceDir) return { note: "视觉判定需人工确认" };
+        const evidence = await this.screenshot(join(opts.evidenceDir, `visual-${Date.now()}.png`));
+        return { note: "已截图，视觉判定需人工确认", evidence };
+      }
+    }
+  }
+}
+
+/** 用 CDP 截取页面当前显示的画面（不裁剪，缩放下也准确） */
+export async function writeViewportCapture(page: Page, path: string): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(path, Buffer.from(data, "base64"));
+  } finally {
+    await cdp.detach().catch(() => undefined);
   }
 }
 

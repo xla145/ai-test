@@ -1,18 +1,20 @@
 // 由 AIProbe 生成：脚本共用的辅助函数。
 import { expect, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 /** 角色登录态（global-setup 生成） */
 export function storageStateFor(role: string): string | undefined {
+  if (process.env.AITEST_EMBEDDED) return `aitest-role:${role}`;
   const file = join(__dirname, ".auth", `${role}.json`);
   return existsSync(file) ? file : undefined;
 }
 
 /** 多角色：每个角色一个独立上下文 */
 export async function openAs(browser: Browser, role: string): Promise<Page> {
+  if (process.env.AITEST_EMBEDDED) return (await import("./aitest-embedded")).embeddedPage(browser, role);
   const context = await browser.newContext({ baseURL: process.env.AITEST_BASE_URL, storageState: storageStateFor(role) });
   return context.newPage();
 }
@@ -98,7 +100,16 @@ export async function expectDb(check: { db?: string; sql: string; params?: Recor
 
 /** 视觉判定：保存截图并标记为 AI 判定，由客户端送入人工复核队列，不直接算通过 */
 export async function visualCheck(page: Page, testInfo: TestInfo, description: string) {
-  const body = await page.screenshot({ fullPage: true });
-  await testInfo.attach("ai-visual-check", { body, contentType: "image/png" });
+  // 以文件形式附加：JSON 报告里才有路径，复核队列才能显示截图
+  const path = testInfo.outputPath(`visual-check-${testInfo.annotations.filter((a) => a.type === "ai-visual-check").length + 1}.png`);
+  if (process.env.AITEST_EMBEDDED) {
+    // 内嵌浏览器有缩放（按桌面宽度渲染后缩小显示），Playwright 截图会错位：直接截视图显示的画面
+    const cdp = await page.context().newCDPSession(page);
+    try { writeFileSync(path, Buffer.from((await cdp.send("Page.captureScreenshot", { format: "png" })).data, "base64")); }
+    finally { await cdp.detach().catch(() => undefined); }
+  } else {
+    await page.screenshot({ path, fullPage: true });
+  }
+  await testInfo.attach("ai-visual-check", { path, contentType: "image/png" });
   testInfo.annotations.push({ type: "ai-visual-check", description });
 }

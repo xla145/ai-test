@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { generateSpec } from "../src/ui/codegen.js";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
 import { checkData, seedData, setServerClock } from "../src/ui/envSupport.js";
 import { candidates, toCode } from "../src/ui/locator.js";
+import { chooseBrowser } from "../src/ui/chromium.js";
+import { resolveRole, UI_SERVERS } from "../src/ui/tools.js";
 import { caseIdFromTitle, classifyUiFailure, parseReport, reportErrors } from "../src/ui/runner.js";
 
 describe("locator priority", () => {
@@ -31,11 +36,14 @@ describe("codegen", () => {
     expect(spec).toContain("// 用例 ID：tc_1");
     expect(spec).toContain('test.use({ storageState: storageStateFor("admin") });');
     expect(spec).toContain('await page.goto("/tags?x=1");');
-    expect(spec).toContain('const clicks = captureRequests(page, "/track");');
+    expect(spec).toContain('const clicks = await test.step("[S3] 开始捕获请求 /track", async () => captureRequests(page, "/track"));');
+    expect(spec).toContain('await test.step("[S4] 点击 testid「disable-TAG-1001」", async () => { await page.getByTestId("disable-TAG-1001").click(); });');
+    expect(spec).toContain('在 标签「密码」 输入 （敏感值）');
     expect(spec).toContain('await expectCaptured(clicks, {"event":"click"}, ["phone"]);');
     expect(spec).toContain('await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });');
     expect(spec).toContain('import { captureRequests, expectCaptured, storageStateFor, visualCheck } from "./aitest-fixtures";');
     expect(spec).toContain('process.env["AITEST_SECRET_PW"]');
+    expect(spec).toContain('await expect(page.getByTestId("status-TAG-1001")).toContainText("已停用", { useInnerText: true });');
     expect(spec).not.toMatch(/xpath/i);
   });
 
@@ -53,6 +61,83 @@ describe("codegen", () => {
     expect(spec).toContain('const rolePage2 = await openAs(browser, "viewer");');
     expect(spec).toContain("async ({ page, browser }, testInfo)");
     expect(spec).toContain('await expect(rolePage2.getByTestId("menu-tags")).toBeHidden();');
+  });
+});
+
+describe("structured steps", () => {
+  it("generates value and negative-text assertions", () => {
+    const spec = generateSpec({ caseId: "tc_v", title: "取值", steps: [
+      { action: "expectValue", target: { kind: "testid", value: "filter-keyword" }, value: "" },
+      { action: "expectNoText", target: { kind: "testid", value: "rows" }, text: "Android" },
+    ] });
+    expect(spec).toContain('await test.step("[S1] 断言 testid「filter-keyword」 为空", async () => { await expect(page.getByTestId("filter-keyword")).toHaveValue(""); });');
+    expect(spec).toContain('await expect(page.getByTestId("rows")).not.toContainText("Android", { useInnerText: true });');
+  });
+
+  it("keeps existing ids, fills gaps without collisions and parses ids back from step titles", () => {
+    const ids = withStepIds([{ action: "press", key: "Enter" }, { id: "S1", action: "press", key: "Tab" }, { action: "press", key: "Escape" }]).map((s) => s.id);
+    expect(ids).toEqual(["S2", "S1", "S3"]);
+    expect(stepIdFromTitle("[S12] 点击 按钮")).toBe("S12");
+    expect(stepIdFromTitle("locator.click")).toBeUndefined();
+  });
+
+  it("writes the spec and a steps file whose hash matches the generated spec", () => {
+    const ws = mkdtempSync(join(tmpdir(), "aitest-steps-"));
+    try {
+      const out = writeUiScript(ws, { caseId: "tc_s", title: "步骤", steps: [
+        { action: "goto", url: "/a", caseStep: 1 },
+        { action: "expectUrl", pattern: "/a", caseStep: 1, source: "ai" },
+      ] });
+      expect(out).toEqual({ path: "scripts/ui/tc_s.spec.ts", stepsPath: "scripts/ui/tc_s.steps.json" });
+      const code = readFileSync(join(ws, out.path), "utf8");
+      const meta = JSON.parse(readFileSync(join(ws, out.stepsPath), "utf8"));
+      expect(meta).toMatchObject({ version: 1, caseId: "tc_s", specHash: sha256(code), steps: [{ id: "S1", caseStep: 1 }, { id: "S2", caseStep: 1 }] });
+      expect(code).toContain('await test.step("[S2] 断言 URL 包含 /a"');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("browser tools", () => {
+  const names = (vision: boolean) => UI_SERVERS.find((x) => x.name === "browser")!
+    .tools({ session: {}, vision: vision ? (() => ({})) : undefined } as never).map((t) => t.name);
+  it("offers vision tools only when a vision model is configured", () => {
+    expect(names(false)).not.toContain("ai_locate");
+    expect(names(false)).toContain("snapshot");
+    expect(names(true)).toEqual(expect.arrayContaining(["ai_locate", "ai_assert", "ai_act"]));
+  });
+});
+
+describe("role resolution", () => {
+  it("maps the case's wording to the closest configured role", () => {
+    expect(resolveRole("管理员", ["管理员", "运营"])).toBe("管理员");
+    expect(resolveRole("运营管理员", ["管理员"])).toBe("管理员");
+    expect(resolveRole("运营管理员", ["管理员", "运营管理"])).toBe("运营管理");
+    expect(resolveRole("运营", ["运营管理员"])).toBe("运营管理员");
+    expect(resolveRole("访客", ["管理员"])).toBe("访客");
+  });
+});
+
+describe("browser choice", () => {
+  const full = "/cache/ms-playwright/chromium-1243/chrome-mac-arm64/Chrome for Testing.app/Contents/MacOS/Chrome for Testing";
+  const shell = "/cache/ms-playwright/chromium_headless_shell-1243";
+  const sysChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const pick = (have: string[], opts: { headless?: boolean; env?: Record<string, string> } = {}) =>
+    chooseBrowser({ platform: "darwin", env: { HOME: "/Users/u", ...opts.env }, headless: opts.headless, bundled: () => full, exists: (p) => have.includes(p) });
+  it("prefers configured, then bundled, then bundled full chromium, then system Chrome", () => {
+    expect(pick([full, shell, sysChrome], { env: { AITEST_CHROMIUM_PATH: "/x/chrome" } })).toEqual({ executablePath: "/x/chrome", source: "configured" });
+    expect(pick([full, shell, sysChrome])).toEqual({ source: "bundled" });
+    expect(pick([full, sysChrome])).toEqual({ executablePath: full, source: "bundled-full" });
+    expect(pick([shell, sysChrome], { headless: false })).toEqual({ executablePath: sysChrome, source: "system" });
+    expect(pick([sysChrome])).toEqual({ executablePath: sysChrome, source: "system" });
+    expect(pick(["/Users/u/Applications/Chromium.app/Contents/MacOS/Chromium"]).source).toBe("system");
+    expect(pick([])).toEqual({ source: "missing" });
+  });
+  it("knows where Windows and Linux install Chrome or Edge", () => {
+    const win = chooseBrowser({ platform: "win32", env: { PROGRAMFILES: "C:\\PF" }, bundled: () => "", exists: (p) => p.endsWith("msedge.exe") });
+    expect(win.source).toBe("system");
+    expect(chooseBrowser({ platform: "linux", env: {}, bundled: () => "", exists: (p) => p === "/usr/bin/chromium" }).executablePath).toBe("/usr/bin/chromium");
   });
 });
 
