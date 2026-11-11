@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { codexProvider, midsceneEnv } from "../src/main/models.js";
+import { codexProvider, midsceneEnv, visionFamilyOf } from "../src/main/models.js";
 import { activeModels, DEFAULT_SETTINGS, migrate, modelKeyRef, usageOf, validateGlobal, type GlobalSettings } from "../src/main/settings.js";
 
 const base = (): GlobalSettings => ({
@@ -58,4 +58,29 @@ describe("global settings", () => {
     expect(validateGlobal({ ...base(), models: [{ id: "p", name: "p", preset: "private", baseUrl: "gpu:8000", model: "m" }], agentModelId: "p", visionModelId: undefined }))
       .toEqual(["p：服务地址应以 http(s):// 开头"]);
   });
+});
+
+it("preserves the explicit Midscene model family and isolates its credentials", () => {
+  const s = base();
+  s.models[1].model = "ep-private";
+  s.models[1].visionFamily = "doubao-seed";
+  const env = midsceneEnv(activeModels(s), "vision-secret");
+  expect(env.MIDSCENE_MODEL_FAMILY).toBe("doubao-seed");
+  expect(env.MIDSCENE_MODEL_API_KEY).toBe("vision-secret");
+  expect(env.OPENAI_API_KEY).toBeUndefined();
+  expect(env.MIDSCENE_USE_QWEN_VL).toBeUndefined();
+  s.models[1].visionFamily = "invalid";
+  expect(validateGlobal(s)).toContain("私有 VL：无效的视觉模型族");
+});
+
+
+it.each([
+  ["Qwen3-VL-8B", "qwen3-vl"],
+  ["Qwen2.5-VL-72B", "qwen2.5-vl"],
+  ["Qwen3.5-35B", "qwen3"],
+  ["doubao-seed-1.6", "doubao-seed"],
+  ["gpt-5.4", "gpt-5"],
+  ["gemini-3-pro", "gemini"],
+])("infers the visual family for %s", (model, expected) => {
+  expect(visionFamilyOf({ preset: "private", model })).toBe(expected);
 });

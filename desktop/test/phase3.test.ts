@@ -27,8 +27,8 @@ describe("model settings (domestic / private deployments)", () => {
   it("maps the vision model to Midscene env only when configured", () => {
     expect(midsceneEnv({ agent: { preset: "openai" } }, "k")).toEqual({});
     const env = midsceneEnv({ agent: { preset: "deepseek" }, vision: { preset: "private", baseUrl: "http://gpu:8000/v1", model: "Qwen3-VL-8B" } }, "key");
-    expect(env).toMatchObject({ AITEST_MIDSCENE: "1", MIDSCENE_MODEL_NAME: "Qwen3-VL-8B", OPENAI_BASE_URL: "http://gpu:8000/v1",
-      OPENAI_API_KEY: "key", MIDSCENE_USE_QWEN_VL: "1" });
+    expect(env).toMatchObject({ AITEST_MIDSCENE: "1", MIDSCENE_MODEL_NAME: "Qwen3-VL-8B", MIDSCENE_MODEL_BASE_URL: "http://gpu:8000/v1",
+      MIDSCENE_MODEL_API_KEY: "key", MIDSCENE_MODEL_FAMILY: "qwen3-vl" });
   });
 
   it("checks connectivity via /models and falls back to a 1-token chat call", async () => {

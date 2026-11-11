@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
   checkData as CheckData,
+  LoginRecipe,
   Platform,
   runAppSuite as RunAppSuite,
   runUiSuite as RunUiSuite,
@@ -23,6 +24,10 @@ import {
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
+import type { UiRunOptions, UiScriptState } from "../shared/ipc.js";
+import { UiWorkflow } from "./uiWorkflow.js";
+import { UiDebugSession, type DebugBrowser } from "./uiDebug.js";
+import type { UiDebugCommand, UiDebugState } from "../shared/ipc.js";
 
 const opt = (flag: string, v: string | undefined): string[] => (v ? [flag, v] : []);
 const pageArgs = (q: PageQuery) => ["--page", String(q.page), "--page-size", String(q.pageSize)];
@@ -82,6 +87,11 @@ export interface UiDeps {
   runUiSuite: typeof RunUiSuite;
   checkData: typeof CheckData;
   seedData: typeof SeedData;
+  prepareEmbedded?: (projectId: string, env: string, roles: string[]) => Promise<{ cdpEndpoint: string; viewMarkers: Record<string, string> }>;
+  /** 单步调试：连接内嵌浏览器的会话（BrowserSession） */
+  createDebugBrowser?: (projectId: string, env: string, opts: { baseUrl: string; testIdAttribute?: string }) => DebugBrowser & {
+    newRoleContext(role: string, opts?: { login?: LoginRecipe; credentials?: { username: string; password: string } }): Promise<unknown>;
+  };
 }
 
 interface CaseRow {
@@ -90,6 +100,7 @@ interface CaseRow {
   execution_mode: string;
   status: string;
   data_refs: string[];
+  lint_status?: string;
 }
 
 export interface RunSummary {
@@ -150,6 +161,14 @@ export interface AppDeps {
 }
 
 export class Orchestrator extends EventEmitter {
+  private uiTaskActive = false;
+  private uiDebug?: UiDebugSession;
+  private async withUiTask<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再操作");
+    if (this.uiDebug) throw new Error("单步调试进行中，请先结束调试");
+    this.uiTaskActive = true;
+    try { return await fn(); } finally { this.uiTaskActive = false; }
+  }
   constructor(private readonly deps: OrchestratorDeps) {
     super();
   }
@@ -285,8 +304,19 @@ export class Orchestrator extends EventEmitter {
   // ------------------------------------------------------------------ UI 测试（二期）
 
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
-  exploreUiCase(projectId: string, env: string, caseId: string) {
-    return this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId));
+  async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
+    return this.withUiTask(async () => {
+      await this.uiCase(projectId, env, caseId, opts.confirmProduction);
+      const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles));
+      // 明确告诉用户有没有生成脚本，以及没生成的原因
+      const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
+      if (scriptGenerated) return { ...result, scriptGenerated };
+      const reason = result.status === "interrupted_budget"
+        ? `超出单任务 token 上限，任务被中断。可在「全局设置」中调高上限后重试。`
+        : result.status !== "completed" ? `任务未正常结束（${result.status}）。` : "";
+      return { ...result, scriptGenerated, message: ["未生成脚本。", reason, result.message.trim()].filter(Boolean).join("\n") };
+    });
   }
 
   // ------------------------------------------------------------------ App 测试
@@ -366,9 +396,14 @@ export class Orchestrator extends EventEmitter {
     return { missing, degraded };
   }
 
-  /** UI 回归：直接跑 Playwright 脚本，不调用模型；失败且无法确定原因时进入自愈 */
+  /** UI 回归直接执行脚本；只有显式 autoHeal=true 时才调用模型。 */
   async runUiRegression(projectId: string, env: string,
-    opts: { autoHeal?: boolean; headed?: boolean; confirmProduction?: boolean } = {}) {
+    opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean } = {}) {
+    return this.withUiTask(() => this.executeUiRegression(projectId, env, opts));
+  }
+
+  private async executeUiRegression(projectId: string, env: string,
+    opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean }) {
     const ui = this.requireUi();
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
@@ -377,12 +412,28 @@ export class Orchestrator extends EventEmitter {
     const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
     const uiScripts = new Map(scripts.filter((s) => s.framework === "playwright").map((s) => [s.case_id, s.path]));
     const cases = (await this.listCases(projectId)) as CaseRow[];
-    const runnable = cases.filter((c) => uiScripts.has(c.id) && c.status !== "deprecated");
-    if (!runnable.length) throw new Error("没有可执行的 UI 脚本，请先在探索模式生成");
+    const workflow = new UiWorkflow(project.workspace_path);
+    const projectIds = new Set(cases.map((c) => c.id));
+    const states = opts.mode ? workflow.states(env, Object.fromEntries([...uiScripts].filter(([id]) => projectIds.has(id)))) : {};
+    const requested = opts.caseIds ? new Set(opts.caseIds) : undefined;
+    if (requested && (!requested.size || [...requested].some((id) => !projectIds.has(id) || !uiScripts.has(id)))) throw new Error("请选择当前项目中已生成脚本的用例");
+    if (opts.mode === "validate" && (!requested || requested.size !== 1 || !opts.embedded)) throw new Error("可视化校验需要选择一条用例并使用内嵌浏览器");
+    if (opts.mode === "validate" && [...requested!].some((id) => !states[id])) throw new Error("脚本文件不存在，请重新生成");
+    if (opts.mode === "regression" && requested && [...requested].some((id) => states[id]?.status !== "confirmed")) throw new Error("选中的脚本尚未确认，请先完成可视化校验");
+    const runnable = cases.filter((c) => uiScripts.has(c.id) && c.status !== "deprecated"
+      && ["ui", "capture"].includes(c.execution_mode) && (!requested || requested.has(c.id))
+      && c.lint_status !== "blocked"
+      && (opts.mode !== "regression" || (states[c.id]?.status === "confirmed" && c.status === "reviewed")));
+    if (requested && runnable.length !== requested.size) throw new Error("选中的用例已废弃、尚未审核或不支持 UI 执行");
+    if (!runnable.length) throw new Error("没有已确认的 UI 脚本，请先在内嵌浏览器中校验并确认");
     const { missing, degraded } = await this.prepareData(projectId, env, runnable);
     const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
+    if (!caseIds.length) throw new Error(`用例依赖的测试数据缺失：${missing.join("、")}`);
 
     const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    if (opts.embedded && !ui.prepareEmbedded) throw new Error("当前运行环境不支持内嵌浏览器校验");
+    const embedded = opts.embedded ? await ui.prepareEmbedded!(projectId, env, roles) : undefined;
+    const versions = opts.mode === "validate" ? Object.fromEntries(runnable.map((c) => [c.id, workflow.hash(uiScripts.get(c.id)!)])) : {};
     const secretEnv = this.deps.secretEnv(projectId, env, roles);
     // UI 脚本中的数据库断言需要的连接配置（含密码，只注入脚本进程）
     const dbRuntime = envCfg.databases && Object.keys(envCfg.databases).length
@@ -394,16 +445,20 @@ export class Orchestrator extends EventEmitter {
       baseUrl: envCfg.base_url,
       caseIds,
       headed: opts.headed,
+      ...embedded,
+      onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     });
+    if (!out.results.length && (out.errors?.length || out.stderr)) throw new Error(`UI 执行失败：${(out.errors ?? []).join("；") || out.stderr}`);
     const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
     writeFileSync(file, JSON.stringify(out.results));
     const run = await this.deps.engine<RunSummary & { reviews: number }>([
       "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "playwright",
       "--html-report", out.htmlReport,
     ]);
+    if (opts.mode === "validate") workflow.record(env, run.run_id, versions, out.results.filter((r) => r.status === "passed").map((r) => r.case_id));
     let heal: TriageItem[] | undefined;
-    if (opts.autoHeal !== false && run.needs_agent.length) {
+    if (opts.autoHeal === true && run.needs_agent.length) {
       heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts);
     }
     // 失败明细：以引擎保存后的归因为准（含规则判定），agent 结论覆盖类型并补充依据
@@ -419,6 +474,114 @@ export class Orchestrator extends EventEmitter {
         };
       });
     return { run, heal, failures, degraded, missingData: missing, htmlReport: out.htmlReport };
+  }
+
+  async uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>> {
+    const p = await this.project(projectId);
+    if (!p.environments[env]) throw new Error("项目未配置该环境");
+    const ids = new Set(((await this.listCases(projectId)) as CaseRow[]).map((c) => c.id));
+    const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
+    return new UiWorkflow(p.workspace_path).states(env, Object.fromEntries(scripts.filter((s) => s.framework === "playwright" && ids.has(s.case_id)).map((s) => [s.case_id, s.path])));
+  }
+
+  async confirmUiScript(projectId: string, env: string, caseId: string, hash: string): Promise<void> {
+    if (this.uiTaskActive) throw new Error("请等待当前 UI 任务完成后再确认脚本");
+    const p = await this.project(projectId);
+    await this.uiCase(projectId, env, caseId, true);
+    const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
+    const script = scripts.find((s) => s.case_id === caseId && s.framework === "playwright");
+    if (!script) throw new Error("用例还没有 Playwright 脚本");
+    new UiWorkflow(p.workspace_path).confirm(env, caseId, script.path, hash);
+  }
+
+  /** 脚本代码与结构化步骤（界面对照用例步骤显示） */
+  async uiScriptDetail(projectId: string, env: string, caseId: string) {
+    const p = await this.project(projectId);
+    const states = await this.uiScriptStates(projectId, env);
+    const state = states[caseId];
+    return state ? new UiWorkflow(p.workspace_path).detail(state.path) : null;
+  }
+
+  // ------------------------------------------------------------------ UI 单步调试
+
+  async uiDebugStart(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}): Promise<UiDebugState> {
+    if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再调试");
+    if (this.uiDebug) throw new Error("已有调试会话，请先结束调试");
+    const ui = this.requireUi();
+    if (!ui.createDebugBrowser) throw new Error("当前运行环境不支持内嵌浏览器调试");
+    const p = await this.project(projectId);
+    await this.uiCase(projectId, env, caseId, opts.confirmProduction);
+    const state = (await this.uiScriptStates(projectId, env))[caseId];
+    if (!state) throw new Error("请先生成该用例的脚本");
+    const file = new UiWorkflow(p.workspace_path).stepsFile(state.path);
+    const envCfg = p.environments[env] as EnvironmentInfo & { testid_attribute?: string };
+    const roles = [...new Set(file.steps.map((s) => s.role ?? "default"))];
+    const secretEnv = this.deps.secretEnv(projectId, env, roles.filter((r) => r !== "default"));
+    const creds: { role: string; username: string; password: string }[] = JSON.parse(secretEnv.AITEST_ROLES || "[]");
+    const browser = ui.createDebugBrowser(projectId, env, { baseUrl: envCfg.base_url, testIdAttribute: envCfg.testid_attribute });
+    const hasDb = Boolean(envCfg.databases && Object.keys(envCfg.databases).length);
+    this.uiDebug = new UiDebugSession({
+      projectId, env, caseId, file, browser,
+      prepareRole: async (role) => {
+        const cred = creds.find((c) => c.role === role);
+        await browser.newRoleContext(role, role === "default" || !cred ? {} : {
+          login: envCfg.login as unknown as LoginRecipe, credentials: { username: cred.username, password: cred.password },
+        });
+      },
+      runOptions: {
+        secrets: secretEnv,
+        evidenceDir: join(p.workspace_path, "evidence", "debug"),
+        ...(hasDb ? { dbCheck: async (check: unknown) => {
+          const res = await this.deps.engine<{ ok: boolean; errors: string[]; rows: unknown[] }>(
+            ["db-check", "--project", projectId, "--env", env, "--spec", JSON.stringify(check)], secretEnv);
+          if (!res.ok) throw new Error(`断言不成立：${res.errors.join("；")}；查询结果：${JSON.stringify(res.rows.slice(0, 5))}`);
+        } } : {}),
+      },
+      emit: (s, role) => this.emit("progress", { projectId, env, stage: "ui-debug", caseId, role, state: s }),
+    });
+    return this.uiDebug.state();
+  }
+
+  async uiDebugCommand(command: UiDebugCommand): Promise<UiDebugState> {
+    const session = this.uiDebug;
+    if (!session) throw new Error("没有进行中的调试");
+    const state = await session.command(command);
+    if (state.phase === "stopped") this.uiDebug = undefined;
+    return state;
+  }
+
+  /** 内嵌浏览器正被 UI 任务或单步调试占用 */
+  uiBusy(): boolean {
+    return this.uiTaskActive || Boolean(this.uiDebug);
+  }
+
+  uiDebugState(): UiDebugState | null {
+    return this.uiDebug?.state() ?? null;
+  }
+
+  async reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts: { confirmProduction?: boolean } = {}) {
+    return this.withUiTask(async () => {
+      await this.uiCase(projectId, env, caseId, opts.confirmProduction);
+      if (!feedback.trim() || feedback.length > 8000) throw new Error("请填写修正说明（最多 8000 字）");
+      const states = await this.uiScriptStates(projectId, env);
+      if (!states[caseId]) throw new Error("请先生成该用例的脚本");
+      return this.agentTask(projectId, "revise", [
+        `任务：为项目 ${projectId} 的 UI 用例 ${caseId} 提出脚本修正，环境：${env}。`,
+        `先调用 browser.open_project（project_id=${projectId}, env=${env}），读取用例和已登记脚本。`,
+        "先在内嵌浏览器中复现当前脚本或失败步骤，结合截图、页面结构和当前脚本定位问题。",
+        `用户反馈：${feedback}`,
+        "不要直接覆盖现有脚本。只使用 report.propose_script_fix 提交该用例完整的新脚本，等待用户审核差异并应用。不要降低断言来掩盖产品缺陷。",
+      ].join("\n"));
+    });
+  }
+
+  private async uiCase(projectId: string, env: string, caseId: string, confirmProduction?: boolean) {
+    const p = await this.project(projectId);
+    if (!p.environments[env]) throw new Error("项目未配置该环境");
+    if (p.environments[env].production && !confirmProduction) throw new ProductionConfirmRequired(env);
+    const c = ((await this.listCases(projectId)) as (CaseRow & { lint_status?: string })[]).find((c) => c.id === caseId);
+    if (!c || !["ui", "capture"].includes(c.execution_mode) || c.status === "deprecated" || c.lint_status === "blocked") throw new Error("用例不属于当前项目、已废弃或存在阻断问题");
+    return c;
   }
 
   async healUi(projectId: string, env: string, runId: string, results?: UiCaseResult[], scripts?: Map<string, string>) {

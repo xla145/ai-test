@@ -145,7 +145,7 @@ export interface BrokerHandlers {
   /** 子项目所属的大项目（凭据继承） */
   parentOf?: (projectId: string) => string | undefined;
   /** 桌面端为角色准备内嵌浏览器视图，返回视图初始 URL 中的标记 */
-  openView?: (projectId: string, role: string) => Promise<string>;
+  openView?: (projectId: string, role: string, env?: string) => Promise<string>;
 }
 
 export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRole"> & Partial<Pick<SecretStore, "roleNames" | "dbPasswords">>, handlers: BrokerHandlers = {}): Promise<Broker> {
@@ -165,7 +165,7 @@ export async function startSecretBroker(store: Pick<SecretStore, "get" | "getRol
       try {
         const payload = JSON.parse(body) as { projectId: string; env?: string; role?: string; roles?: string[] };
         const result = req.url === "/views"
-          ? { marker: await handlers.openView!(payload.projectId, String(payload.role)) }
+          ? { marker: await handlers.openView!(payload.projectId, String(payload.role), payload.env) }
           : { env: secretEnvFor(store, payload.projectId, String(payload.env), payload.roles ?? [], handlers.parentOf?.(payload.projectId)) };
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
       } catch (e) {

@@ -8,6 +8,7 @@ export interface McpServerEntry {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  envVars?: string[];
 }
 
 export interface ModelProvider {
@@ -51,6 +52,7 @@ export function buildCodexConfig(input: CodexConfigInput): string {
   }
   for (const s of input.mcpServers) {
     lines.push(`[mcp_servers.${key(s.name)}]`, `command = ${q(s.command)}`, `args = [${s.args.map(q).join(", ")}]`);
+    if (s.envVars?.length) lines.push(`env_vars = [${s.envVars.map(q).join(", ")}]`);
     if (s.env && Object.keys(s.env).length) {
       lines.push(`env = { ${Object.entries(s.env).map(([k, v]) => `${key(k)} = ${q(v)}`).join(", ")} }`);
     }

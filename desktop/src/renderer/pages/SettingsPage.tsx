@@ -208,6 +208,7 @@ interface ModelForm {
   baseUrl?: string;
   model?: string;
   key?: string;
+  visionFamily?: string;
 }
 
 function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSubmit }: {
@@ -227,7 +228,7 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
   useEffect(() => {
     if (!open) return;
     form.resetFields();
-    form.setFieldsValue(entry ? { name: entry.name, preset: entry.preset, baseUrl: entry.baseUrl, model: entry.model }
+    form.setFieldsValue(entry ? { name: entry.name, preset: entry.preset, baseUrl: entry.baseUrl, model: entry.model, visionFamily: entry.visionFamily }
       : { preset: presets[1]?.id ?? presets[0]?.id });
   }, [open, entry, form, presets]);
 
@@ -239,6 +240,7 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
       id: entry?.id ?? `m_${Math.random().toString(36).slice(2, 10)}`,
       name: v.name.trim(),
       preset: v.preset,
+      ...(v.visionFamily ? { visionFamily: v.visionFamily } : {}),
       ...(v.baseUrl?.trim() ? { baseUrl: v.baseUrl.trim() } : {}),
       ...(v.model?.trim() ? { model: v.model.trim() } : {}),
     }, v.key || undefined);
@@ -253,6 +255,7 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
         <Form.Item name="preset" label="服务" rules={[{ required: true }]} extra={preset?.note}>
           <Select options={presets.map((p) => ({ value: p.id, label: p.name }))}
             onChange={(id) => {
+              form.setFieldValue("visionFamily", undefined);
               const p = presets.find((x) => x.id === id);
               if (!form.getFieldValue("name") && p) form.setFieldValue("name", p.model ? `${p.name.replace(/（.*）$/, "")} ${p.model}` : p.name.replace(/（.*）$/, ""));
             }} />
@@ -274,6 +277,9 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
           rules={[{ required: !!needsModel, message: "请填写模型名" }]}>
           <Input className="mono" placeholder={preset?.model || (preset?.id === "ark" ? "推理接入点 ID" : "模型名")} />
         </Form.Item>
+        {preset?.visionFamily && <Form.Item name="visionFamily" label="Midscene 视觉模型族" extra="留空按模型名推断；方舟接入点或自定义模型名请明确选择实际模型族。">
+          <Select allowClear placeholder="按模型名推断" options={["qwen2.5-vl", "qwen3-vl", "qwen3", "doubao-vision", "doubao-seed", "gpt-5", "gpt-6", "gemini", "glm-v", "kimi"].map((value) => ({ value, label: value }))} />
+        </Form.Item>}
         <Form.Item name="key" label="API key" extra={hasKey ? "已保存在钥匙串，留空则不修改" : "存入系统钥匙串，不写入配置文件"}>
           <Input.Password placeholder={hasKey ? "••••••••" : "API key"} autoComplete="off" />
         </Form.Item>

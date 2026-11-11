@@ -16,6 +16,7 @@ const methods = [
   "setProjectType",
   "pickFile", "pickDirectory", "openTestPage",
   "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
+  "uiScriptStates", "confirmUiScript", "reviseUiScript", "uiScriptDetail", "dockTestView", "uiDebugStart", "uiDebugCommand", "uiDebugState", "openRoleLogin", "saveRoleLogin", "roleSessions",
   "listProposals", "resolveProposal", "listReviews", "resolveReview",
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
   "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",

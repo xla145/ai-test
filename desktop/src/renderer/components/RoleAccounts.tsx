@@ -1,7 +1,7 @@
 import { UserAddOutlined } from "@ant-design/icons";
 import { Button, Card, Col, Form, Input, Row, Space, Tag, Tooltip, Typography } from "antd";
 import { api, type Project } from "../api";
-import { useAction, useLoad } from "../hooks";
+import { notifyProjectChanged, useAction, useLoad } from "../hooks";
 import { useProjects } from "./ProjectSettings";
 
 interface RoleForm {
@@ -36,7 +36,7 @@ export function RoleAccounts({ project, purpose = "all" }: { project: Project; p
                 onClick={() => form.setFieldsValue({ name, username: "", password: "", token: "" })}>
                 {name}{inherited ? "（继承）" : ""}
                 <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                  {[s?.account && "账号", s?.token && "token"].filter(Boolean).join(" · ") || "未保存凭据"}
+                  {[s?.account && "账号", s?.token && "token"].filter(Boolean).join(" · ") || (purpose === "api" ? "未保存凭据" : "仅角色名")}
                 </Typography.Text>
               </Tag>
             </Tooltip>
@@ -44,10 +44,11 @@ export function RoleAccounts({ project, purpose = "all" }: { project: Project; p
         })}
         {!names.length && <Typography.Text type="secondary">还没有角色</Typography.Text>}
       </Space>
-      <Form form={form} layout="vertical" onFinish={(v) => run(async () => {
+      <Form form={form} name="role-account" layout="vertical" onFinish={(v) => run(async () => {
         await api().setRoleSecret(project.id, v.name.trim(), v.username?.trim() ?? "", v.password ?? "", v.token?.trim() || undefined);
         form.resetFields();
         await Promise.all([roles.reload(), status.reload()]);
+        notifyProjectChanged(project.id);
       }, "角色已保存")}>
         <Form.Item name="name" label="角色名" rules={[{ required: true, whitespace: true, message: "请输入角色名" }]}>
           <Input placeholder={purpose === "api" ? "如：买家、运营、财务" : "如：管理员、运营、访客"} />
@@ -57,9 +58,11 @@ export function RoleAccounts({ project, purpose = "all" }: { project: Project; p
           <Col span={12}><Form.Item name="password" label="密码"><Input.Password autoComplete="new-password" /></Form.Item></Col>
         </Row>
         <Form.Item name="token" label="接口 token（可选）"
-          extra="接口测试优先使用；不填则用账号密码调用环境的「接口登录」换取。修改已有角色时，留空的项保持不变。"
+          extra={purpose === "api"
+            ? "接口测试优先使用；不填则用账号密码调用环境的「接口登录」换取。修改已有角色时，留空的项保持不变。"
+            : "接口测试优先使用；不填则用账号密码换取。只在 UI 测试中「手动登录」的角色可以只填角色名。修改已有角色时，留空的项保持不变。"}
           rules={[({ getFieldValue }) => ({
-            validator: (_, token: string) => (token || getFieldValue("username")
+            validator: (_, token: string) => (purpose !== "api" || token || getFieldValue("username")
               || status.data?.[getFieldValue("name")]?.account || status.data?.[getFieldValue("name")]?.token
               ? Promise.resolve() : Promise.reject(new Error("请填写账号密码或接口 token"))),
           })]}>

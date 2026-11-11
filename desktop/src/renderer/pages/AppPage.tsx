@@ -6,7 +6,7 @@ import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { EnvSelect, RunButton, useEnvChoice, NoEnvironment } from "../components/EnvPicker";
 import { FAILURE, LabelTag, LINT } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useLoad, usePaged, notifyProjectChanged } from "../hooks";
+import { useAction, useKeyedAction, useLoad, usePaged, notifyProjectChanged } from "../hooks";
 
 type Platform = "android" | "ios";
 
@@ -116,12 +116,12 @@ function AppCases({ project, env, platform, canExplore, pinkyOn }: {
       Promise<{ items: TestCase[]; total: number }>,
     [project.id], 15);
   const scripts = useLoad(() => api().scriptMap("maestro"), [project.id]);
-  const { busy, run } = useAction();
+  const { busy, activeKey, run } = useKeyedAction();
   const { modal } = App.useApp();
   const production = Boolean(project.environments[env]?.production);
 
   const explore = (c: TestCase) => {
-    const go = (confirmProduction: boolean) => run(async () => {
+    const go = (confirmProduction: boolean) => run(c.id, async () => {
       await api().exploreAppCase(project.id, env, platform, c.id, { confirmProduction });
       await Promise.all([reload(), scripts.reload()]);
     }, "脚本已生成，请查看 agent 的结论与试跑结果");
@@ -147,8 +147,8 @@ function AppCases({ project, env, platform, canExplore, pinkyOn }: {
           { title: "规范检查", dataIndex: "lint_status", width: 100, render: (v: string) => <LabelTag map={LINT} value={v} /> },
           { title: "", width: 160, render: (_: unknown, c: TestCase) => (
             <Tooltip title={!pinkyOn ? "未启用 Pinky" : !canExplore ? `环境没有配置 ${PLATFORM_LABEL[platform]} App` : c.lint_status === "blocked" ? "用例有阻断问题" : undefined}>
-              <Button size="small" icon={<CompassOutlined />} loading={busy}
-                disabled={!canExplore || c.lint_status === "blocked"} onClick={() => explore(c)}>
+              <Button size="small" icon={<CompassOutlined />} loading={activeKey === c.id}
+                disabled={busy || !canExplore || c.lint_status === "blocked"} onClick={() => explore(c)}>
                 {scripts.data?.[c.id] ? "重新探索" : "探索生成脚本"}
               </Button>
             </Tooltip>

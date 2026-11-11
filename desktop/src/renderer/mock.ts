@@ -2,7 +2,9 @@
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
  */
-import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState } from "../shared/ipc";
+import type { UiStep } from "@ai-test/mcp-servers";
+import { UiDebugSession } from "../main/uiDebug";
+import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState, UiScriptState, UiStepView } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -207,7 +209,7 @@ const neverRun = new Set<string>();
 const listeners: {
   approval?: (r: ApprovalRequest) => void;
   event?: (e: { method: string; params: unknown }) => void;
-  view?: (v: { visible: boolean }) => void;
+  view?: (v: { visible: boolean; docked?: boolean; shown?: boolean }) => void;
   update?: (s: UpdateState) => void;
 } = {};
 
@@ -218,6 +220,24 @@ const setUpdate = (next: Partial<UpdateState>) => {
 };
 
 const apiTestSets: Record<string, ApiTestSet[]> = {};
+const uiScripts: Record<string, UiScriptState> = {
+  tc_8f2a1c0e01: { path: "scripts/ui/tc_8f2a1c0e01.spec.ts", hash: "demo-1", status: "pending" },
+};
+/** 演示脚本步骤：按用例步骤分组，最后一步故意失败以展示定位效果 */
+const demoSteps = (caseId: string): UiStepView[] => [
+  { id: "S1", caseStep: 1, action: "goto", description: "打开 /tags", role: "管理员", source: "ai" },
+  { id: "S2", caseStep: 1, action: "expectVisible", description: "断言可见 table「标签列表」", role: "管理员", source: "ai" },
+  { id: "S3", caseStep: 2, action: "fill", description: "在 占位「搜索标签」 输入「TAG-1001」", role: "管理员", source: "ai" },
+  { id: "S4", caseStep: 2, action: "click", description: `点击 testid「disable-TAG-1001」`, role: "管理员", source: "ai" },
+  { id: "S5", caseStep: 3, action: "expectText", description: `断言 testid「status-TAG-1001」 包含「已停用」`, role: "管理员", source: caseId.endsWith("1") ? "ai" : "user" },
+];
+let debugSession: UiDebugSession | undefined;
+const roleSessionTimes: Record<string, string> = {};
+const debugFailed = new Set<string>();
+let viewState = { visible: false, docked: false };
+const setView = (next: Partial<typeof viewState>) => { viewState = { ...viewState, ...next }; listeners.view?.(viewState); };
+const eventListeners = new Set<(e: { method: string; params: unknown }) => void>();
+listeners.event = event => eventListeners.forEach(cb => cb(event));
 const mockApi: AitestApi = {
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
@@ -257,6 +277,7 @@ const mockApi: AitestApi = {
     const text = q.query ?? "";
     return page(cases.filter((c) =>
       (!text || c.title.includes(text) || c.id.includes(text) || c.module_path.join("/").includes(text)) &&
+      matches(c.id, f.ids) && (!f.exclude_ids || !f.exclude_ids.split(",").includes(c.id)) &&
       matches(c.execution_mode, f.execution_mode) && matches(c.priority, f.priority) &&
       matches(c.status, f.status) && matches(c.lint_status, f.lint_status)), q);
   },
@@ -336,22 +357,86 @@ const mockApi: AitestApi = {
     ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" }
     : framework === "pytest" ? { tc_8f2a1c0e04: "scripts/api/test_api.py", tc_8f2a1c0e08: "scripts/api/test_api.py", tc_8f2a1c0e11: "scripts/api/test_api.py" } : {}),
   caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
-  exploreUiCase: () => delay({ message: "已生成脚本 scripts/ui/tc_8f2a1c0e02.spec.ts，试跑通过" }, 900),
-  runUiRegression: (id, env, _headed, opts) => requireConfirm(id, env, opts) ?? delay({
-    run: { run_id: "run_9a7b", total: 28, passed: 25, failed: 2, error: 1, reviews: 2 },
-    heal: [{ case_id: "tc_8f2a1c0e01", failure_type: "script_error", reason: "按钮 testid 变更" }],
-    failures: [
-      { case_id: "tc_8f2a1c0e01", status: "failed", failure_type: "script_error", reason: "按钮 testid 变更，属于页面改版，已生成修改建议",
-        message: "locator.click: Timeout 10000ms exceeded.\nwaiting for getByTestId('disable-TAG-1001')" },
-      { case_id: "tc_8f2a1c0e03", status: "failed", failure_type: "product_bug", message: "expect(locator).toHaveText: 指标卡片显示 NaN，预期为数值" },
-      { case_id: "tc_imp0005", status: "error", failure_type: "environment", message: "page.goto: net::ERR_CONNECTION_REFUSED at https://feature-test.example.com/tags" },
-    ],
-    degraded: ["tc_8f2a1c0e07"], missingData: ["DEM-1002"], htmlReport: "reports/ui/html",
-  }, 1000),
+  uiScriptStates: (_id, _env) => delay(uiScripts),
+  // 单步调试：复用主进程的调试状态机，浏览器换成假的（S4 第一次执行失败，用于演示失败停住）
+  uiDebugStart: async (id, env, caseId, opts) => {
+    const blocked = requireConfirm(id, env, opts); if (blocked) return blocked as never;
+    if (debugSession) throw new Error("已有调试会话，请先结束调试");
+    const steps = demoSteps(caseId).map((st) => ({ id: st.id, caseStep: st.caseStep, role: st.role, action: "press", key: st.description })) as UiStep[];
+    debugSession = new UiDebugSession({
+      projectId: id, env, caseId, file: { version: 1, caseId, title: "", specHash: "", steps },
+      browser: {
+        runStep: async (st) => {
+          await delay(null, 450);
+          if ((st as { id?: string }).id === "S4" && !debugFailed.has(caseId)) {
+            debugFailed.add(caseId);
+            throw new Error("TimeoutError: locator.click: Timeout 5000ms exceeded.\n  - waiting for getByTestId('disable-TAG-1001')");
+          }
+          return (st as { id?: string }).id === "S2" ? { note: "演示：这一步只截图，视觉判定需人工确认" } : {};
+        },
+        resetCaptures: () => undefined,
+        close: async () => undefined,
+      },
+      prepareRole: async () => { setView({ visible: true }); },
+      runOptions: {},
+      emit: (state) => listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-debug", caseId, state } }),
+    });
+    setView({ visible: true });
+    return debugSession.state();
+  },
+  uiDebugCommand: async (cmd) => {
+    if (!debugSession) throw new Error("没有进行中的调试");
+    const state = await debugSession.command(cmd);
+    if (state.phase === "stopped") debugSession = undefined;
+    return state;
+  },
+  uiDebugState: async () => debugSession?.state() ?? null,
+  openRoleLogin: async () => { setView({ visible: true }); },
+  saveRoleLogin: async (_p, _e, role) => { roleSessionTimes[role] = new Date().toISOString(); return delay({ cookies: 3, localStorage: 1, url: "https://feature-test.example.com/index", savedAt: roleSessionTimes[role] }, 300); },
+  roleSessions: async () => delay({ ...roleSessionTimes }),
+  uiScriptDetail: (_id, _env, caseId) => delay(uiScripts[caseId] ? {
+    path: uiScripts[caseId].path, synced: true, steps: demoSteps(caseId),
+    code: `// 用例 ID：${caseId}\nimport { expect, test } from "@playwright/test";\n\ntest("${caseId}", async ({ page }) => {\n${demoSteps(caseId).map((st) => `  await test.step("[${st.id}] ${st.description}", async () => { /* … */ });`).join("\n")}\n});\n`,
+  } : null),
+  confirmUiScript: async (_id, _env, caseId, hash) => {
+    if (!uiScripts[caseId]?.validatedRunId || uiScripts[caseId].hash !== hash) throw new Error("请先完成校验");
+    uiScripts[caseId].status = "confirmed";
+  },
+  reviseUiScript: async (id, env, caseId, feedback, opts) => {
+    const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
+    await delay(null, 500);
+    proposals.unshift({ id: `proposal_${Date.now()}`, case_id: caseId, script_path: uiScripts[caseId]?.path ?? "", diff: `@@ -1 +1 @@\n-// 原脚本\n+// 修正：${feedback}`, reason: feedback, status: "pending" });
+    return { message: "已提交脚本修改建议，请审核差异，应用后重新试跑。" };
+  },
+  exploreUiCase: async (id, env, caseId, opts) => {
+    const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
+    await delay(null, 600);
+    uiScripts[caseId] = { path: `scripts/ui/${caseId}.spec.ts`, hash: `demo-${Date.now()}`, status: "pending" };
+    return { message: "脚本已生成，请在内嵌浏览器中试跑校验。" };
+  },
+  runUiRegression: async (id, env, _headed, opts) => {
+    const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
+    const ids = opts?.caseIds ?? [];
+    for (const caseId of ids) {
+      for (const st of demoSteps(caseId)) {
+        const title = `[${st.id}] ${st.description}`;
+        listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "running", stepId: st.id, kind: "step" } });
+        await delay(null, 260);
+        listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "passed", stepId: st.id, kind: "step" } });
+      }
+      if (opts?.mode === "validate" && uiScripts[caseId]) uiScripts[caseId].validatedRunId = "run_demo";
+    }
+    return { run: { run_id: "run_demo", total: ids.length, passed: ids.length, failed: 0, error: 0, reviews: 0 }, failures: [], degraded: [], missingData: [], htmlReport: "reports/ui/html" };
+  },
   listProposals: (status) => delay(proposals.filter((p) => !status || p.status === status)),
   pageProposals: (_p, q) => page(proposals.filter((p) => matches(p.status, q.status)), q),
-  resolveProposal: async (_p, id) => {
-    proposals.splice(proposals.findIndex((p) => p.id === id), 1);
+  resolveProposal: async (_p, id, accept) => {
+    const index = proposals.findIndex((p) => p.id === id);
+    const proposal = proposals[index];
+    if (accept && proposal && uiScripts[proposal.case_id]) {
+      uiScripts[proposal.case_id] = { ...uiScripts[proposal.case_id], hash: `demo-${Date.now()}`, status: "pending", validatedRunId: undefined };
+    }
+    if (index >= 0) proposals.splice(index, 1);
     return delay({});
   },
   listReviews: (status) => delay(reviews.filter((r) => !status || r.status === status)),
@@ -419,8 +504,9 @@ const mockApi: AitestApi = {
   pickFile: () => delay("/Users/demo/Downloads/特征中心v4.4用例.xlsx"),
   pickDirectory: () => delay("/Users/demo/aitest/new-project"),
   // 预览时模拟内嵌浏览器：界面收窄到左半屏
-  openTestPage: async () => listeners.view?.({ visible: true }),
-  hideTestView: async () => listeners.view?.({ visible: false }),
+  openTestPage: async () => setView({ visible: true }),
+  hideTestView: async () => setView({ visible: false }),
+  dockTestView: async (dock) => { if (Boolean(dock) !== viewState.docked) setView({ docked: Boolean(dock) }); },
   saveDatabase: () => delay({}),
   removeDatabase: () => delay({}),
   testDatabase: (_p, _e, name) => name === "main" ? delay({ ok: true, elapsed_ms: 23.4 }, 400)
@@ -446,8 +532,8 @@ const mockApi: AitestApi = {
   },
   respondApproval: () => undefined,
   onEvent: (cb) => {
-    listeners.event = cb;
-    return () => (listeners.event = undefined);
+    eventListeners.add(cb);
+    return () => { eventListeners.delete(cb); };
   },
   getUpdateState: () => delay(updateState),
   checkForUpdates: async () => {
