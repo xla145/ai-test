@@ -102,5 +102,7 @@ describe("buildCodexConfig", () => {
     expect(toml).toContain('AITEST_DB = "C:\\\\db \\"x\\""');
     expect(toml).toContain('model_provider = "qwen"');
     expect(toml).toContain('env_key = "QWEN_API_KEY"');
+    expect(toml).toContain('wire_api = "responses"');
+    expect(toml).not.toContain('wire_api = "chat"');
   });
 });

@@ -42,10 +42,11 @@ export function EnvSelect({ project, value, onChange, showUrl, width = 220 }: {
  * 执行按钮：生产环境显示为危险按钮，点击后二次确认，确认后以 confirmProduction 调用。
  * 主进程同样会拒绝未确认的生产环境执行。
  */
-export function RunButton({ project, env, loading, onRun, children }: {
+export function RunButton({ project, env, loading, disabled, onRun, children }: {
   project: Project;
   env: string;
   loading: boolean;
+  disabled?: boolean;
   onRun: (confirmProduction: boolean) => void;
   children: ReactNode;
 }) {
@@ -70,7 +71,7 @@ export function RunButton({ project, env, loading, onRun, children }: {
     });
   };
   return (
-    <Button type="primary" danger={production} icon={production ? <WarningFilled /> : <CaretRightOutlined />} loading={loading} onClick={click}>
+    <Button type="primary" danger={production} disabled={disabled} icon={production ? <WarningFilled /> : <CaretRightOutlined />} loading={loading} onClick={click}>
       {production ? <>{children}（生产）</> : children}
     </Button>
   );

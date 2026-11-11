@@ -13,6 +13,7 @@ describe("model settings (domestic / private deployments)", () => {
     expect(toml).toContain('base_url = "http://10.0.0.8:8000/v1"');
     expect(toml).toContain('model = "Qwen3-32B"');
     expect(toml).toContain(`env_key = "${AGENT_KEY_ENV}"`);
+    expect(toml).toContain('wire_api = "responses"');
     expect(toml).not.toMatch(/sk-|api_key\s*=/);
   });
 

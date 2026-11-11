@@ -79,8 +79,13 @@ def parse_junit(xml_path: str | Path, run_id: str) -> list[RunResult]:
 
 def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_name: str = "default",
                report_dir: str | Path | None = None, extra_args: list[str] | None = None,
-               timeout: float | None = None, extra_env: dict[str, str] | None = None) -> tuple[Run, list[RunResult]]:
+               timeout: float | None = None, extra_env: dict[str, str] | None = None,
+               case_ids: list[str] | None = None) -> tuple[Run, list[RunResult]]:
+    if case_ids is not None and not case_ids:
+        raise ValueError("请至少选择一条接口用例")
     suite_dir = Path(suite_dir)
+    if not suite_dir.is_dir():
+        raise ValueError("尚未生成接口脚本，请先生成已审核脚本")
     run = Run(project_id=project_id, env=env_name, mode=RunMode.REGRESSION.value,
               started_at=datetime.now(timezone.utc).isoformat())
     report_dir = Path(report_dir or suite_dir / "reports")
@@ -89,11 +94,21 @@ def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_
     cmd = [sys.executable, "-m", "pytest", str(suite_dir), f"--junitxml={junit}", "-q", "-p", "no:cacheprovider",
            "--rootdir", str(suite_dir), *(extra_args or [])]
     proc_env = {**os.environ, **env.to_env(), **(extra_env or {})}
+    if case_ids is not None:
+        cmd.extend(["-p", "aitest.pytest_selection"])
+        proc_env["AITEST_SELECTED_CASE_IDS"] = json.dumps(case_ids)
+        # 桌面端捆绑的引擎也可被脚本子进程导入；无需改写已有脚本。
+        proc_env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent.parent),
+                                                              proc_env.get("PYTHONPATH", "")]))
     proc = subprocess.run(cmd, cwd=str(suite_dir), env=proc_env, capture_output=True, text=True, timeout=timeout)
+    if proc.returncode not in (0, 1):
+        raise RuntimeError("接口脚本未能执行：" + (proc.stderr or proc.stdout)[-4000:])
     results = parse_junit(junit, run.id) if junit.exists() else []
     run.result = summarize(results)
     run.result.update({"exit_code": proc.returncode, "junit": str(junit),
                        "stdout_tail": proc.stdout[-2000:], "stderr_tail": proc.stderr[-2000:]})
+    if case_ids is not None:
+        run.result["selected_case_ids"] = list(dict.fromkeys(case_ids))
     return run, results
 
 

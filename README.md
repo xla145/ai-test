@@ -77,6 +77,8 @@ npm run preview:web -w desktop   # 打开 http://localhost:5173
 
 `npm run dev` 和 `npm start -w desktop` 会自动准备 `.release/engine-deps` 并加载引擎依赖，首次需要联网。也可在仓库根目录运行 `npm run prepare:engine -w desktop` 手动准备；命令行和引擎测试仍需按上文安装 Python 依赖。
 
+开发模式下，页面由 Vite 热更新；修改主进程、preload 或共享 IPC 定义时会自动重新编译并重启 Electron，确保新接口同时生效。编译失败时保留当前运行实例，修正后再重启。
+
 ## 仓库结构
 
 ```
@@ -99,6 +101,11 @@ docs/          架构说明与实现对照
 
 ## 使用说明
 
+创建项目时可选择测试端：Web、App、纯接口或多端（Web + App），之后可在「项目设置 → 基本信息」调整。
+Web 项目显示 Web UI 测试，App 项目显示 App 测试，纯接口项目隐藏这两个入口，多端项目同时显示。
+接口测试、用例库、数据库、报告等为公共能力。旧项目默认多端，调整类型后已有用例、脚本和报告继续保留。
+大项目只管理共享配置，各子项目可独立选择测试端。
+
 ### 命令行跑通接口测试
 
 ```bash
@@ -117,6 +124,27 @@ aitest summarize-failures --run <run_id>
 aitest import-excel --project <项目ID> --file 用例.xlsx
 aitest lint --project <项目ID> --with-issues
 aitest export-excel --project <项目ID> --out 修复后.xlsx
+```
+
+### 选择接口回归范围
+
+在「接口回归」中按模块、请求方法或接口路径筛选，勾选接口可选中其下全部用例；展开接口可单独选择用例。
+仅展示已审核且无阻断问题的接口用例。筛选、翻页不会清除已选项，可点击「清空选择」重新选择。
+
+- 首次执行或审核后修改了用例，先点击「生成已审核脚本」，再选择环境、配置凭据，点击「执行选中项」。生成与执行均不调用模型。
+- 「全量回归」执行全部可用的已审核接口用例，不受当前筛选和勾选影响。
+- 多步骤流程按整条用例执行，保留全部前置步骤与变量传递。拆成不同用例的依赖不会自动补选，应选择完整链路或整理为流程用例。
+- 可「保存为测试集」（例如订单冒烟），下次加载后直接执行；同名保存更新范围。测试集保存在 workspace 的 `api-test-sets.json`，可随 git 共享。
+- 空选择、跨项目 / 未审核 / 废弃用例、缺少脚本都会报错，不会退回全量执行；未选中项不计入通过率。
+- 回归执行本身不消耗模型；原因不明的失败仍按现有规则自动调用 agent 归因。
+
+命令行也可显式限定用例范围（省略 `--case-ids` 仍兼容原来的全量脚本执行）：
+
+```bash
+aitest write-api-suite --project <项目ID> --reviewed-only
+aitest run-api-suite --project <项目ID> --env test --case-ids '["tc_one","tc_flow"]'
+aitest save-api-test-set --project <项目ID> --name 订单冒烟 --case-ids '["tc_one","tc_flow"]'
+aitest list-api-test-sets --project <项目ID>
 ```
 
 ### 接口多账号流程

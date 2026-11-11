@@ -1,4 +1,4 @@
-import type { AitestApi } from "../shared/ipc";
+import type { AitestApi, ProjectType } from "../shared/ipc";
 
 declare global {
   interface Window {
@@ -20,6 +20,7 @@ export interface Project {
   inherited_environments?: Record<string, string>;
   /** "group" 为大项目：不含用例，只存放共享配置 */
   kind?: "project" | "group";
+  project_type?: ProjectType;
   parent_id?: string;
   parent_name?: string;
   children?: string[];

@@ -119,6 +119,8 @@ class Store:
             self.conn.execute("ALTER TABLE project ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")
         if "kind" not in cols:
             self.conn.execute("ALTER TABLE project ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
+        if "project_type" not in cols:
+            self.conn.execute("ALTER TABLE project ADD COLUMN project_type TEXT NOT NULL DEFAULT 'multi'")
         self.conn.commit()
 
     def close(self) -> None:
@@ -127,8 +129,8 @@ class Store:
     # ---- project ----
     def add_project(self, p: Project) -> Project:
         self.conn.execute(
-            "INSERT OR REPLACE INTO project (id, name, workspace_path, environments, parent_id, kind) VALUES (?,?,?,?,?,?)",
-            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False), p.parent_id or "", p.kind),
+            "INSERT OR REPLACE INTO project (id, name, workspace_path, environments, parent_id, kind, project_type) VALUES (?,?,?,?,?,?,?)",
+            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False), p.parent_id or "", p.kind, p.project_type),
         )
         self.conn.commit()
         return p
@@ -168,7 +170,7 @@ class Store:
             return None
         return Project(id=r["id"], name=r["name"], workspace_path=r["workspace_path"],
                        environments=json.loads(r["environments"]), parent_id=r["parent_id"] or "",
-                       kind=r["kind"] or "project")
+                       kind=r["kind"] or "project", project_type=r["project_type"])
 
     def list_projects(self) -> list[Project]:
         rows = self.conn.execute("SELECT id FROM project ORDER BY name").fetchall()

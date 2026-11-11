@@ -2,7 +2,7 @@
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
  */
-import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState } from "../shared/ipc";
+import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -53,11 +53,15 @@ const cases = [
   mk("tc_8f2a1c0e01", "标签管理-停用标签", "ui", "P0", "passed", "reviewed"),
   mk("tc_8f2a1c0e02", "标签管理-批量导入标签", "ui", "P1", "warned", "draft"),
   mk("tc_8f2a1c0e03", "综合总览-指标卡片展示", "ui", "P0", "passed", "reviewed"),
-  mk("tc_8f2a1c0e04", "推荐配置-接口越权", "api", "P0", "passed", "reviewed"),
+  mk("tc_8f2a1c0e04", "推荐配置-接口越权", "api", "P0", "passed", "reviewed", {
+    api: { method: "POST", path: "/recommendations", expected_status: [403] },
+  }),
   mk("tc_8f2a1c0e05", "用户特征-数值核对", "ui", "P1", "blocked", "draft", { expected: ["若数值相同须记录说明"] }),
   mk("tc_8f2a1c0e06", "埋点-停用按钮 click 上报", "capture", "P1", "passed", "reviewed"),
   mk("tc_8f2a1c0e07", "数据清洗-规则启停", "ui", "P2", "passed", "draft"),
-  mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed"),
+  mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed", {
+    api: { method: "POST", path: "/authorizations/disable", expected_status: [200] },
+  }),
   mk("tc_8f2a1c0e09", "多端-桌面客户端同步", "manual", "P3", "warned", "draft"),
   mk("tc_8f2a1c0e10", "埋点表-字段核对", "doc", "P2", "passed", "draft"),
   mk("tc_8f2a1c0e11", "订单-退款审核流程", "api", "P0", "passed", "reviewed", {
@@ -210,11 +214,12 @@ const setUpdate = (next: Partial<UpdateState>) => {
   listeners.update?.(updateState);
 };
 
+const apiTestSets: Record<string, ApiTestSet[]> = {};
 const mockApi: AitestApi = {
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
     const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
-      environments, kind: opts?.kind ?? "project", parent_id: opts?.parent ?? "" };
+      environments, kind: opts?.kind ?? "project", parent_id: opts?.parent ?? "", project_type: opts?.projectType ?? "multi" };
     projects.push(p);
     return delay(view(p));
   },
@@ -261,9 +266,18 @@ const mockApi: AitestApi = {
   applyFix: () => delay({}),
   generateApiSuite: () => delay({ generated: { generated: 37 }, suite: { cases: 35, skipped: 2, test: "scripts/api/test_api.py", version: "a3f9c21d7e0b" } }, 800),
   generateCases: () => delay({ message: "新增 24 条用例：UI 16、接口 6、埋点抓包 2。仍有 3 条警告（预期写成操作）。用例为草稿，等待审核。", tokens: 18420 }, 900),
+  writeReviewedApiSuite: () => delay({ cases: 3 }),
+  listApiTestSets: (p) => delay(apiTestSets[p] ?? []),
+  saveApiTestSet: (p, name, ids) => {
+    const entry = { name, case_ids: ids };
+    apiTestSets[p] = [...(apiTestSets[p] ?? []).filter((s) => s.name !== name), entry];
+    return delay(entry);
+  },
   runRegression: (id, env, opts) => requireConfirm(id, env, opts) ?? delay({
-    run: { run_id: "run_8d2f", total: 35, passed: 33, failed: 2, error: 0, skipped: 0, pass_rate: 0.943 },
-    triage: [
+    run: opts?.caseIds ? { run_id: "run_selected", total: opts.caseIds.length, passed: opts.caseIds.length,
+      failed: 0, error: 0, skipped: 0, pass_rate: 1 } :
+      { run_id: "run_8d2f", total: 35, passed: 33, failed: 2, error: 0, skipped: 0, pass_rate: 0.943 },
+    triage: opts?.caseIds ? [] : [
       { case_id: "tc_8f2a1c0e08", failure_type: "product_bug", reason: "停用后接口仍返回 200", suggestion: "提交缺陷：授权停用未生效" },
       { case_id: "tc_api_017", failure_type: "environment", reason: "确定性规则判定" },
     ],
@@ -294,6 +308,11 @@ const mockApi: AitestApi = {
     if (p) p.name = name;
     return delay({});
   },
+  setProjectType: async (id, projectType) => {
+    const p = projects.find((x) => x.id === id);
+    if (p) p.project_type = projectType;
+    return delay({});
+  },
   deleteProject: async (id) => {
     const i = projects.findIndex((x) => x.id === id);
     const [p] = projects.splice(i, 1);
@@ -301,7 +320,8 @@ const mockApi: AitestApi = {
   },
   getCase: (id) => delay(cases.find((c) => c.id === id)),
   scriptMap: (framework) => delay<Record<string, string>>(framework === "maestro"
-    ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" } : {}),
+    ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" }
+    : framework === "pytest" ? { tc_8f2a1c0e04: "scripts/api/test_api.py", tc_8f2a1c0e08: "scripts/api/test_api.py", tc_8f2a1c0e11: "scripts/api/test_api.py" } : {}),
   caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
   exploreUiCase: () => delay({ message: "已生成脚本 scripts/ui/tc_8f2a1c0e02.spec.ts，试跑通过" }, 900),
   runUiRegression: (id, env, _headed, opts) => requireConfirm(id, env, opts) ?? delay({

@@ -12,6 +12,8 @@ function subscribe<T>(channel: string, cb: (v: T) => void): () => void {
 const methods = [
   "listProjects", "createProject", "importExcel", "lint", "listCases", "updateCase", "applyFix",
   "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret",
+  "writeReviewedApiSuite", "listApiTestSets", "saveApiTestSet",
+  "setProjectType",
   "pickFile", "pickDirectory", "openTestPage",
   "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
   "listProposals", "resolveProposal", "listReviews", "resolveReview",

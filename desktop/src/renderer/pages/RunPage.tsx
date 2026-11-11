@@ -1,7 +1,8 @@
 import { ChromeOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Collapse, Empty, Progress, Space, Statistic, Table, Typography } from "antd";
 import { useState } from "react";
-import { api, type Project } from "../api";
+import { api, type Project, type TestCase } from "../api";
+import { ApiCasePicker } from "../components/ApiCasePicker";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { ApiLoginCard } from "../components/ApiLogin";
 import { EnvCredentials } from "../components/EnvCredentials";
@@ -17,9 +18,16 @@ interface RunResult {
 }
 
 export function RunPage({ project }: { project: Project }) {
+  return <ApiRunPage key={project.id} project={project} />;
+}
+
+function ApiRunPage({ project }: { project: Project }) {
   const envs = Object.keys(project.environments);
   const [env, setEnv] = useEnvChoice(project);
   const [result, setResult] = useState<RunResult>();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [available, setAvailable] = useState<TestCase[]>([]);
+  const [preparing, setPreparing] = useState(false);
   const { busy, run } = useAction();
 
   if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
@@ -33,12 +41,24 @@ export function RunPage({ project }: { project: Project }) {
         extra={<>
           <EnvSelect project={project} value={env} onChange={setEnv} showUrl />
           <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</Button>
-          <RunButton project={project} env={env} loading={busy}
-            onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env, { confirmProduction })) as RunResult))}>
-            执行回归
+          <RunButton project={project} env={env} loading={busy} disabled={preparing || !available.length}
+            onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env,
+              { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult))}>
+            全量回归（{available.length} 条已审核用例）
           </RunButton>
         </>}
       />
+      <ApiCasePicker projectId={project.id} selected={selected} onSelect={setSelected} onAvailable={setAvailable}
+        disabled={busy} onBusyChange={setPreparing} />
+      <Space style={{ marginBottom: 16 }}>
+        <RunButton project={project} env={env} loading={busy}
+          disabled={preparing || !selected.length || selected.some((id) => !available.some((c) => c.id === id))}
+          onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env,
+            { confirmProduction, caseIds: selected })) as RunResult))}>
+          执行选中项（{selected.length} 条）
+        </RunButton>
+        <Typography.Text type="secondary">仅向选中用例涉及的接口发送请求</Typography.Text>
+      </Space>
       <EnvCredentials project={project} env={env} />
       <Collapse size="small" style={{ marginBottom: 16 }} items={[{
         key: "roles",
@@ -63,7 +83,8 @@ export function RunPage({ project }: { project: Project }) {
             <Card><Statistic title="跳过" value={result.run.skipped} /></Card>
             <Card><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>
-          {failed === 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
+          {failed === 0 && result.run.total > 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
+          {result.run.total === 0 && <Alert style={{ marginTop: 16 }} type="warning" showIcon message="没有执行任何用例，请检查脚本与测试范围" />}
           <Space style={{ marginTop: 16 }}>
             <Button size="small" loading={busy} onClick={() => run(async () => {
               const out = await api().exportReport([result.run.run_id], "html");

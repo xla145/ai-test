@@ -107,5 +107,12 @@ def load_schema(name: str) -> dict[str, Any]:
     return json.loads(text)
 
 
-def validate_case(case: dict[str, Any]) -> list[str]:
-    return validate(case, load_schema("testcase.schema.json"))
+def validate_case(case: dict[str, Any], *, partial: bool = False) -> list[str]:
+    schema = load_schema("testcase.schema.json")
+    if partial:
+        schema.pop("required", None)
+    errors = validate(case, schema)
+    if isinstance(case.get("title"), str) and not case["title"].strip():
+        errors = [e for e in errors if e != "$.title: 长度小于 1"]
+        errors.append("$.title: 用例标题不能为空，请填写「模块-场景」")
+    return errors

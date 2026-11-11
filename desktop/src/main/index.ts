@@ -311,7 +311,7 @@ async function saveAs(defaultName: string, filters: { name: string; extensions: 
 function registerIpc(orch: Orchestrator): void {
   const handlers: Record<string, (...a: any[]) => unknown> = {
     listProjects: async () => rememberParents(await orch.listProjects()),
-    createProject: async (name: string, ws: string, envs, opts?: { kind?: "project" | "group"; parent?: string }) => {
+    createProject: async (name: string, ws: string, envs, opts?: Parameters<Orchestrator["createProject"]>[3]) => {
       const out = await orch.createProject(name, ws, envs, opts);
       await refreshParents(orch);
       return out;
@@ -341,9 +341,12 @@ function registerIpc(orch: Orchestrator): void {
       await setApprovalContext(orch, p);
       return orch.generateCases(p, f);
     },
-    runRegression: async (p: string, env: string, opts?: { confirmProduction?: boolean }) => {
+    writeReviewedApiSuite: (p: string) => orch.writeReviewedApiSuite(p),
+    listApiTestSets: (p: string) => orch.listApiTestSets(p),
+    saveApiTestSet: (p: string, name: string, ids: string[]) => orch.saveApiTestSet(p, name, ids),
+    runRegression: async (p: string, env: string, opts) => {
       await setApprovalContext(orch, p);
-      return orch.runRegression(p, env, { confirmProduction: opts?.confirmProduction });
+      return orch.runRegression(p, env, opts);
     },
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
@@ -380,6 +383,7 @@ function registerIpc(orch: Orchestrator): void {
       return out;
     },
     renameProject: (p: string, name: string) => orch.renameProject(p, name),
+    setProjectType: (p: string, type: Parameters<Orchestrator["setProjectType"]>[1]) => orch.setProjectType(p, type),
     deleteProject: async (p: string) => {
       const out = await orch.deleteProject(p);
       // 该项目的环境 token 与角色账号一并从钥匙串删除

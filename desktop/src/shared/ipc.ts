@@ -161,11 +161,24 @@ export interface SettingsDetail {
   parent_name: string;
 }
 
+export interface ApiTestSet {
+  name: string;
+  case_ids: string[];
+}
+
+export interface ApiRunOptions {
+  confirmProduction?: boolean;
+  /** 省略时兼容全量脚本执行；显式空数组会拒绝执行。 */
+  caseIds?: string[];
+}
+
+export type ProjectType = "web" | "app" | "api" | "multi";
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
   /** opts.kind="group" 创建大项目（不需要 workspace）；opts.parent 为所属大项目 */
   createProject(name: string, workspace: string, environments: Record<string, unknown>,
-    opts?: { kind?: "project" | "group"; parent?: string }): Promise<unknown>;
+    opts?: { kind?: "project" | "group"; parent?: string; projectType?: ProjectType }): Promise<unknown>;
   /** 移入大项目；parent 为空字符串表示移出 */
   moveProject(projectId: string, parent: string): Promise<unknown>;
   projectOverview(groupId: string): Promise<GroupOverview>;
@@ -181,7 +194,10 @@ export interface AitestApi {
   generateApiSuite(projectId: string, openapiSource: string, enrich: boolean): Promise<unknown>;
   generateCases(projectId: string, requirementFile: string): Promise<unknown>;
   /** 生产环境需要 confirmProduction，否则主进程拒绝执行 */
-  runRegression(projectId: string, env: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  runRegression(projectId: string, env: string, opts?: ApiRunOptions): Promise<unknown>;
+  writeReviewedApiSuite(projectId: string): Promise<unknown>;
+  listApiTestSets(projectId: string): Promise<ApiTestSet[]>;
+  saveApiTestSet(projectId: string, name: string, caseIds: string[]): Promise<ApiTestSet>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
   /** 留空的字段保留原值；token 为接口测试用的固定鉴权头值 */
@@ -194,6 +210,7 @@ export interface AitestApi {
   /** 同时删除该环境保存在钥匙串中的 token */
   deleteEnvironment(projectId: string, env: string): Promise<unknown>;
   renameProject(projectId: string, name: string): Promise<unknown>;
+  setProjectType(projectId: string, projectType: ProjectType): Promise<unknown>;
   /** 从客户端移除项目（数据库记录与凭据）；workspace 目录保留 */
   deleteProject(projectId: string): Promise<{ id: string; workspace_path: string }>;
   getCase(caseId: string): Promise<unknown>;
