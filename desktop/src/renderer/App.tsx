@@ -36,27 +36,30 @@ import {
   Radio,
   Select,
   Space,
-  Tabs,
   Tag,
   Timeline,
   Tooltip,
   Typography,
   theme,
+  type MenuProps,
 } from "antd";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { InputRef } from "antd";
 import type { ApprovalRequest, ProjectType } from "../shared/ipc";
 import { projectTypeOptions, visibleProjectTab } from "./projectTypes";
 import { api, isGroup, type Project } from "./api";
 import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
+import { ProjectSwitcher } from "./components/ProjectSwitcher";
 import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad } from "./hooks";
+import { lastNav, NAV_SECTIONS, navLabel, NavContext, rememberNav } from "./nav";
 import { ApiPage } from "./pages/ApiPage";
 import { AppPage } from "./pages/AppPage";
 import { GroupPage } from "./pages/GroupPage";
 import { CasesPage } from "./pages/CasesPage";
 import { DatabasePage } from "./pages/DatabasePage";
+import { HomePage, loadTodos } from "./pages/HomePage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -95,11 +98,26 @@ function describe(method: string, params: any): string | undefined {
   }
 }
 
+const NAV_ICON: Record<string, ReactNode> = {
+  home: <DashboardOutlined />,
+  cases: <AppstoreOutlined />,
+  import: <FileExcelOutlined />,
+  api: <ApiOutlined />,
+  run: <PlayCircleOutlined />,
+  ui: <ChromeOutlined />,
+  app: <MobileOutlined />,
+  reports: <FileSearchOutlined />,
+  ops: <BarChartOutlined />,
+  db: <DatabaseOutlined />,
+  settings: <ToolOutlined />,
+};
+
 export function App() {
   const { token } = theme.useToken();
   const { data: projects = [], reload } = useLoad(() => api().listProjects() as Promise<Project[]>, []);
   const [currentId, setCurrentId] = useState<string>();
-  const [tab, setTab] = useState("import");
+  /** 每个项目当前打开的页面；未打开过的项目回到上次离开时的页面 */
+  const [navByProject, setNavByProject] = useState<Record<string, string>>({});
   const [approval, setApproval] = useState<ApprovalRequest>();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -126,33 +144,35 @@ export function App() {
       btn: <Button type="primary" size="small" onClick={() => { notification.destroy(key); void api().installUpdate(); }}>重启并更新</Button>,
     });
   }, [update?.status, update?.version, notification]);
-  const current = projects.find((p) => p.id === currentId) ?? projects[0];
+  const current = projects.find((p) => p.id === currentId) ?? projects.find((p) => !isGroup(p)) ?? projects[0];
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
   const compact = viewVisible;
-  const projectsCtx = useMemo(() => ({
-    reload, projects,
-    goTab: (key: string) => setTab(key),
+  const parent = current?.parent_id ? projects.find((x) => x.id === current.parent_id) : undefined;
+  const group = isGroup(current);
+
+  const savedNav = current ? navByProject[current.id] ?? lastNav(current.id) : "home";
+  // 测试端调整后某些页面不再显示：回到概览
+  const nav = current && !group && visibleProjectTab(savedNav, current.project_type) && savedNav !== "settings" ? savedNav : "home";
+  // 侧栏角标与概览待办：切换页面后重新统计（页面上的审核、合并会改变计数）
+  const todos = useLoad(async () => current && !group ? { id: current.id, ...(await loadTodos(current)) } : undefined,
+    [current?.id, current?.project_type, nav]);
+  const currentTodos = todos.data?.id === current?.id ? todos.data : undefined;
+
+  const go = useCallback((key: string) => {
+    if (!current) return;
+    if (key === "settings") return setProjectSettingsOpen({});
+    setShowSettings(false);
+    setNavByProject((m) => ({ ...m, [current.id]: key }));
+    rememberNav(current.id, key);
+  }, [current]);
+  const navCtx = useMemo(() => ({ go }), [go]);
+  const projectsCtx = useMemo(() => ({ reload, projects, goTab: go,
     openSettings: (opts?: { addEnv?: boolean }) => setProjectSettingsOpen(opts ?? {}),
-  }), [reload, projects]);
-  const groups = projects.filter(isGroup);
-  const parentOf = (p?: Project) => (p?.parent_id ? projects.find((x) => x.id === p.parent_id) : undefined);
-  // 侧栏树：大项目 → 概览 + 子项目 + 新建子项目；独立项目在后
-  const menuItems = [
-    ...groups.map((g) => ({
-      key: `group:${g.id}`,
-      icon: <ClusterOutlined />,
-      label: g.name,
-      children: [
-        { key: g.id, icon: <DashboardOutlined />, label: "概览与共享配置" },
-        ...projects.filter((p) => p.parent_id === g.id).map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name })),
-        { key: `new:${g.id}`, icon: <PlusOutlined />, label: <Typography.Text type="secondary">新建子项目</Typography.Text> },
-      ],
-    })),
-    ...projects.filter((p) => !isGroup(p) && !p.parent_id).map((p) => ({ key: p.id, icon: <FolderOpenOutlined />, label: p.name })),
-  ];
-  const [openGroups, setOpenGroups] = useState<string[]>();
-  // 默认展开全部大项目；之后由用户折叠 / 展开
-  const openKeys = openGroups ?? groups.map((g) => `group:${g.id}`);
+  }), [reload, projects, go]);
+  const openProject = (id: string) => {
+    setCurrentId(id);
+    setShowSettings(false);
+  };
 
   useEffect(() => {
     const offApproval = api().onApprovalRequest(setApproval);
@@ -175,24 +195,63 @@ export function App() {
     setApproval(undefined);
   }, [approval]);
 
-  const tabs = current
+  /** 侧栏角标：需要人处理的数量 */
+  const badgeOf = (key: string): { n: number; danger?: boolean } | undefined => {
+    const t = currentTodos;
+    if (!t) return undefined;
+    return {
+      cases: { n: t.draft },
+      import: { n: t.blocked, danger: true },
+      ui: { n: t.proposals + t.reviews },
+      ops: { n: t.attributions },
+    }[key];
+  };
+  const navLabelNode = (key: string, label: string) => {
+    const b = badgeOf(key);
+    return (
+      <span className="nav-label">
+        <span className="nav-label-text">{label}</span>
+        {!!b?.n && <Badge count={b.n} size="small" overflowCount={99}
+          style={b.danger ? undefined : { background: token.colorFillSecondary, color: token.colorTextSecondary, boxShadow: "none" }} />}
+      </span>
+    );
+  };
+
+  // 侧栏导航：项目按工作流分组；大项目显示概览与子项目
+  const menuItems: MenuProps["items"] = !current ? [] : group
     ? [
-        { key: "import", label: "用例导入与检查", icon: <FileExcelOutlined />, children: <ImportPage project={current} /> },
-        { key: "api", label: "接口用例生成", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
-        { key: "cases", label: "用例库", icon: <AppstoreOutlined />, children: <CasesPage project={current} /> },
-        { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
-        { key: "ui", label: "Web UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
-        { key: "db", label: "数据库", icon: <DatabaseOutlined />, children: <DatabasePage project={current} onChanged={reload} /> },
-        { key: "reports", label: "测试报告", icon: <FileSearchOutlined />, children: <ReportsPage project={current} /> },
-        { key: "app", label: "App 测试", icon: <MobileOutlined />, children: <AppPage project={current} /> },
-        { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
-      ].filter((t) => visibleProjectTab(t.key, current.project_type))
-    : [];
+        { key: "home", icon: <DashboardOutlined />, label: "概览与共享配置" },
+        { type: "group", key: "children", label: "子项目", children: [
+          ...projects.filter((p) => p.parent_id === current.id).map((p) => ({ key: `open:${p.id}`, icon: <FolderOpenOutlined />, label: p.name })),
+          { key: `new:${current.id}`, icon: <PlusOutlined />, label: <Typography.Text type="secondary">新建子项目</Typography.Text> },
+        ] },
+      ]
+    : NAV_SECTIONS.flatMap<NonNullable<MenuProps["items"]>[number]>((s) => {
+        const items = s.items.filter((i) => visibleProjectTab(i.key, current.project_type))
+          .map((i) => ({ key: i.key, icon: NAV_ICON[i.key], label: navLabelNode(i.key, i.label) }));
+        return s.title ? [{ type: "group" as const, key: s.key, label: s.title, children: items }] : items;
+      });
+
+  const page = (p: Project, key: string): ReactNode => {
+    switch (key) {
+      case "import": return <ImportPage project={p} />;
+      case "api": return <ApiPage project={p} />;
+      case "cases": return <CasesPage project={p} />;
+      case "run": return <RunPage project={p} />;
+      case "ui": return <UiPage project={p} />;
+      case "db": return <DatabasePage project={p} onChanged={reload} />;
+      case "reports": return <ReportsPage project={p} />;
+      case "app": return <AppPage project={p} />;
+      case "ops": return <OpsPage project={p} />;
+      default: return <HomePage project={p} todos={currentTodos} />;
+    }
+  };
 
   return (
     <ProjectsContext.Provider value={projectsCtx}>
+    <NavContext.Provider value={navCtx}>
     <Layout className={`app-shell ${viewVisible ? "with-view" : ""}`}>
-      <Sider width={232} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
+      <Sider width={224} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
         style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}>
         <Flex vertical style={{ height: "100%" }}>
           <div className={`brand ${compact ? "compact" : ""}`}>
@@ -200,22 +259,19 @@ export function App() {
             {!compact && "AIProbe"}
           </div>
           <div className="sider-section">
-            <Tooltip title={compact ? "新建项目" : undefined} placement="right">
-              <Button block type="dashed" icon={<PlusOutlined />} aria-label="新建项目" onClick={() => setCreating({})}>
-                {!compact && "新建项目"}
-              </Button>
-            </Tooltip>
+            <ProjectSwitcher projects={projects} current={current} compact={compact}
+              onSelect={openProject} onCreate={setCreating} />
           </div>
           <Menu
             mode="inline"
-            style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 8 }}
-            selectedKeys={current && !showSettings ? [current.id] : []}
-            openKeys={compact ? undefined : openKeys}
-            onOpenChange={(keys) => setOpenGroups(keys as string[])}
+            className="side-nav"
+            inlineCollapsed={compact}
+            style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 4 }}
+            selectedKeys={current && !showSettings ? [nav] : []}
             onClick={(e) => {
               if (e.key.startsWith("new:")) return setCreating({ parent: e.key.slice(4) });
-              setCurrentId(e.key);
-              setShowSettings(false);
+              if (e.key.startsWith("open:")) return openProject(e.key.slice(5));
+              go(e.key);
             }}
             items={menuItems}
           />
@@ -260,30 +316,28 @@ export function App() {
 
       <Layout>
         {current && !showSettings && (
-          <Header style={{ padding: "0 24px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+          <Header style={{ padding: "0 24px", height: 52, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
               <Flex align="center" gap={8} style={{ minWidth: 0 }}>
-                {parentOf(current) && (
+                {parent && (
                   <>
-                    <Typography.Link type="secondary" style={{ fontSize: 16, whiteSpace: "nowrap" }}
-                      onClick={() => setCurrentId(parentOf(current)!.id)}>{parentOf(current)!.name}</Typography.Link>
+                    <Typography.Link type="secondary" style={{ whiteSpace: "nowrap" }} onClick={() => openProject(parent.id)}>{parent.name}</Typography.Link>
                     <Typography.Text type="secondary">/</Typography.Text>
                   </>
                 )}
-                <Typography.Text strong ellipsis style={{ fontSize: 16, minWidth: 0 }}>{current.name}</Typography.Text>
-                {isGroup(current) && <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>大项目</Tag>}
-                {!isGroup(current) && <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
-                  {projectTypeOptions.find((o) => o.value === (current.project_type ?? "multi"))?.label}
-                </Tag>}
-                <Tooltip title="项目设置：名称、测试端、执行环境">
-                  <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
-                </Tooltip>
-                {!compact && current.workspace_path && (
-                  <Tooltip title={current.workspace_path}>
-                    <Typography.Text type="secondary" className="mono" ellipsis style={{ minWidth: 0 }}>
-                      {current.workspace_path}
-                    </Typography.Text>
-                  </Tooltip>
+                {nav !== "home" ? (
+                  <>
+                    <Typography.Link type="secondary" style={{ whiteSpace: "nowrap" }} onClick={() => go("home")}>{current.name}</Typography.Link>
+                    <Typography.Text type="secondary">/</Typography.Text>
+                    <Typography.Text strong ellipsis style={{ minWidth: 0 }}>{navLabel(nav)}</Typography.Text>
+                  </>
+                ) : (
+                  <Typography.Text strong ellipsis style={{ minWidth: 0 }}>{current.name}</Typography.Text>
+                )}
+                {group ? <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>大项目</Tag> : !compact && (
+                  <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
+                    {projectTypeOptions.find((o) => o.value === (current.project_type ?? "multi"))?.label}
+                  </Tag>
                 )}
               </Flex>
               <Space size={4} style={{ flexShrink: 0 }}>
@@ -292,6 +346,11 @@ export function App() {
                     <Tag color={env.production ? "red" : "blue"} bordered={false}>{env.production ? `${name}（生产）` : name}</Tag>
                   </Tooltip>
                 ))}
+                {!group && (
+                  <Tooltip title="项目设置：名称、测试端、执行环境">
+                    <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
+                  </Tooltip>
+                )}
                 {viewVisible && (
                   <Button size="small" icon={<CloseOutlined />} onClick={() => api().hideTestView?.()}>收起浏览器</Button>
                 )}
@@ -302,26 +361,15 @@ export function App() {
         <Content style={{ overflow: "hidden" }}>
           {showSettings ? (
             <div className="page"><SettingsPage /></div>
-          ) : current && isGroup(current) ? (
-            <div className="page">
-              <GroupPage group={current} onOpen={setCurrentId} onNewChild={() => setCreating({ parent: current.id })} />
+          ) : current && group ? (
+            <div className="page" key={current.id}>
+              <GroupPage group={current} onOpen={openProject} onNewChild={() => setCreating({ parent: current.id })} />
             </div>
           ) : current ? (
-            <Tabs
-              activeKey={tabs.some((t) => t.key === tab) ? tab : "cases"}
-              onChange={setTab}
-              items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: (
-                <div className="page">
-                  {/* 半屏（内嵌浏览器打开）时不占用高度 */}
-                  {!compact && <ProjectGuide key={current.id} project={current} />}
-                  {t.children}
-                </div>
-              ) }))}
-              tabBarStyle={{ padding: "0 24px", marginBottom: 0 }}
-              className="project-tabs"
-              style={{ height: "100%" }}
-              destroyOnHidden
-            />
+            <div className="page" key={`${current.id}:${nav}`}>
+              {!compact && <ProjectGuide key={current.id} project={current} />}
+              {page(current, nav)}
+            </div>
           ) : (
             <Flex align="center" justify="center" style={{ height: "100%" }}>
               <Empty description="还没有项目">
@@ -340,17 +388,7 @@ export function App() {
           onDeleted={() => setCurrentId(undefined)} />
       )}
 
-      <NewProjectModal open={!!creating} preset={creating || NO_PRESET} groups={groups} onClose={() => setCreating(false)} onCreated={async (p) => {
-        await reload();
-        setCurrentId(p.id);
-        setShowSettings(false);
-        // 新项目从第一步开始；所属大项目在侧栏展开，能看到新建的子项目
-        setTab("import");
-        if (p.parent_id) setOpenGroups((keys) => {
-          const all = keys ?? groups.map((g) => `group:${g.id}`);
-          return all.includes(`group:${p.parent_id}`) ? all : [...all, `group:${p.parent_id}`];
-        });
-      }} />
+      <NewProjectModal open={!!creating} preset={creating || NO_PRESET} groups={projects.filter(isGroup)} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); openProject(p.id); }} />
 
       <Modal
         open={!!approval}
@@ -384,6 +422,7 @@ export function App() {
         )}
       </Drawer>
     </Layout>
+    </NavContext.Provider>
     </ProjectsContext.Provider>
   );
 }
