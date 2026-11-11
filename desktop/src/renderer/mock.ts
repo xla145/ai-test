@@ -56,6 +56,18 @@ const cases = [
   mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed"),
   mk("tc_8f2a1c0e09", "多端-桌面客户端同步", "manual", "P3", "warned", "draft"),
   mk("tc_8f2a1c0e10", "埋点表-字段核对", "doc", "P2", "passed", "draft"),
+  mk("tc_8f2a1c0e11", "订单-退款审核流程", "api", "P0", "passed", "reviewed", {
+    type: "api", module_path: ["特征中心", "订单"],
+    steps: ["买家下单", "买家支付", "买家申请退款", "运营审核退款", "买家查看订单"],
+    expected: ["下单成功", "支付成功", "状态为退款中", "审核通过", "订单状态为已退款"],
+    api_flow: [
+      { name: "买家下单", role: "买家", method: "POST", path: "/orders", expected_status: [201], extract: { order_id: "data.id" } },
+      { name: "买家支付", role: "买家", method: "POST", path: "/orders/${order_id}/pay", expected_status: [200], expected_fields: { "data.status": "paid" } },
+      { name: "买家申请退款", role: "买家", method: "POST", path: "/orders/${order_id}/refund", expected_status: [200], expected_fields: { "data.status": "refunding" } },
+      { name: "运营审核退款", role: "运营", method: "POST", path: "/admin/refunds/${order_id}/approve", expected_status: [200] },
+      { name: "买家查看订单", role: "买家", method: "GET", path: "/orders/${order_id}", expected_status: [200], expected_fields: { "data.status": "refunded" } },
+    ],
+  }),
   mk("tc_app_001", "标签管理-App端停用标签", "app", "P0", "passed", "reviewed", { type: "app" }),
   mk("tc_app_003", "综合总览-App端指标卡片", "app", "P1", "passed", "reviewed", { type: "app" }),
   mk("tc_app_007", "登录-iOS 面容登录", "app", "P1", "warned", "draft", { type: "app" }),
@@ -140,6 +152,11 @@ const requireConfirm = (id: string, env: string, opts?: { confirmProduction?: bo
     ? Promise.reject(new Error(`「${env}」是生产环境，需要确认后才能执行`)) : undefined;
 };
 
+const roleSecrets: Record<string, { account: boolean; token: boolean; inherited: boolean }> = {
+  管理员: { account: true, token: false, inherited: true },
+  运营: { account: true, token: true, inherited: true },
+};
+
 const listeners: {
   approval?: (r: ApprovalRequest) => void;
   event?: (e: { method: string; params: unknown }) => void;
@@ -206,7 +223,11 @@ const mockApi: AitestApi = {
   }, 900),
   tokenUsage: () => delay({ tokens: 412300 }),
   setEnvSecret: () => delay(undefined),
-  setRoleSecret: () => delay(undefined),
+  setRoleSecret: async (_p, role, username, _password, token) => {
+    roleSecrets[role] = { account: Boolean(username) || roleSecrets[role]?.account || false, token: Boolean(token) || roleSecrets[role]?.token || false, inherited: false };
+    return delay(undefined);
+  },
+  roleSecretStatus: () => delay(roleSecrets),
   listRoles: (id) => delay(id === "grp_feature" || projects.find((x) => x.id === id)?.parent_id === "grp_feature"
     ? [{ role_name: "管理员" }, { role_name: "运营" }, { role_name: "分析师" }, { role_name: "访客" }]
         .map((r) => (id === "grp_feature" ? r : { ...r, inherited_from: "grp_feature" }))

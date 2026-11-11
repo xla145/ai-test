@@ -59,7 +59,7 @@ describe("mcp server", () => {
     const secrets = { resolve: vi.fn(async () => ({ AITEST_AUTH_TOKEN: "Bearer s3cret" })) };
     const { client } = await connect("api-runner", run as unknown as typeof runEngine, secrets);
     const res = await client.callTool({ name: "run_api_suite", arguments: { project_id: "p1", env: "test" } });
-    expect(secrets.resolve).toHaveBeenCalledWith("p1", "test");
+    expect(secrets.resolve).toHaveBeenCalledWith("p1", "test", { roles: ["*"] });
     const [args, opts] = run.mock.calls[0] as unknown as [string[], { env: Record<string, string> }];
     expect(args).toEqual(["run-api-suite", "--project", "p1", "--env", "test"]);
     expect(opts.env.AITEST_AUTH_TOKEN).toBe("Bearer s3cret");

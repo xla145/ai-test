@@ -165,7 +165,10 @@ export interface AitestApi {
   runRegression(projectId: string, env: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
-  setRoleSecret(projectId: string, role: string, username: string, password: string): Promise<void>;
+  /** 留空的字段保留原值；token 为接口测试用的固定鉴权头值 */
+  setRoleSecret(projectId: string, role: string, username: string, password: string, token?: string): Promise<void>;
+  /** 各角色已保存的凭据种类（不含明文），inherited 表示来自大项目 */
+  roleSecretStatus(projectId: string): Promise<Record<string, { account: boolean; token: boolean; inherited: boolean }>>;
   /** 子项目包含继承自大项目的角色（inherited_from 为大项目 ID） */
   listRoles(projectId: string): Promise<{ role_name: string; inherited_from?: string }[]>;
   setEnvironment(projectId: string, env: string, cfg: Record<string, unknown>): Promise<unknown>;

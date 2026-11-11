@@ -1,6 +1,6 @@
 import { Descriptions, Drawer, Skeleton, Table, Tag, Typography } from "antd";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, type TestCase } from "../api";
+import { api, type ApiStep, type TestCase } from "../api";
 import { LabelTag, LINT, MODE, STATUS } from "./labels";
 
 export const PRIORITY_COLOR: Record<string, string> = { P0: "red", P1: "orange", P2: "blue", P3: "default" };
@@ -82,6 +82,35 @@ export function CaseDrawer({ caseId, onClose, extra, data }: {
             <>
               <Typography.Title level={5} style={{ marginTop: 16 }}>前置条件</Typography.Title>
               <ol className="case-steps">{detail.preconditions.map((p, i) => <li key={i}>{p}</li>)}</ol>
+            </>
+          )}
+          {(detail.api_flow?.length || detail.api) && (
+            <>
+              <Typography.Title level={5} style={{ marginTop: 16 }}>{detail.api_flow?.length ? "接口流程" : "接口请求"}</Typography.Title>
+              <Table size="small" pagination={false} rowKey={(_, i) => String(i)} scroll={{ x: 480 }}
+                dataSource={detail.api_flow?.length ? detail.api_flow : [detail.api!]}
+                columns={[
+                  { title: "#", width: 36, render: (_: unknown, __: unknown, i: number) => i + 1 },
+                  { title: "步骤", render: (_: unknown, s: ApiStep) => (
+                    <>
+                      {s.name && <div>{s.name}</div>}
+                      <Typography.Text className="mono" style={{ fontSize: 12 }}>{s.method} {s.path}</Typography.Text>
+                    </>
+                  ) },
+                  { title: "角色", dataIndex: "role", width: 90, render: (r?: string) =>
+                    r ? <Tag color="blue" bordered={false}>{r}</Tag> : <Typography.Text type="secondary" style={{ fontSize: 12 }}>默认</Typography.Text> },
+                  { title: "预期", width: 170, render: (_: unknown, s: ApiStep) => (
+                    <>
+                      <Tag bordered={false}>{s.expected_status.join(" / ")}</Tag>
+                      {Object.entries(s.expected_fields ?? {}).map(([k, v]) => (
+                        <div key={k} className="mono" style={{ fontSize: 12 }}>{k} = {JSON.stringify(v)}</div>
+                      ))}
+                      {Object.keys(s.extract ?? {}).length > 0 && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>提取 {Object.keys(s.extract!).join("、")}</Typography.Text>
+                      )}
+                    </>
+                  ) },
+                ]} />
             </>
           )}
           <Typography.Title level={5} style={{ marginTop: 16 }}>步骤与预期</Typography.Title>

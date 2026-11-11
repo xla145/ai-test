@@ -44,6 +44,21 @@ export interface TestCase {
   lint_status: string;
   status: string;
   data_refs?: string[];
+  /** 接口：单个请求 */
+  api?: ApiStep | null;
+  /** 接口流程：多个请求按顺序执行，每步可用不同角色 */
+  api_flow?: ApiStep[];
+}
+
+export interface ApiStep {
+  name?: string;
+  role?: string;
+  method: string;
+  path: string;
+  expected_status: number[];
+  expected_fields?: Record<string, unknown>;
+  extract?: Record<string, string>;
+  auth?: boolean;
 }
 
 export interface LintIssue {

@@ -224,9 +224,10 @@ export class Orchestrator extends EventEmitter {
     if (!envCfg) throw new Error(`项目未配置环境：${env}`);
     if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     this.emit("progress", { projectId, stage: "run", env });
+    // 接口多账号：注入全部角色的凭据（账号密码与固定 token），流程中每步按角色鉴权
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env],
-      this.deps.secretEnv(projectId, env),
+      this.deps.secretEnv(projectId, env, ["*"]),
     );
     let triage: TriageItem[] | undefined;
     if (opts.autoTriage !== false && run.needs_agent.length) {

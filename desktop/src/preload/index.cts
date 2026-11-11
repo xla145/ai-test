@@ -20,7 +20,7 @@ const methods = [
   "saveGlobalSettings", "checkModel", "checkRuntime", "getUserInfo", "openDataDir", "hideTestView",
   "runAppRegression", "exploreAppCase",
   "moveProject", "projectOverview", "getSettingsDetail",
-  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap",
+  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
 ] as const;
 

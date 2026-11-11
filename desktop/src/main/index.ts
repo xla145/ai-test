@@ -326,9 +326,29 @@ function registerIpc(orch: Orchestrator): void {
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
       secretStore.set(SecretStore.ref(p, env), { authToken, authHeader }),
-    setRoleSecret: async (p: string, role: string, username: string, password: string) => {
+    // 留空的字段保留原值：只补接口 token 时不必重新输入账号密码
+    setRoleSecret: async (p: string, role: string, username: string, password: string, token?: string) => {
       await orch.addRole(p, role);
-      secretStore.set(SecretStore.roleRef(p, role), { username, password });
+      const prev = secretStore.getRole(p, role);
+      const next = {
+        username: username || prev?.username || "",
+        password: password || prev?.password || "",
+        ...(token !== undefined ? (token ? { token } : {}) : prev?.token ? { token: prev.token } : {}),
+      };
+      if (!next.username && !next.token) throw new Error("请填写账号密码或接口 token");
+      secretStore.set(SecretStore.roleRef(p, role), next);
+    },
+    /** 各角色已保存哪些凭据（不返回明文）：账号密码 / 接口 token，以及是否继承自大项目 */
+    roleSecretStatus: (p: string) => {
+      const parent = projectParents.get(p);
+      const status: Record<string, { account: boolean; token: boolean; inherited: boolean }> = {};
+      for (const [pid, inherited] of [...(parent ? [[parent, true] as const] : []), [p, false] as const]) {
+        for (const role of secretStore.roleNames(pid)) {
+          const s = secretStore.getRole(pid, role);
+          status[role] = { account: Boolean(s?.username), token: Boolean(s?.token), inherited };
+        }
+      }
+      return status;
     },
     listRoles: (p: string) => orch.listRoles(p),
     setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),

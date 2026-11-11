@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -33,6 +34,8 @@ class EnvConfig:
     auth_header: str = "Authorization"
     auth_token: str = ""  # 由客户端从钥匙串取出后传入，不落库
     timeout: float = 30
+    # 多账号：环境的接口登录配置（不含凭据），角色账号密码由客户端以 AITEST_ROLES 注入
+    api_login: dict | None = None
 
     def to_env(self) -> dict[str, str]:
         return {
@@ -40,6 +43,7 @@ class EnvConfig:
             "AITEST_AUTH_HEADER": self.auth_header,
             "AITEST_AUTH_TOKEN": self.auth_token,
             "AITEST_TIMEOUT": str(self.timeout),
+            **({"AITEST_API_LOGIN": json.dumps(self.api_login, ensure_ascii=False)} if self.api_login else {}),
         }
 
 

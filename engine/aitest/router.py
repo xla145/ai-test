@@ -25,7 +25,7 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
 
 
 def route(case: TestCase) -> str:
-    if case.type == "api" or case.api is not None:
+    if case.type == "api" or case.is_api_executable:
         return ExecutionMode.API.value
     if case.type == "app":
         return ExecutionMode.APP.value
