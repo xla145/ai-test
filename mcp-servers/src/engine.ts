@@ -46,6 +46,11 @@ export function runEngine<T = unknown>(args: string[], opts: EngineOptions = {})
       try {
         parsed = JSON.parse(line);
       } catch {
+        const missingModule = err.match(/ModuleNotFoundError: No module named ['"]([^'"\r\n]+)['"]/);
+        if (missingModule) {
+          reject(new EngineError(`Python 引擎缺少模块 ${missingModule[1]}（解释器：${python}）。开发环境请在仓库根目录运行 npm run prepare:engine -w desktop，并重新启动应用；自定义 Python 请安装 engine/pyproject.toml 中的依赖。`));
+          return;
+        }
         reject(new EngineError(`引擎输出无法解析：${line.slice(0, 500)} ${err.slice(-500)}`));
         return;
       }

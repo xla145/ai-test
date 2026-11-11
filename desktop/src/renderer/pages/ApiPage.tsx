@@ -1,5 +1,5 @@
 import { FileTextOutlined, RobotOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Descriptions, Result, Space, Steps, Switch, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Input, Result, Segmented, Space, Steps, Switch, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project } from "../api";
 import { PageHeader } from "../components/PageHeader";
@@ -13,6 +13,8 @@ interface SuiteResult {
 
 export function ApiPage({ project }: { project: Project }) {
   const [enrich, setEnrich] = useState(false);
+  const [sourceType, setSourceType] = useState<"file" | "url">("file");
+  const [openapiUrl, setOpenapiUrl] = useState("");
   const [result, setResult] = useState<SuiteResult>();
   const [agentResult, setAgentResult] = useState<{ message: string; tokens: number }>();
   const { busy, run } = useAction();
@@ -20,6 +22,18 @@ export function ApiPage({ project }: { project: Project }) {
   const fromOpenapi = () => run(async () => {
     const file = await api().pickFile([{ name: "OpenAPI / Swagger", extensions: ["json", "yaml", "yml"] }]);
     if (file) setResult((await api().generateApiSuite(project.id, file, enrich)) as SuiteResult);
+  }, "接口用例与脚本已生成");
+
+  const fromOpenapiUrl = () => run(async () => {
+    const source = openapiUrl.trim();
+    let url: URL;
+    try {
+      url = new URL(source);
+    } catch {
+      throw new Error("请输入有效的 OpenAPI HTTP/HTTPS 地址");
+    }
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("OpenAPI 地址仅支持 HTTP/HTTPS");
+    setResult((await api().generateApiSuite(project.id, source, enrich)) as SuiteResult);
   }, "接口用例与脚本已生成");
 
   const fromRequirement = () => run(async () => {
@@ -44,8 +58,17 @@ export function ApiPage({ project }: { project: Project }) {
               确定性生成基线用例与脚本，不耗模型。需要业务场景（先创建再查询等接口依赖）时，可让 agent 在此基础上补充。
             </Typography.Paragraph>
             <Space direction="vertical" style={{ width: "100%" }}>
+              <Segmented value={sourceType} disabled={busy} onChange={(value) => setSourceType(value as "file" | "url")}
+                options={[{ label: "文件导入", value: "file" }, { label: "地址导入", value: "url" }]} />
+              {sourceType === "url" && <>
+                <Input aria-label="OpenAPI 文档地址" placeholder="https://example.com/v3/api-docs" value={openapiUrl}
+                  onChange={(e) => setOpenapiUrl(e.target.value)} disabled={busy} />
+                <Typography.Text type="secondary">填写 JSON/YAML 规范文档的 HTTP/HTTPS 地址，支持 OpenAPI 3.x 和 Swagger 2.0。</Typography.Text>
+              </>}
               <Space><Switch checked={enrich} onChange={setEnrich} /><span>让 agent 补充业务场景用例（消耗模型）</span></Space>
-              <Button type="primary" loading={busy} onClick={fromOpenapi}>选择 OpenAPI 文件</Button>
+              {sourceType === "file"
+                ? <Button type="primary" loading={busy} onClick={fromOpenapi}>选择 OpenAPI 文件</Button>
+                : <Button type="primary" loading={busy} disabled={!openapiUrl.trim()} onClick={fromOpenapiUrl}>从地址导入并生成</Button>}
             </Space>
           </Card>
         </div>

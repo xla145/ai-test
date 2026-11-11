@@ -639,7 +639,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("parse-requirement", cmd_parse_requirement, (("--project",), req), (("--file",), req))
     add("list-sections", cmd_list_sections, (("--project",), req), (("--query",), {}),
         (("--full",), {"action": "store_true"}))
-    add("parse-openapi", cmd_parse_openapi, (("--file",), req))
+    add("parse-openapi", cmd_parse_openapi, (("--file",), {**req, "help": "JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址"}))
     add("import-excel", cmd_import_excel, (("--project",), req), (("--file",), req), (("--sheet",), {}),
         (("--column-map",), {}))
     add("lint", cmd_lint, (("--project",), req), (("--case-ids",), {}),
@@ -655,7 +655,8 @@ def build_parser() -> argparse.ArgumentParser:
         *[((f"--{k}",), {}) for k in ("type", "priority", "execution-mode", "status", "lint-status")], *paging)
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
     add("route", cmd_route, (("--project",), req), (("--overwrite",), {"action": "store_true"}))
-    add("generate-api-cases", cmd_generate_api_cases, (("--project",), req), (("--openapi",), req),
+    add("generate-api-cases", cmd_generate_api_cases, (("--project",), req),
+        (("--openapi",), {**req, "help": "JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址"}),
         (("--operation",), {}))
     add("write-api-suite", cmd_write_api_suite, (("--project",), req), (("--suite",), {"default": "api"}),
         (("--reviewed-only",), {"action": "store_true"}))

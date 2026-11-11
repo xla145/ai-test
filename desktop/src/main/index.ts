@@ -88,9 +88,11 @@ const paths = {
   codexHome: () => join(app.getPath("userData"), "codex"),
   codexBin: () => codexBin().path,
   engineDir: () => (app.isPackaged ? join(process.resourcesPath, "engine") : join(repoRoot, "engine")),
-  // 安装包内附带引擎的纯 Python 依赖（openpyxl、httpx、pytest 等），用户只需要 Python 3.10+
+  // 开发和打包模式都加载预先准备的纯 Python 依赖，避免依赖全局 Python 环境。
   enginePythonPath: () =>
-    app.isPackaged ? [join(process.resourcesPath, "engine"), join(process.resourcesPath, "engine-deps")].join(delimiter) : join(repoRoot, "engine"),
+    (app.isPackaged
+      ? [join(process.resourcesPath, "engine"), join(process.resourcesPath, "engine-deps")]
+      : [join(repoRoot, "engine"), join(repoRoot, ".release", "engine-deps")]).join(delimiter),
   // MCP Server 由 Codex 以独立进程启动，必须是 asar 之外的真实文件
   mcpEntry: () => unpacked(join(dirname(require.resolve("@ai-test/mcp-servers/package.json")), "dist", "index.js")),
   python: () => python().path,

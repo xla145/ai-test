@@ -1,8 +1,87 @@
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import httpx
+import pytest
+import yaml
 
 from aitest.apigen import generate_suite, sample_value, write_pytest_suite
 from aitest.openapi import parse_openapi
 from aitest.schema import validate, validate_case
+
+
+@pytest.fixture
+def spec_server(openapi_path):
+    document = openapi_path.read_text(encoding="utf-8")
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/spec.yaml")
+                self.end_headers()
+                return
+            content = {
+                "/spec.yaml": document,
+                "/spec.json": json.dumps(yaml.safe_load(document)),
+                "/swagger.json": json.dumps({"swagger": "2.0", "info": {"title": "Swagger"}, "paths": {}}),
+                "/ui": "<html>Swagger UI</html>",
+                "/invalid": "openapi: [invalid",
+            }.get(self.path)
+            self.send_response(200 if content is not None else 404)
+            self.end_headers()
+            self.wfile.write((content or "Not found").encode("utf-8"))
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@pytest.mark.parametrize("path", ["/spec.yaml", "/spec.json", "/redirect"])
+def test_import_url_matches_file(spec_server, openapi_path, path):
+    remote = parse_openapi(f"{spec_server}{path}")
+    local = parse_openapi(openapi_path)
+    assert remote == local
+    assert [c.title for c in generate_suite(remote)] == [c.title for c in generate_suite(local)]
+
+
+def test_import_swagger_url(spec_server):
+    assert parse_openapi(f"{spec_server}/swagger.json").title == "Swagger"
+
+
+@pytest.mark.parametrize("path, message", [
+    ("/missing", "HTTP 404"),
+    ("/ui", "而非 Swagger UI 页面"),
+    ("/invalid", "内容无法解析"),
+])
+def test_import_url_errors(spec_server, path, message):
+    with pytest.raises(ValueError, match=message):
+        parse_openapi(f"{spec_server}{path}")
+
+
+def test_import_url_timeout(monkeypatch):
+    def timeout(*args, **kwargs):
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(httpx, "get", timeout)
+    with pytest.raises(ValueError, match="无法读取 OpenAPI 地址"):
+        parse_openapi("https://example.com/openapi.json")
+
+
+def test_import_json_file(tmp_path, openapi_path):
+    target = tmp_path / "openapi.json"
+    target.write_text(json.dumps(yaml.safe_load(openapi_path.read_text(encoding="utf-8"))), encoding="utf-8")
+    assert parse_openapi(str(target)) == parse_openapi(openapi_path)
 
 
 def test_parse(openapi_path):

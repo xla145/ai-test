@@ -96,7 +96,7 @@ export const SERVERS: ServerDef[] = [
       {
         name: "parse_openapi",
         description: "解析 OpenAPI / Swagger：接口、参数类型与约束、状态码",
-        input: { file: z.string() },
+        input: { file: z.string().describe("本地 JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址") },
         toArgs: (i) => ["parse-openapi", "--file", String(i.file)],
       },
     ],
@@ -217,7 +217,7 @@ export const SERVERS: ServerDef[] = [
       {
         name: "generate_api_cases",
         description: "从 OpenAPI 生成基线接口用例：正向、必填缺失、边界值、类型错误、鉴权、幂等",
-        input: { project_id: project, openapi: z.string(), operation_id: z.string().optional() },
+        input: { project_id: project, openapi: z.string().describe("本地 JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址"), operation_id: z.string().optional() },
         toArgs: (i) => ["generate-api-cases", "--project", String(i.project_id), "--openapi", String(i.openapi), ...opt("--operation", i.operation_id)],
       },
       {
