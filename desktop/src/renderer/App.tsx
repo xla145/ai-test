@@ -50,7 +50,6 @@ import { projectTypeOptions, visibleProjectTab } from "./projectTypes";
 import { api, isGroup, type Project } from "./api";
 import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
-import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad, useProjectChanged } from "./hooks";
