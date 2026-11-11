@@ -94,12 +94,17 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
         "run": {
             "id": run_id, "env": r["env"], "mode": r["mode"], "started_at": r["started_at"],
             "framework": _framework(result), "html_report": result.get("html_report"), "junit": result.get("junit"),
-            "base_url": (project.environments.get(r["env"], {}) or {}).get("base_url", "") if project else "",
+            "base_url": (_effective_envs(store, project).get(r["env"], {}) or {}).get("base_url", "") if project else "",
         },
         "project": {"id": project.id, "name": project.name, "workspace_path": project.workspace_path} if project else None,
         "summary": _summary(results),
         "results": results,
     }
+
+
+def _effective_envs(store: Store, project: Any) -> dict[str, Any]:
+    parent = store.get_project(project.parent_id) if getattr(project, "parent_id", None) else None
+    return {**(parent.environments if parent else {}), **project.environments}
 
 
 def _has_table(store: Store, name: str) -> bool:

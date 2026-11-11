@@ -35,6 +35,12 @@ const tempFile = (name: string, content: string) => {
 };
 const opt = (flag: string, v: unknown): string[] =>
   v === undefined || v === null || v === "" || v === false ? [] : v === true ? [flag] : [flag, String(v)];
+/** 列表工具的可选分页：传 page_size 后返回 {items, total, page, page_size}，避免一次把全部数据塞进上下文 */
+const paging = {
+  page: z.number().int().min(1).optional().describe("页码，从 1 开始"),
+  page_size: z.number().int().min(1).max(200).optional().describe("每页条数；不传则返回全部"),
+};
+const pageArgs = (i: Record<string, unknown>) => (i.page_size ? [...opt("--page", i.page), "--page-size", String(i.page_size)] : []);
 
 const apiSpec = z.object({
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
@@ -109,19 +115,21 @@ export const SERVERS: ServerDef[] = [
       },
       {
         name: "list_cases",
-        description: "按条件列出用例",
+        description: "按条件列出用例。用例较多时传 page_size 分页读取，用 query 按标题 / 模块 / ID 搜索",
         input: {
           project_id: project,
+          query: z.string().optional().describe("匹配标题、用例 ID、模块路径"),
           type: z.enum(["api", "ui"]).optional(),
           priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
           execution_mode: z.enum(["ui", "api", "capture", "doc", "manual"]).optional(),
           status: z.enum(["draft", "reviewed", "deprecated"]).optional(),
           lint_status: z.enum(["unchecked", "passed", "warned", "blocked"]).optional(),
+          ...paging,
         },
         toArgs: (i) => [
-          "list-cases", "--project", String(i.project_id),
+          "list-cases", "--project", String(i.project_id), ...opt("--query", i.query),
           ...opt("--type", i.type), ...opt("--priority", i.priority), ...opt("--execution-mode", i.execution_mode),
-          ...opt("--status", i.status), ...opt("--lint-status", i.lint_status),
+          ...opt("--status", i.status), ...opt("--lint-status", i.lint_status), ...pageArgs(i),
         ],
       },
       {
@@ -173,9 +181,16 @@ export const SERVERS: ServerDef[] = [
       },
       {
         name: "list_issues",
-        description: "列出规范检查问题（可按用例过滤）",
-        input: { case_id: caseId.optional() },
-        toArgs: (i) => ["list-issues", ...opt("--case", i.case_id)],
+        description: "列出规范检查问题（可按项目、用例、级别过滤；传 page_size 分页）",
+        input: {
+          project_id: project.optional(),
+          case_id: caseId.optional(),
+          level: z.enum(["block", "block_script", "warn", "info"]).optional(),
+          ...paging,
+        },
+        toArgs: (i) => [
+          "list-issues", ...opt("--project", i.project_id), ...opt("--case", i.case_id), ...opt("--level", i.level), ...pageArgs(i),
+        ],
       },
       {
         name: "apply_fix",
@@ -272,9 +287,9 @@ export const SERVERS: ServerDef[] = [
       },
       {
         name: "list_proposals",
-        description: "列出脚本修改建议（含 diff）",
-        input: { status: z.enum(["pending", "accepted", "rejected"]).optional() },
-        toArgs: (i) => ["list-proposals", ...opt("--status", i.status)],
+        description: "列出脚本修改建议（含 diff；可按项目过滤，传 page_size 分页）",
+        input: { project_id: project.optional(), status: z.enum(["pending", "accepted", "rejected"]).optional(), ...paging },
+        toArgs: (i) => ["list-proposals", ...opt("--project", i.project_id), ...opt("--status", i.status), ...pageArgs(i)],
       },
       {
         name: "record_attribution",

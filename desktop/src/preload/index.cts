@@ -16,8 +16,11 @@ const methods = [
   "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
   "listProposals", "resolveProposal", "listReviews", "resolveReview",
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "stability", "listAttributions",
-  "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getModelSettings",
-  "setModelSettings", "checkModel", "hideTestView",
+  "confirmAttribution", "exportWorkspace", "importWorkspace", "initCi", "modelPresets", "getGlobalSettings",
+  "saveGlobalSettings", "checkModel", "checkRuntime", "getUserInfo", "openDataDir", "hideTestView",
+  "moveProject", "projectOverview", "getSettingsDetail",
+  "deleteEnvironment", "renameProject", "deleteProject", "getCase", "caseTitles",
+  "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
   "saveDatabase", "removeDatabase", "testDatabase", "queryDatabase", "hasDbPassword",
   "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
 ] as const;

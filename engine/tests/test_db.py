@@ -200,3 +200,18 @@ def test_real_server(var, type_):
         assert db.query(ro, f"SELECT count(*) AS n FROM {table}")["rows"][0]["n"] == 1
     finally:
         db.execute(rw, f"DROP TABLE {table}")
+
+
+def test_sub_project_uses_inherited_database_connections(tmp_path, capsys, sqlite_db):
+    dbfile = str(tmp_path / "e.sqlite")
+
+    def call(*args):
+        assert main(["--db", dbfile, *args]) == 0
+        return json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]
+
+    envs = {"test": {"base_url": "http://t", "databases": {"main": {"type": "sqlite", "path": str(sqlite_db)}}}}
+    grp = call("init-project", "--name", "大项目", "--kind", "group", "--environments", json.dumps(envs))["id"]
+    child = call("init-project", "--name", "子项目", "--workspace", str(tmp_path / "ws"), "--parent", grp)["id"]
+    assert [c["name"] for c in call("db-list", "--project", child, "--env", "test")] == ["main"]
+    assert call("db-query", "--project", child, "--env", "test", "--sql", "SELECT count(*) AS n FROM users")["rows"] == [{"n": 2}]
+    assert "AITEST_DATABASES" in call("db-runtime-env", "--project", child, "--env", "test")

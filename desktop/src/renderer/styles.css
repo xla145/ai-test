@@ -5,13 +5,27 @@ body {
 }
 .app-shell { height: 100vh; transition: width .2s ease; }
 .app-shell.with-view { width: 50vw; min-width: 760px; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 18px 20px 14px; font-weight: 600; font-size: 15px; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 18px 20px 14px; font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; }
+.brand.compact { justify-content: center; padding-inline: 0; }
 .brand-logo {
   width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
   background: linear-gradient(135deg, #3b6ef5, #7a5af8); color: #fff; font-size: 16px;
 }
 .sider-section { padding: 0 12px; }
+.sider-footer { display: flex; align-items: center; gap: 0; padding: 10px 8px 12px; }
+.sider-footer.compact { flex-direction: column-reverse; gap: 4px; }
+.sider-footer.compact .sider-user { flex: none; margin: 4px 0 0; padding: 0; }
+.sider-action.ant-btn { width: 30px; height: 30px; font-size: 16px; flex-shrink: 0; }
+/* 本机用户：占据左侧剩余宽度 */
+.sider-user { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px; margin-right: 2px; cursor: default; }
+.sider-user-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+.sider-user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sider-user-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .page { padding: 20px 24px 32px; overflow: auto; height: 100%; }
+/* 统计卡片与两栏卡片：按内容区宽度换行（内嵌浏览器打开时内容区只有半屏） */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+.split { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.split > * { min-width: 0; }
 .page-title { margin-bottom: 4px !important; }
 .diff { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6;
   border-radius: 8px; overflow: auto; max-height: 320px; border: 1px solid rgba(128,128,128,.25); }

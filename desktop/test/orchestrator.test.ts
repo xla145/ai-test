@@ -69,3 +69,43 @@ describe("parseTriage", () => {
     expect(parseTriage("没有结论")).toEqual([]);
   });
 });
+
+describe("paged lists", () => {
+  it("maps page queries, search and multi-value filters to engine arguments", async () => {
+    const { engine, calls } = fakeEngine({});
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({}) });
+    await orch.pageCases("p1", { page: 2, pageSize: 20, query: "标签", filters: { execution_mode: "ui,capture", priority: undefined } });
+    await orch.pageIssues("p1", { page: 1, pageSize: 10, level: "warn" });
+    await orch.pageProposals("p1", { page: 1, pageSize: 5, status: "pending" });
+    await orch.pageReviews("p1", { page: 3, pageSize: 10 });
+    await orch.pageAttributions("p1", { page: 1, pageSize: 10, pending: true });
+    await orch.lint("p1");
+    expect(calls.map(([a]) => a)).toEqual([
+      ["list-cases", "--project", "p1", "--query", "标签", "--execution-mode", "ui,capture", "--page", "2", "--page-size", "20"],
+      ["list-issues", "--project", "p1", "--level", "warn", "--page", "1", "--page-size", "10"],
+      ["list-proposals", "--project", "p1", "--status", "pending", "--page", "1", "--page-size", "5"],
+      ["list-reviews", "--project", "p1", "--page", "3", "--page-size", "10"],
+      ["list-attributions", "--project", "p1", "--pending", "--page", "1", "--page-size", "10"],
+      // 规范检查不再随结果返回全部问题，明细改为分页读取
+      ["lint", "--project", "p1"],
+    ]);
+  });
+});
+
+describe("two-level projects", () => {
+  it("creates groups without a workspace, sub-projects with a parent, and clears settings to inherit", async () => {
+    const { engine, calls } = fakeEngine({});
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({}) });
+    await orch.createProject("特征中心", "", {}, { kind: "group" });
+    await orch.createProject("v4.4", "/ws/a", {}, { parent: "grp_1" });
+    await orch.moveProject("p1", "");
+    await orch.setSettings("p1", { currency: null, price_per_mtok: 20, per_task_token_limit: undefined });
+    expect(calls.map(([a]) => a).filter((a) => a[0] !== "get-settings")).toEqual([
+      ["init-project", "--name", "特征中心", "--kind", "group", "--environments", "{}"],
+      ["init-project", "--name", "v4.4", "--workspace", "/ws/a", "--environments", "{}", "--parent", "grp_1"],
+      ["update-project", "--project", "p1", "--parent", ""],
+      ["set-setting", "--project", "p1", "--key", "currency", "--value", ""],
+      ["set-setting", "--project", "p1", "--key", "price_per_mtok", "--value", "20"],
+    ]);
+  });
+});
