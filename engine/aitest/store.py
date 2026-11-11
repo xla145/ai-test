@@ -247,6 +247,11 @@ class Store:
         if filters.get("ids"):
             s, a = _match("id", filters["ids"])
             sql, args = sql + s, args + a
+        if filters.get("exclude_ids"):
+            excluded = [v for v in str(filters["exclude_ids"]).split(",") if v]
+            if excluded:
+                sql += f" AND id NOT IN ({','.join('?' * len(excluded))})"
+                args += excluded
         if query:
             sql += (" AND (title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\'"
                     " OR json_extract(data, '$.module_path') LIKE ? ESCAPE '\\')")

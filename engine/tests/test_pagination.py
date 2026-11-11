@@ -139,3 +139,17 @@ def test_attributions_and_run_results_page(cli, db, tmp_path):
     cli("confirm-attribution", "--run", run.id, "--case", ids[0], "--type", "product_bug")
     assert cli("list-attributions", "--project", pid, "--pending", "--page-size", "2")["total"] == 4
     assert cli("list-attributions", "--project", pid, "--page-size", "2")["total"] == 5
+
+
+def test_script_state_id_filters_apply_before_pagination(cli, tmp_path):
+    pid = _project(cli, tmp_path, "ui-states")
+    ids = _cases(cli, pid, 6)
+    generated = ",".join(ids[:3])
+    missing = cli("list-cases", "--project", pid, "--exclude-ids", generated, "--page-size", "2")
+    assert missing["total"] == 3
+    assert [c["id"] for c in missing["items"]] == ids[3:5]
+    next_page = cli("list-cases", "--project", pid, "--exclude-ids", generated, "--page", "2", "--page-size", "2")
+    assert [c["id"] for c in next_page["items"]] == ids[5:]
+    combined = cli("list-cases", "--project", pid, "--ids", generated, "--query", "场景01", "--page-size", "2")
+    assert combined["total"] == 1 and combined["items"][0]["id"] == ids[1]
+    assert cli("list-cases", "--project", pid, "--exclude-ids", ",".join(ids), "--page-size", "2")["total"] == 0
