@@ -45,7 +45,8 @@ import {
 } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { InputRef } from "antd";
-import type { ApprovalRequest } from "../shared/ipc";
+import type { ApprovalRequest, ProjectType } from "../shared/ipc";
+import { projectTypeOptions, visibleProjectTab } from "./projectTypes";
 import { api, isGroup, type Project } from "./api";
 import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
@@ -177,15 +178,15 @@ export function App() {
   const tabs = current
     ? [
         { key: "import", label: "用例导入与检查", icon: <FileExcelOutlined />, children: <ImportPage project={current} /> },
+        { key: "api", label: "接口用例生成", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "cases", label: "用例库", icon: <AppstoreOutlined />, children: <CasesPage project={current} /> },
-        { key: "api", label: "接口测试", icon: <ApiOutlined />, children: <ApiPage project={current} /> },
         { key: "run", label: "接口回归", icon: <PlayCircleOutlined />, children: <RunPage project={current} /> },
-        { key: "ui", label: "UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
+        { key: "ui", label: "Web UI 测试", icon: <ChromeOutlined />, children: <UiPage project={current} /> },
         { key: "db", label: "数据库", icon: <DatabaseOutlined />, children: <DatabasePage project={current} onChanged={reload} /> },
         { key: "reports", label: "测试报告", icon: <FileSearchOutlined />, children: <ReportsPage project={current} /> },
         { key: "app", label: "App 测试", icon: <MobileOutlined />, children: <AppPage project={current} /> },
         { key: "ops", label: "工程化", icon: <BarChartOutlined />, children: <OpsPage project={current} /> },
-      ]
+      ].filter((t) => visibleProjectTab(t.key, current.project_type))
     : [];
 
   return (
@@ -271,7 +272,10 @@ export function App() {
                 )}
                 <Typography.Text strong ellipsis style={{ fontSize: 16, minWidth: 0 }}>{current.name}</Typography.Text>
                 {isGroup(current) && <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>大项目</Tag>}
-                <Tooltip title="项目设置：名称、执行环境">
+                {!isGroup(current) && <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
+                  {projectTypeOptions.find((o) => o.value === (current.project_type ?? "multi"))?.label}
+                </Tag>}
+                <Tooltip title="项目设置：名称、测试端、执行环境">
                   <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
                 </Tooltip>
                 {!compact && current.workspace_path && (
@@ -304,7 +308,7 @@ export function App() {
             </div>
           ) : current ? (
             <Tabs
-              activeKey={tab}
+              activeKey={tabs.some((t) => t.key === tab) ? tab : "cases"}
               onChange={setTab}
               items={tabs.map((t) => ({ key: t.key, label: <span>{t.icon} {t.label}</span>, children: (
                 <div className="page">
@@ -393,6 +397,7 @@ interface NewProjectForm {
   workspace?: string;
   env: string;
   baseUrl?: string;
+  projectType: ProjectType;
 }
 
 function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
@@ -408,7 +413,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const { busy, run } = useAction();
   const nameRef = useRef<InputRef>(null);
   useEffect(() => {
-    if (open) form.setFieldsValue({ kind: preset.kind ?? "project", parent: preset.parent, env: "test" });
+    if (open) form.setFieldsValue({ kind: preset.kind ?? "project", parent: preset.parent, env: "test", projectType: "web" });
   }, [open, preset, form]);
   const pick = async () => {
     const dir = await api().pickDirectory();
@@ -419,7 +424,8 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
     if (!v) return;
     const envs = v.baseUrl ? { [v.env || "test"]: { base_url: v.baseUrl } } : {};
     const p = await run(() => api().createProject(v.name, v.workspace ?? "", envs,
-      { kind: v.kind, parent: v.kind === "project" ? v.parent : undefined }) as Promise<Project>,
+      { kind: v.kind, parent: v.kind === "project" ? v.parent : undefined,
+        projectType: v.kind === "project" ? v.projectType : undefined }) as Promise<Project>,
       v.kind === "group" ? "大项目已创建，可以在其下新建子项目" : "项目已创建，按「快速开始」完成配置");
     if (p) {
       form.resetFields();
@@ -433,7 +439,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
       okText="创建" confirmLoading={busy} destroyOnHidden
       // 打开动画结束后再聚焦（Modal 打开时会把焦点放在对话框本身）
       afterOpenChange={(v) => v && nameRef.current?.focus()}>
-      <Form form={form} layout="vertical" initialValues={{ env: "test", kind: "project" }} preserve={false}>
+      <Form form={form} layout="vertical" initialValues={{ env: "test", kind: "project", projectType: "web" }} preserve={false}>
         <Form.Item name="kind" label="类型" extra={group
           ? "大项目不含用例，只存放执行环境、凭据、角色账号与预算，其下的子项目自动继承"
           : "项目有自己的用例库与 workspace；放在大项目下时继承大项目的环境与账号"}>
@@ -447,6 +453,10 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
         <Form.Item name="name" label={group ? "大项目名" : "项目名"} rules={[{ required: true, whitespace: true, message: "请输入名称" }]}>
           <Input ref={nameRef} onPressEnter={submit} placeholder={group ? "如：特征中心" : parent ? "如：v4.4、标签管理" : "如：订单服务"} />
         </Form.Item>
+        {!group && <Form.Item name="projectType" label="测试端" rules={[{ required: true, message: "请选择测试端" }]}
+          extra="按测试端显示相关功能；所有项目都支持接口测试，可在项目设置中调整。">
+          <Select aria-label="测试端" options={projectTypeOptions} />
+        </Form.Item>}
         {!group && (
           <Form.Item label="workspace 目录" required extra="用例、脚本与报告都放在这里，并用 git 管理">
             <Space.Compact style={{ width: "100%" }}>

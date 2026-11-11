@@ -54,6 +54,19 @@ describe("tool definitions", () => {
 });
 
 describe("mcp server", () => {
+  it("rejects empty titles before invoking the engine", async () => {
+    const run = vi.fn(async () => ({}));
+    const { client } = await connect("case-store", run as unknown as typeof runEngine);
+    for (const title of ["", "   "]) {
+      const res = await client.callTool({ name: "create_case", arguments: {
+        project_id: "p1", case: { title, type: "ui", priority: "P1", steps: ["打开页面"], expected: ["页面显示"] },
+      } });
+      expect(res.isError).toBe(true);
+      expect(JSON.stringify(res.content)).toContain("用例标题不能为空");
+    }
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("injects secrets only into the engine process, never into tool output", async () => {
     const run = vi.fn(async () => ({ run_id: "run_1", passed: 3 }));
     const secrets = { resolve: vi.fn(async () => ({ AITEST_AUTH_TOKEN: "Bearer s3cret" })) };

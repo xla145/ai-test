@@ -3,6 +3,8 @@ import { Alert, App, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Selec
 import { createContext, useContext, useEffect, useState } from "react";
 import { api, isGroup, type Project } from "../api";
 import { useAction } from "../hooks";
+import type { ProjectType } from "../../shared/ipc";
+import { projectTypeOptions } from "../projectTypes";
 
 /** 项目数据变化（改名、改环境、保存登录方式）后刷新项目列表，避免页面拿着旧配置再保存 */
 export const ProjectsContext = createContext<{
@@ -166,10 +168,10 @@ export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
   const { reload, projects } = useProjects();
   const { busy, run } = useAction();
   const { modal } = App.useApp();
-  const [nameForm] = Form.useForm<{ name: string }>();
+  const [nameForm] = Form.useForm<{ name: string; projectType: ProjectType }>();
   useEffect(() => {
-    if (open) nameForm.setFieldsValue({ name: project.name });
-  }, [open, project.name, nameForm]);
+    if (open) nameForm.setFieldsValue({ name: project.name, projectType: project.project_type ?? "multi" });
+  }, [open, project.name, project.project_type, nameForm]);
   const group = isGroup(project);
   const groups = projects.filter(isGroup);
   const childCount = project.children?.length ?? 0;
@@ -202,11 +204,18 @@ export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
       <Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
         <Form form={nameForm} layout="vertical" onFinish={(v) => run(async () => {
           await api().renameProject(project.id, v.name.trim());
+          if (!group && v.projectType !== (project.project_type ?? "multi")) {
+            await api().setProjectType(project.id, v.projectType);
+          }
           await reload();
         }, "已保存")}>
           <Form.Item name="name" label={group ? "大项目名" : "项目名"} rules={[{ required: true, whitespace: true, message: "请输入名称" }]}>
             <Input />
           </Form.Item>
+          {!group && <Form.Item name="projectType" label="测试端" rules={[{ required: true, message: "请选择测试端" }]}
+            extra="调整项目显示的测试入口；已有用例、脚本和报告会保留。">
+            <Select aria-label="测试端" options={projectTypeOptions} />
+          </Form.Item>}
           {!group && (
             <Form.Item label="workspace 目录" extra="用例、脚本与报告保存在这里并用 git 管理；创建后不能修改">
               <Typography.Text className="mono" copyable>{project.workspace_path}</Typography.Text>

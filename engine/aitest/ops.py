@@ -397,6 +397,7 @@ def export_workspace(store: Store, project_id: str) -> dict[str, Any]:
         "format": 1,
         "id": p.id,
         "name": p.name,
+        "project_type": p.project_type,
         # 子项目导出生效的配置（含继承自大项目的），成员导入后可直接使用
         "environments": _strip_secrets(hierarchy.effective_environments(store, p)),
         "roles": sorted({r.role_name for pid in ([p.parent_id] if p.parent_id else []) + [project_id]
@@ -429,10 +430,11 @@ def import_workspace(store: Store, workspace: str | Path, name: str | None = Non
         raise FileNotFoundError(f"不是已导出的 workspace（缺少 {meta_file}）")
     meta = json.loads(meta_file.read_text(encoding="utf-8"))
     project = Project(id=meta["id"], name=name or meta["name"], workspace_path=str(root),
-                      environments=meta.get("environments", {}))
+                      environments=meta.get("environments", {}), project_type=meta.get("project_type", "multi"))
     existing = store.get_project(project.id)
     if existing:  # 本地可能补充过环境配置，以本地为准合并；保留所属大项目
         project.parent_id, project.kind = existing.parent_id, existing.kind
+        project.project_type = existing.project_type
         project.environments = (existing.environments if existing.parent_id
                                 else {**project.environments, **existing.environments})
     store.add_project(project)

@@ -65,7 +65,7 @@ export function CaseDrawer({ caseId, onClose, extra, data }: {
   }, [caseId, data]);
   const detail = data ?? loaded;
   return (
-    <Drawer open={!!caseId} onClose={onClose} width={560} title={detail?.title ?? caseId} extra={detail && extra?.(detail)}>
+    <Drawer open={!!caseId} onClose={onClose} width={560} title={detail?.title?.trim() || caseId} extra={detail && extra?.(detail)}>
       {!detail ? <Skeleton active /> : (
         <>
           <Descriptions size="small" column={2} items={[

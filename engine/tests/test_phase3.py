@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from openpyxl import Workbook
 
 from aitest.cli import main
 
@@ -35,6 +36,40 @@ def project(cli, tmp_path):
 def _case(cli, pid, title="模块-场景", **extra):
     case = {"title": title, "type": "ui", "priority": "P1", "steps": ["a"], "expected": ["b"], **extra}
     return cli("create-case", "--project", pid, "--json", json.dumps(case, ensure_ascii=False))["id"]
+
+
+def test_repair_incomplete_import_before_review(cli, project, tmp_path):
+    path = tmp_path / "incomplete.xlsx"
+    book = Workbook()
+    book.active.append(["标题", "步骤描述", "预期结果", "用例等级"])
+    book.active.append([None, "打开页面", None, None])
+    book.save(path)
+    cli("import-excel", "--project", project, "--file", str(path))
+    case = cli("list-cases", "--project", project)[0]
+    cid = case["id"]
+
+    def update(patch, **kwargs):
+        return cli("update-case", "--case", cid, "--json", json.dumps(patch), **kwargs)
+
+    error = update({"status": "reviewed"}, ok=False)
+    assert "无法审核通过" in error and "Excel 第 2 行" in error and "标题不能为空" in error
+    assert cli("get-case", "--case", cid)["status"] == "draft"
+    # 原有空标题和预期不能阻止修正其他字段，也可以废弃不完整用例。
+    assert update({"priority": "P1"})["title"] == ""
+    update({"category": "功能测试"})
+    assert update({"status": "deprecated"})["status"] == "deprecated"
+    update({"status": "draft"})
+    for bad_title in ("", "   "):
+        assert "标题不能为空" in update({"title": bad_title}, ok=False)
+    assert "枚举" in update({"priority": "P9"}, ok=False)
+    assert update({"title": "页面-打开页面"})["lint_status"] == "blocked"
+    assert "元素数少于" in update({"status": "reviewed"}, ok=False)
+    repaired = update({"expected": ["显示页面内容"]})
+    assert repaired["lint_status"] != "blocked"
+    assert not any(i["rule"] == "required_fields" for i in cli("list-issues", "--case", cid))
+    assert update({"status": "reviewed"})["status"] == "reviewed"
+    # 已审核的用例修改后仍必须完整。
+    assert "标题不能为空" in update({"title": ""}, ok=False)
 
 
 def _run(cli, pid, tmp_path, results, framework="playwright"):

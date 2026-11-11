@@ -60,7 +60,7 @@ const apiSpec = z.object({
 });
 
 const caseInput = z.object({
-  title: z.string().describe("「模块-场景」"),
+  title: z.string().trim().min(1, "用例标题不能为空").max(200).describe("必填，格式为「模块-场景」"),
   type: z.enum(["api", "ui", "app"]),
   priority: z.enum(["P0", "P1", "P2", "P3"]),
   category: z.enum(["功能测试", "安全相关", "兼容性", "其它"]).optional(),

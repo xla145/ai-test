@@ -176,7 +176,7 @@ function Models({ view, presets, save, busy }: SectionProps) {
           ]}
         />
         <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
-          都通过 OpenAI 兼容接口接入。非 GPT 模型效果需要实测：先测试连通、确认合规，再在小范围用例上验证。修改后下一个 agent 任务按新配置启动。
+          agent 模型服务需支持 OpenAI Responses API，视觉模型使用 Chat Completions 兼容接口。非 GPT 模型效果需在小范围用例上验证。修改后下一个 agent 任务按新配置启动。
         </Typography.Paragraph>
       </Card>
 

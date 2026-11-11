@@ -12,7 +12,7 @@
     "test": "vitest run",
     "prepare:engine": "cd .. && scripts/prepare-engine-deps.sh",
     "predev": "npm run prepare:engine",
-    "dev": "npm run deps && npm run build:main && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env AITEST_DEV_SERVER=http://localhost:5173 electron .\"",
+    "dev": "npm run deps && concurrently -k \"vite\" \"node scripts/dev-electron.mjs\"",
     "prestart": "npm run prepare:engine",
     "start": "electron .",
     "deps": "npm run build --prefix ../mcp-servers",

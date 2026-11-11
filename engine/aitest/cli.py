@@ -16,9 +16,10 @@ from typing import Any, Callable
 
 from datetime import datetime, timezone
 
-from . import apigen, db, docparser, heal, hierarchy, importer, linter, openapi, ops, reports, router, runner, workspace
-from .models import AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
-from .store import Store
+from . import api_selection, apigen, db, docparser, heal, hierarchy, importer, linter, openapi, ops, reports, router, runner, workspace
+from .models import PROJECT_TYPES, AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
+from .schema import validate_case
+from .store import CaseValidationError, Store
 
 DEFAULT_DB = os.environ.get("AITEST_DB", str(Path.home() / ".aitest" / "aitest.db"))
 
@@ -68,7 +69,7 @@ def cmd_init_project(store: Store, a: argparse.Namespace) -> Any:
         raise ValueError("项目需要 --workspace")
     parent = _group(store, a.parent) if a.parent else None
     p = Project(name=a.name, workspace_path=str(Path(a.workspace).resolve()), environments=envs,
-                parent_id=parent.id if parent else "")
+                parent_id=parent.id if parent else "", project_type=a.project_type)
     workspace.init_workspace(p.workspace_path, p.name)
     return hierarchy.project_view(store, store.add_project(p))
 
@@ -201,7 +202,19 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
         raise KeyError(a.case)
     patch = json.loads(a.json)
     merged = {**case.to_dict(), **patch, "id": case.id, "project_id": case.project_id}
-    out = store.upsert_case(TestCase.from_dict(merged)).to_dict()
+    # 导入草稿允许不完整，逐项修正时只校验本次修改；审核后的用例必须完整。
+    reviewing = merged.get("status") == "reviewed"
+    errors = validate_case(merged if reviewing else patch, partial=not reviewing)
+    if errors:
+        location = f"（Excel 第 {case.source_row} 行）" if case.source_row is not None else ""
+        action = "无法审核通过，请先修正用例" if reviewing else "无法修改用例"
+        raise CaseValidationError(f"{action} {case.id}{location}：{'；'.join(errors)}")
+    updated = TestCase.from_dict(merged)
+    if set(patch) - {"status"}:
+        report = linter.lint_cases([updated])
+        keep = [i for i in store.list_lint_issues(case.id) if i.rule in ("group_not_subdivided", "p0_ratio")]
+        store.replace_lint_issues([case.id], [*report.issues, *keep])
+    out = store.upsert_case(updated, validate=False).to_dict()
     if a.actor == "human":
         ops.log_event(store, "case_edited", case.project_id, case.id, actor="human", data={"fields": sorted(patch)})
     return out
@@ -260,6 +273,9 @@ def cmd_write_api_suite(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
     p = _leaf(store, a.project)
+    case_ids = api_selection.parse_ids(a.case_ids) if a.case_ids is not None else None
+    if case_ids is not None:
+        api_selection.validate_selection(store, p.id, case_ids)
     env_cfg = hierarchy.effective_environments(store, p).get(a.env)
     if env_cfg is None:
         raise KeyError(f"项目未配置环境：{a.env}")
@@ -274,9 +290,20 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
     # 入库校验需要的数据库连接（密码来自 AITEST_DB_PASSWORDS，只传给脚本进程）
     db_env = db.runtime_env(db.configs_for_env(env_cfg))
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
-                                     report_dir=Path(p.workspace_path) / "reports", extra_env=db_env)
+                                     report_dir=Path(p.workspace_path) / "reports", extra_env=db_env, case_ids=case_ids)
     store.save_run(run, results)
     return {"run_id": run.id, **run.result}
+
+
+def cmd_list_api_test_sets(store: Store, a: argparse.Namespace) -> Any:
+    return api_selection.list_sets(_leaf(store, a.project).workspace_path)
+
+
+def cmd_save_api_test_set(store: Store, a: argparse.Namespace) -> Any:
+    p = _leaf(store, a.project)
+    ids = api_selection.parse_ids(a.case_ids)
+    api_selection.validate_selection(store, p.id, ids)
+    return api_selection.save_set(p.workspace_path, a.name, ids)
 
 
 def cmd_summarize_failures(store: Store, a: argparse.Namespace) -> Any:
@@ -330,6 +357,10 @@ def cmd_delete_environment(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_update_project(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
+    if a.project_type is not None:
+        if hierarchy.is_group(p):
+            raise ValueError("请在子项目中设置测试端，大项目只存放共享配置")
+        p.project_type = a.project_type
     if a.name is not None:
         if not a.name.strip():
             raise ValueError("项目名不能为空")
@@ -633,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     paging = ((("--page",), {"type": positive, "default": 1}),
               (("--page-size",), {"type": positive, "help": "每页条数；指定后返回 {items, total, page, page_size}"}))
     add("init-project", cmd_init_project, (("--name",), req), (("--workspace",), {}), (("--environments",), {}),
+        (("--project-type",), {"choices": PROJECT_TYPES, "default": "multi"}),
         (("--kind",), {"choices": ["project", "group"], "default": "project"}),
         (("--parent",), {"help": "所属大项目 ID"}))
     add("list-projects", cmd_list_projects)
@@ -661,7 +693,10 @@ def build_parser() -> argparse.ArgumentParser:
         (("--operation",), {}))
     add("write-api-suite", cmd_write_api_suite, (("--project",), req), (("--suite",), {"default": "api"}),
         (("--reviewed-only",), {"action": "store_true"}))
-    add("run-api-suite", cmd_run_api_suite, (("--project",), req), (("--env",), req))
+    add("run-api-suite", cmd_run_api_suite, (("--project",), req), (("--env",), req),
+        (("--case-ids",), {"help": "JSON 用例 ID 数组；仅运行选中的已审核接口用例"}))
+    add("list-api-test-sets", cmd_list_api_test_sets, (("--project",), req))
+    add("save-api-test-set", cmd_save_api_test_set, (("--project",), req), (("--name",), req), (("--case-ids",), req))
     add("summarize-failures", cmd_summarize_failures, (("--run",), req))
     add("agent-session", cmd_agent_session, (("--project",), req), (("--thread",), req), (("--purpose",), req))
     add("add-tokens", cmd_add_tokens, (("--session",), req), (("--tokens",), {"type": int, "required": True}))
@@ -673,6 +708,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("set-environment", cmd_set_environment, (("--project",), req), (("--env",), req), (("--json",), req))
     add("delete-environment", cmd_delete_environment, (("--project",), req), (("--env",), req))
     add("update-project", cmd_update_project, (("--project",), req), (("--name",), {}),
+        (("--project-type",), {"choices": PROJECT_TYPES}),
         (("--parent",), {"help": "移入的大项目 ID；空字符串表示移出"}))
     add("delete-project", cmd_delete_project, (("--project",), req))
     add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))

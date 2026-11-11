@@ -63,6 +63,7 @@ class FailureType(str, Enum):
 
 PRIORITIES = ("P0", "P1", "P2", "P3")
 CATEGORIES = ("功能测试", "安全相关", "兼容性", "其它")
+PROJECT_TYPES = ("web", "app", "api", "multi")
 
 
 @dataclass
@@ -75,6 +76,7 @@ class Project:
     # 子项目的 parent_id 指向大项目，继承其执行环境、角色账号与设置
     parent_id: str = ""
     kind: str = "project"
+    project_type: str = "multi"  # 旧项目默认保留全部测试端；与大项目 / 子项目层级无关。
 
 
 @dataclass

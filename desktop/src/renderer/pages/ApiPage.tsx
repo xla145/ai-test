@@ -49,7 +49,7 @@ export function ApiPage({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHeader title="接口测试" description="接口测试是主线：输入稳定、结果可判定。首次生成脚本后，回归直接执行，不再消耗模型。" />
+      <PageHeader title="接口用例生成" description="从 OpenAPI 或需求文档生成用例，在「用例库」审核后，到「接口回归」选择测试范围并执行。" />
       <Steps size="small" style={{ marginBottom: 20 }} items={[
         { title: "解析 OpenAPI", description: "接口、参数约束、状态码" },
         { title: "生成用例", description: "正向 / 必填 / 边界 / 类型 / 鉴权 / 幂等" },

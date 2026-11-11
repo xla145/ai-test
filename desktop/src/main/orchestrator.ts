@@ -22,7 +22,7 @@ import {
 } from "./prompts.js";
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
-import type { CaseQuery, Page, PageQuery } from "../shared/ipc.js";
+import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 
 const opt = (flag: string, v: string | undefined): string[] => (v ? [flag, v] : []);
 const pageArgs = (q: PageQuery) => ["--page", String(q.page), "--page-size", String(q.pageSize)];
@@ -72,6 +72,7 @@ export interface ProjectInfo {
   /** 两层项目："group" 为大项目，只存放共享配置 */
   kind?: "project" | "group";
   parent_id?: string;
+  project_type?: ProjectType;
   /** 继承自大项目的环境：环境名 → 定义它的大项目 ID */
   inherited_environments?: Record<string, string>;
 }
@@ -164,10 +165,11 @@ export class Orchestrator extends EventEmitter {
   }
 
   createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {},
-    opts: { kind?: "project" | "group"; parent?: string } = {}) {
+    opts: { kind?: "project" | "group"; parent?: string; projectType?: ProjectType } = {}) {
     return this.deps.engine<ProjectInfo>([
       "init-project", "--name", name, ...(opts.kind === "group" ? ["--kind", "group"] : ["--workspace", workspace]),
       "--environments", JSON.stringify(environments), ...(opts.parent ? ["--parent", opts.parent] : []),
+      ...(opts.kind !== "group" && opts.projectType ? ["--project-type", opts.projectType] : []),
     ]);
   }
 
@@ -230,8 +232,24 @@ export class Orchestrator extends EventEmitter {
     return this.agentTask(projectId, "case_gen", caseGenerationPrompt(projectId, requirementFile));
   }
 
-  /** 回归：直接跑脚本，不消耗大模型；失败且无法确定类型时才调 agent 归因 */
-  async runRegression(projectId: string, env: string, opts: { autoTriage?: boolean; confirmProduction?: boolean } = {}) {
+  /** 审核后确定性生成脚本，不调用模型。 */
+  writeReviewedApiSuite(projectId: string) {
+    return this.deps.engine(["write-api-suite", "--project", projectId, "--reviewed-only"]);
+  }
+
+  listApiTestSets(projectId: string) {
+    return this.deps.engine<ApiTestSet[]>(["list-api-test-sets", "--project", projectId]);
+  }
+
+  saveApiTestSet(projectId: string, name: string, caseIds: string[]) {
+    if (!caseIds.length) throw new Error("请至少选择一条接口用例");
+    return this.deps.engine<ApiTestSet>(["save-api-test-set", "--project", projectId, "--name", name,
+      "--case-ids", JSON.stringify(caseIds)]);
+  }
+
+  /** 回归直接执行脚本；只有原因不明的失败才调 agent 归因。 */
+  async runRegression(projectId: string, env: string, opts: ApiRunOptions & { autoTriage?: boolean } = {}) {
+    if (opts.caseIds !== undefined && !opts.caseIds.length) throw new Error("请至少选择一条接口用例");
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
     if (!envCfg) throw new Error(`项目未配置环境：${env}`);
@@ -239,7 +257,8 @@ export class Orchestrator extends EventEmitter {
     this.emit("progress", { projectId, stage: "run", env });
     // 接口多账号：注入全部角色的凭据（账号密码与固定 token），流程中每步按角色鉴权
     const run = await this.deps.engine<RunSummary>(
-      ["run-api-suite", "--project", projectId, "--env", env],
+      ["run-api-suite", "--project", projectId, "--env", env,
+        ...opt("--case-ids", opts.caseIds === undefined ? undefined : JSON.stringify(opts.caseIds))],
       this.deps.secretEnv(projectId, env, ["*"]),
     );
     let triage: TriageItem[] | undefined;
@@ -460,6 +479,10 @@ export class Orchestrator extends EventEmitter {
 
   renameProject(projectId: string, name: string) {
     return this.deps.engine(["update-project", "--project", projectId, "--name", name]);
+  }
+
+  setProjectType(projectId: string, projectType: ProjectType) {
+    return this.deps.engine(["update-project", "--project", projectId, "--project-type", projectType]);
   }
 
   /** 从客户端移除项目：删除数据库记录，workspace 目录保留 */

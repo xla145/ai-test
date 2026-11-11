@@ -73,7 +73,7 @@ export function CasesPage({ project }: { project: Project }) {
         onRow={(r) => ({ onDoubleClick: () => setDetail(r) })}
         columns={[
           { title: "标题", dataIndex: "title", width: 280, render: (t: string, r: TestCase) => (
-            <a onClick={() => setDetail(r)}>{t}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.module_path.join(" / ")}</Typography.Text></div></a>
+            <a onClick={() => setDetail(r)}>{t?.trim() || "未填写标题"}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.module_path.join(" / ")}</Typography.Text></div></a>
           ) },
           { title: "等级", dataIndex: "priority", width: 80,
             render: (p: string) => <Tag color={PRIORITY_COLOR[p]} bordered={false}>{p}</Tag> },

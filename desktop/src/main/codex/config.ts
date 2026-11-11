@@ -45,7 +45,7 @@ export function buildCodexConfig(input: CodexConfigInput): string {
       `name = ${q(p.name)}`,
       `base_url = ${q(p.baseUrl)}`,
       `env_key = ${q(p.envKey)}`,
-      'wire_api = "chat"',
+      'wire_api = "responses"',
       "",
     );
   }
