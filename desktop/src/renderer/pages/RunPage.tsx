@@ -1,5 +1,5 @@
 import { ChromeOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Collapse, Empty, Progress, Space, Statistic, Table, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Progress, Space, Statistic, Table, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { ApiCasePicker } from "../components/ApiCasePicker";
