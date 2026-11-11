@@ -10,4 +10,4 @@ mkdir -p "$OUT"
 # PyYAML 的 C 扩展绑定构建机的 Python 版本；删掉后自动回退到纯 Python 实现
 find "$OUT" \( -name "_yaml*.so" -o -name "_yaml*.pyd" \) -delete
 rm -rf "$OUT/_yaml" "$OUT/bin"
-echo "引擎依赖已准备：$OUT（$(du -sh "$OUT" | cut -f1)）"
+echo "引擎依赖已准备：${OUT}（$(du -sh "${OUT}" | cut -f1)）"
