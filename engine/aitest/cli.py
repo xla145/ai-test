@@ -241,7 +241,7 @@ def cmd_write_api_suite(store: Store, a: argparse.Namespace) -> Any:
     p = _leaf(store, a.project)
     cases = store.list_cases(a.project, execution_mode="api")
     issues = store.list_lint_issues()
-    eligible = [c for c in cases if c.api and c.status != "deprecated" and linter.can_generate_script(c, issues)]
+    eligible = [c for c in cases if c.is_api_executable and c.status != "deprecated" and linter.can_generate_script(c, issues)]
     if a.reviewed_only:
         eligible = [c for c in eligible if c.status == "reviewed"]
     out = Path(p.workspace_path) / "scripts" / "api"
@@ -267,6 +267,7 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
         auth_header=os.environ.get("AITEST_AUTH_HEADER") or env_cfg.get("auth_header", "Authorization"),
         auth_token=os.environ.get("AITEST_AUTH_TOKEN", ""),
         timeout=float(env_cfg.get("timeout", 30)),
+        api_login=env_cfg.get("api_login") or None,
     )
     suite_dir = Path(p.workspace_path) / "scripts" / "api"
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,

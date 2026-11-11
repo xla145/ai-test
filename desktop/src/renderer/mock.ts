@@ -2,7 +2,7 @@
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
  * 只在 window.aitest 不存在时动态加载，不进入桌面端的正常流程。
  */
-import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery } from "../shared/ipc";
+import type { AitestApi, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -15,7 +15,7 @@ const projects: any[] = [
   {
     id: "grp_feature", name: "特征中心", workspace_path: "", kind: "group", parent_id: "",
     environments: {
-      test: { base_url: "https://feature-test.example.com", login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
+      test: { base_url: "https://feature-test.example.com", app: { android: "com.example.feature.test", ios: "com.example.feature.test" }, login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
       prod: { base_url: "https://feature.example.com", production: true },
     },
   },
@@ -56,6 +56,21 @@ const cases = [
   mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed"),
   mk("tc_8f2a1c0e09", "多端-桌面客户端同步", "manual", "P3", "warned", "draft"),
   mk("tc_8f2a1c0e10", "埋点表-字段核对", "doc", "P2", "passed", "draft"),
+  mk("tc_8f2a1c0e11", "订单-退款审核流程", "api", "P0", "passed", "reviewed", {
+    type: "api", module_path: ["特征中心", "订单"],
+    steps: ["买家下单", "买家支付", "买家申请退款", "运营审核退款", "买家查看订单"],
+    expected: ["下单成功", "支付成功", "状态为退款中", "审核通过", "订单状态为已退款"],
+    api_flow: [
+      { name: "买家下单", role: "买家", method: "POST", path: "/orders", expected_status: [201], extract: { order_id: "data.id" } },
+      { name: "买家支付", role: "买家", method: "POST", path: "/orders/${order_id}/pay", expected_status: [200], expected_fields: { "data.status": "paid" } },
+      { name: "买家申请退款", role: "买家", method: "POST", path: "/orders/${order_id}/refund", expected_status: [200], expected_fields: { "data.status": "refunding" } },
+      { name: "运营审核退款", role: "运营", method: "POST", path: "/admin/refunds/${order_id}/approve", expected_status: [200] },
+      { name: "买家查看订单", role: "买家", method: "GET", path: "/orders/${order_id}", expected_status: [200], expected_fields: { "data.status": "refunded" } },
+    ],
+  }),
+  mk("tc_app_001", "标签管理-App端停用标签", "app", "P0", "passed", "reviewed", { type: "app" }),
+  mk("tc_app_003", "综合总览-App端指标卡片", "app", "P1", "passed", "reviewed", { type: "app" }),
+  mk("tc_app_007", "登录-iOS 面容登录", "app", "P1", "warned", "draft", { type: "app" }),
   // 批量导入的用例，用来演示分页
   ...Array.from({ length: 56 }, (_, i) => mk(`tc_imp${String(i + 1).padStart(4, "0")}`,
     `${["标签管理", "综合总览", "推荐配置", "数据清洗"][i % 4]}-导入场景 ${i + 1}`,
@@ -124,6 +139,8 @@ const globalView = (): GlobalSettingsView => ({
     codex: globalSettings.general.codexPath ? { path: globalSettings.general.codexPath, source: "settings" }
       : { path: "/Applications/aitest-desktop.app/Contents/Resources/codex/bin/codex", source: "bundled" },
     taskTokenLimit: { value: globalSettings.general.taskTokenLimit ?? 200000, source: globalSettings.general.taskTokenLimit ? "settings" : "default" },
+    maestro: { path: globalSettings.general.maestroPath || "maestro", source: globalSettings.general.maestroPath ? "settings" : "default" },
+    pinky: { path: globalSettings.general.pinkyPath || "pinkyctl", enabled: Boolean(globalSettings.general.pinkyEnabled) },
     envOverrides: [],
   },
 });
@@ -135,11 +152,23 @@ const requireConfirm = (id: string, env: string, opts?: { confirmProduction?: bo
     ? Promise.reject(new Error(`「${env}」是生产环境，需要确认后才能执行`)) : undefined;
 };
 
+const roleSecrets: Record<string, { account: boolean; token: boolean; inherited: boolean }> = {
+  管理员: { account: true, token: false, inherited: true },
+  运营: { account: true, token: true, inherited: true },
+};
+
 const listeners: {
   approval?: (r: ApprovalRequest) => void;
   event?: (e: { method: string; params: unknown }) => void;
   view?: (v: { visible: boolean }) => void;
+  update?: (s: UpdateState) => void;
 } = {};
+
+let updateState: UpdateState = { status: "idle", current: "0.3.11", feedUrl: "https://download.classktv.com/aitest-desktop" };
+const setUpdate = (next: Partial<UpdateState>) => {
+  updateState = { ...updateState, ...next };
+  listeners.update?.(updateState);
+};
 
 const mockApi: AitestApi = {
   listProjects: () => delay(projects.map(view)),
@@ -201,7 +230,11 @@ const mockApi: AitestApi = {
   }, 900),
   tokenUsage: () => delay({ tokens: 412300 }),
   setEnvSecret: () => delay(undefined),
-  setRoleSecret: () => delay(undefined),
+  setRoleSecret: async (_p, role, username, _password, token) => {
+    roleSecrets[role] = { account: Boolean(username) || roleSecrets[role]?.account || false, token: Boolean(token) || roleSecrets[role]?.token || false, inherited: false };
+    return delay(undefined);
+  },
+  roleSecretStatus: () => delay(roleSecrets),
   listRoles: (id) => delay(id === "grp_feature" || projects.find((x) => x.id === id)?.parent_id === "grp_feature"
     ? [{ role_name: "管理员" }, { role_name: "运营" }, { role_name: "分析师" }, { role_name: "访客" }]
         .map((r) => (id === "grp_feature" ? r : { ...r, inherited_from: "grp_feature" }))
@@ -227,6 +260,8 @@ const mockApi: AitestApi = {
     return delay({ id, workspace_path: p?.workspace_path ?? "" });
   },
   getCase: (id) => delay(cases.find((c) => c.id === id)),
+  scriptMap: (framework) => delay<Record<string, string>>(framework === "maestro"
+    ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" } : {}),
   caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
   exploreUiCase: () => delay({ message: "已生成脚本 scripts/ui/tc_8f2a1c0e02.spec.ts，试跑通过" }, 900),
   runUiRegression: (id, env, _headed, opts) => requireConfirm(id, env, opts) ?? delay({
@@ -290,7 +325,19 @@ const mockApi: AitestApi = {
     globalSettings = structuredClone(s);
     return delay(globalView());
   },
-  checkRuntime: () => delay({ python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" } }, 500),
+  checkRuntime: () => delay({
+    python: { ok: true, detail: "Python 3.12.4" }, codex: { ok: true, detail: "codex-cli 0.167.0" },
+    maestro: { ok: true, detail: "2.1.0" }, pinky: { ok: true, detail: "pinkyctl 0.4.2" },
+  }, 500),
+  runAppRegression: (id, env, platform, opts) => requireConfirm(id, env, opts) ?? delay({
+    platform, report: "reports/app-android-2026-11-11",
+    run: { run_id: "run_app1", total: 12, passed: 10, failed: 1, error: 1, skipped: 0, pass_rate: 0.833 },
+    failures: [
+      { case_id: "tc_app_003", status: "failed", failure_type: "unknown", message: "Assertion is false: \"已停用\" is visible" },
+      { case_id: "tc_app_007", status: "error", failure_type: "environment", message: platform === "ios" ? "App com.example.feature is not installed on the device" : "Device emulator-5554 not found" },
+    ],
+  }, 1200),
+  exploreAppCase: () => delay({ message: "已在 Android 上走通 5 步，生成 scripts/app/tc_app_001.yaml，试跑通过；「删除标签」一步由你在 Pinky 中确认。", tokens: 21400 }, 1200),
   openDataDir: () => delay(""),
   getUserInfo: () => delay({ name: "张晓", email: "zhangxiao@example.com", source: "git" as const }),
   checkModel: (id) => delay(id !== "vision"
@@ -309,6 +356,27 @@ const mockApi: AitestApi = {
   onEvent: (cb) => {
     listeners.event = cb;
     return () => (listeners.event = undefined);
+  },
+  getUpdateState: () => delay(updateState),
+  checkForUpdates: async () => {
+    // 演示：发现新版本 → 后台下载 → 下载完成
+    setUpdate({ status: "checking" });
+    await delay(null, 600);
+    setUpdate({ status: "downloading", version: "0.3.12", progress: 0 });
+    for (const p of [18, 42, 67, 90]) {
+      await delay(null, 350);
+      setUpdate({ progress: p });
+    }
+    await delay(null, 350);
+    setUpdate({ status: "downloaded", progress: 100, checkedAt: new Date().toISOString() });
+    return updateState;
+  },
+  installUpdate: async () => {
+    setUpdate({ status: "idle", current: updateState.version ?? updateState.current, version: undefined });
+  },
+  onUpdate: (cb) => {
+    listeners.update = cb;
+    return () => (listeners.update = undefined);
   },
   onViewChange: (cb) => {
     listeners.view = cb;

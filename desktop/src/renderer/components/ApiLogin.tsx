@@ -1,0 +1,103 @@
+import { Button, Card, Col, Form, Input, Row, Select, Typography } from "antd";
+import { useEffect } from "react";
+import { api, envOwner, type Project } from "../api";
+import { useAction } from "../hooks";
+import { useProjects } from "./ProjectSettings";
+
+interface ApiLoginConfig {
+  method?: string;
+  path: string;
+  body?: Record<string, unknown>;
+  token_path?: string;
+  prefix?: string;
+}
+
+interface ApiLoginForm {
+  method: string;
+  path?: string;
+  body: string;
+  token_path: string;
+  prefix: string;
+}
+
+const DEFAULT_BODY = '{"username": "${username}", "password": "${password}"}';
+
+/**
+ * 环境的「接口登录」：执行接口测试时用各角色的账号密码调用它换取 token（每个角色只登录一次）。
+ * 保存在环境配置中（不含任何凭据）；继承来的环境保存到大项目。
+ */
+export function ApiLoginCard({ project, env }: { project: Project; env: string }) {
+  const [form] = Form.useForm<ApiLoginForm>();
+  const { busy, run } = useAction();
+  const { reload, projects } = useProjects();
+  const cfg = project.environments[env] as (Project["environments"][string] & { api_login?: ApiLoginConfig }) | undefined;
+  const owner = env ? envOwner(project, env) : project.id;
+  const ownerName = owner !== project.id ? projects.find((p) => p.id === owner)?.name : undefined;
+
+  useEffect(() => {
+    const l = cfg?.api_login;
+    form.setFieldsValue({
+      method: l?.method ?? "POST", path: l?.path ?? "", token_path: l?.token_path ?? "data.token",
+      prefix: l?.prefix ?? "Bearer ", body: l?.body ? JSON.stringify(l.body) : DEFAULT_BODY,
+    });
+  }, [cfg?.api_login, env, form]);
+
+  const save = (v: ApiLoginForm) => run(async () => {
+    const next: Record<string, unknown> = { ...cfg };
+    if (v.path?.trim()) {
+      next.api_login = {
+        method: v.method, path: v.path.trim(), body: JSON.parse(v.body),
+        token_path: v.token_path.trim() || "data.token", prefix: v.prefix,
+      };
+    } else {
+      delete next.api_login;
+    }
+    await api().setEnvironment(owner, env, next);
+    await reload();
+  }, v.path?.trim() ? (ownerName ? `已保存到大项目「${ownerName}」` : "接口登录已保存") : "已清除接口登录");
+
+  return (
+    <Card size="small" title={`接口登录（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`}
+      extra={<Typography.Text type="secondary">用角色账号密码换取 token</Typography.Text>}>
+      <Form form={form} layout="vertical" onFinish={save}>
+        <Row gutter={8}>
+          <Col flex="110px">
+            <Form.Item name="method" label="方法">
+              <Select options={["POST", "PUT", "GET"].map((m) => ({ value: m, label: m }))} />
+            </Form.Item>
+          </Col>
+          <Col flex="auto">
+            <Form.Item name="path" label="登录接口路径" extra="留空表示不使用接口登录（角色需保存固定 token）"
+              rules={[{ pattern: /^\//, message: "以 / 开头，如 /api/login" }]}>
+              <Input className="mono" placeholder="/api/login" />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Form.Item name="body" label="请求体（JSON）" extra="${username} / ${password} 在执行时替换为角色的账号密码"
+          rules={[{ validator: (_, v: string) => {
+            try {
+              const parsed = JSON.parse(v);
+              return parsed && typeof parsed === "object" ? Promise.resolve() : Promise.reject(new Error("需要 JSON 对象"));
+            } catch {
+              return Promise.reject(new Error("不是合法的 JSON"));
+            }
+          } }]}>
+          <Input.TextArea className="mono" autoSize={{ minRows: 2, maxRows: 6 }} />
+        </Form.Item>
+        <Row gutter={8}>
+          <Col span={14}>
+            <Form.Item name="token_path" label="响应中 token 的路径" extra="点号路径，如 data.token、data.access_token">
+              <Input className="mono" placeholder="data.token" />
+            </Form.Item>
+          </Col>
+          <Col span={10}>
+            <Form.Item name="prefix" label="鉴权头前缀" extra="拼在 token 前，可为空">
+              <Input className="mono" placeholder="Bearer " />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Button htmlType="submit" loading={busy}>保存接口登录</Button>
+      </Form>
+    </Card>
+  );
+}

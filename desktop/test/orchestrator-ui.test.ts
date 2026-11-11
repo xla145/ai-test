@@ -126,3 +126,84 @@ describe("production guard and UI failure details", () => {
     ]);
   });
 });
+
+describe("App testing", () => {
+  const appProject = {
+    ...project,
+    environments: {
+      test: { base_url: "http://sut", app: { android: "com.example.shop", ios: "com.example.shop.ios" } },
+      prod: { base_url: "https://prod", production: true, app: { android: "com.example.shop" } },
+      bare: { base_url: "http://bare" },
+    },
+  };
+  function appSetup() {
+    const calls: string[][] = [];
+    const engine = vi.fn(async (args: string[]) => {
+      calls.push(args);
+      switch (args[0]) {
+        case "list-projects": return [appProject];
+        case "list-scripts": return [
+          { case_id: "tc_a", path: "scripts/app/tc_a.yaml", framework: "maestro" },
+          { case_id: "tc_b", path: "scripts/app/tc_b.yaml", framework: "maestro" },
+          { case_id: "tc_c", path: "scripts/ui/tc_c.spec.ts", framework: "playwright" },
+        ];
+        case "list-cases": return cases;
+        case "list-roles": return [{ role_name: "admin" }];
+        case "save-run": return { run_id: "run_app", total: 2, passed: 1, failed: 1, error: 0, skipped: 0, pass_rate: 0.5, failure_types: {}, needs_agent: [] };
+        case "list-run-results": return [
+          { case_id: "tc_a", status: "passed", message: "" },
+          { case_id: "tc_b", status: "failed", failure_type: "environment", message: "Device emulator-5554 not found" },
+        ];
+        default: return {};
+      }
+    }) as unknown as EngineCall;
+    const runAppSuite = vi.fn(async () => ({
+      exitCode: 1, junit: "", outDir: "/ws/reports/app-x", errors: [], stderr: "",
+      results: [
+        { case_id: "tc_a", status: "passed", duration: 1, message: "", evidence_paths: [], reviews: [] },
+        { case_id: "tc_b", status: "failed", duration: 1, message: "Device emulator-5554 not found", evidence_paths: [], reviews: [] },
+      ],
+    }));
+    const secretEnv = vi.fn(() => ({ AITEST_ROLES: JSON.stringify([{ role: "admin", username: "u", password: "p" }]) }));
+    return { engine, calls, runAppSuite, secretEnv };
+  }
+
+  it("runs maestro flows for the chosen platform without the model and records rule attributions", async () => {
+    const { engine, calls, runAppSuite, secretEnv } = appSetup();
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine, secretEnv, agent, app: { runAppSuite: runAppSuite as any, maestroBin: () => "/opt/maestro" } });
+    const out = await orch.runAppRegression("p1", "test", "ios", { device: "UDID-1" });
+    expect(agent).not.toHaveBeenCalled();
+    expect(runAppSuite).toHaveBeenCalledWith({
+      workspace: "/ws", platform: "ios", appId: "com.example.shop.ios", caseIds: ["tc_a", "tc_b"], device: "UDID-1",
+      roles: [{ role: "admin", username: "u", password: "p" }], maestroBin: "/opt/maestro",
+    });
+    expect(calls.find((a) => a[0] === "save-run")).toContain("maestro");
+    expect(out.failures).toEqual([{ case_id: "tc_b", status: "failed", message: "Device emulator-5554 not found", failure_type: "environment" }]);
+    expect(calls.find((a) => a[0] === "set-attribution")).toEqual(
+      ["set-attribution", "--run", "run_app", "--case", "tc_b", "--type", "environment", "--source", "rule", "--reason", "确定性规则判定"]);
+  });
+
+  it("guards production, missing app ids and missing Pinky", async () => {
+    const { engine, runAppSuite, secretEnv } = appSetup();
+    const orch = new Orchestrator({ engine, secretEnv, agent: vi.fn(), app: { runAppSuite: runAppSuite as any, pinkyEnabled: () => false } });
+    await expect(orch.runAppRegression("p1", "prod", "android")).rejects.toThrow("生产环境");
+    await expect(orch.runAppRegression("p1", "prod", "ios", { confirmProduction: true })).rejects.toThrow("iOS Bundle ID");
+    await expect(orch.runAppRegression("p1", "bare", "android")).rejects.toThrow("Android 包名");
+    await expect(orch.exploreAppCase("p1", "test", "android", "tc_a")).rejects.toThrow("Pinky");
+    expect(runAppSuite).not.toHaveBeenCalled();
+  });
+
+  it("explores with an agent task that uses Pinky and the app server", async () => {
+    const { engine, secretEnv, runAppSuite } = appSetup();
+    const runTurn = vi.fn(async () => ({ status: "completed", message: "已生成脚本", tokens: 100 }));
+    const orch = new Orchestrator({ engine, secretEnv, agent: async () => ({ startThread: async () => "th", runTurn }) as any,
+      app: { runAppSuite: runAppSuite as any, pinkyEnabled: () => true } });
+    await orch.exploreAppCase("p1", "test", "android", "tc_a");
+    const prompt = (runTurn.mock.calls[0] as unknown as [string, string])[1];
+    expect(prompt).toContain("pinky");
+    expect(prompt).toContain("app.save_app_flow");
+    expect(prompt).toContain("com.example.shop");
+    expect(prompt).toContain("appId: ${APP_ID}");
+  });
+});

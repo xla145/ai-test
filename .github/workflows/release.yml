@@ -73,18 +73,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # 安装包 + 自动更新所需文件（latest*.yml、增量下载用的 blockmap、macOS 更新用的 zip）
           - os: ubuntu-latest
-            files: desktop/release/*.AppImage
+            files: |
+              desktop/release/*.AppImage
+              desktop/release/latest-linux.yml
           - os: windows-latest
-            files: desktop/release/*.exe
+            files: |
+              desktop/release/*.exe
+              desktop/release/*.exe.blockmap
+              desktop/release/latest.yml
           - os: macos-latest
-            files: desktop/release/*.dmg
+            files: |
+              desktop/release/*.dmg
+              desktop/release/*.zip
+              desktop/release/latest-mac.yml
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      # 自动更新地址（写入安装包的 app-update.yml）：下载站域名 + 本产品的目录前缀
+      UPDATE_URL: ${{ vars.UPDATE_URL || 'https://download.classktv.com/aitest-desktop' }}
       # 未配置代码签名证书：Windows 安装包未签名；macOS 用 ad-hoc 签名（desktop/package.json 的
       # mac.identity = "-"），否则 Apple 芯片上会提示"已损坏"且无法在「隐私与安全性」中放行
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -106,7 +117,7 @@ jobs:
         run: |
           npm version "${VERSION}" -w desktop --no-git-tag-version --allow-same-version
           npm run build -w desktop
-          cd desktop && npx electron-builder --publish never
+          cd desktop && npx electron-builder --publish never -c.publish.provider=generic -c.publish.url="${UPDATE_URL}"
       - name: 校验 macOS 签名
         if: runner.os == 'macOS'
         run: |
@@ -160,3 +171,40 @@ jobs:
             --title "AI 测试客户端 $TAG" \
             --notes-file notes.md \
             --generate-notes
+
+  # 自动更新：把安装包与 latest*.yml 上传到 Cloudflare R2（下载站 download.classktv.com 的存储桶），
+  # 放在独立前缀下，不影响存储桶中的其它内容。客户端从 UPDATE_URL 检查更新。
+  update-feed:
+    needs: [version, desktop, release]
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # R2 不支持新版 AWS CLI 默认附带的部分校验头
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || '8f6229ee5588cc2e3ea0b886d5c7d96e' }}
+      R2_BUCKET: ${{ vars.R2_BUCKET || 'aiprobe' }}
+      R2_PREFIX: ${{ vars.R2_PREFIX || 'aitest-desktop' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: feed
+          merge-multiple: true
+      - name: 上传到 R2
+        run: |
+          if [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
+            echo "::warning::未配置 R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY，跳过自动更新发布"
+            exit 0
+          fi
+          ls -la feed
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          dest="s3://${R2_BUCKET}/${R2_PREFIX}/"
+          # 先传安装包，最后传 latest*.yml：客户端看到新版本时文件已经就绪
+          aws s3 cp feed/ "${dest}" --recursive --exclude "*.yml" --endpoint-url "${endpoint}" --no-progress
+          aws s3 cp feed/ "${dest}" --recursive --exclude "*" --include "*.yml" --endpoint-url "${endpoint}" \
+            --cache-control "no-cache" --content-type "text/yaml; charset=utf-8" --no-progress
+          echo "已发布到 ${dest}："
+          aws s3 ls "${dest}" --endpoint-url "${endpoint}" | grep -E "latest|${{ needs.version.outputs.version }}" || true

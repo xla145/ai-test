@@ -16,6 +16,7 @@ def new_id(prefix: str) -> str:
 class CaseType(str, Enum):
     API = "api"
     UI = "ui"
+    APP = "app"  # 移动端 App（Android / iOS）
 
 
 class ExecutionMode(str, Enum):
@@ -24,6 +25,7 @@ class ExecutionMode(str, Enum):
     CAPTURE = "capture"  # 埋点抓包
     DOC = "doc"  # 文档核对
     MANUAL = "manual"
+    APP = "app"  # 移动端 App：Pinky 探索 + Maestro 回归
 
 
 class CaseStatus(str, Enum):
@@ -101,6 +103,10 @@ class ApiSpec:
     # 接口间依赖：从响应中提取变量供后续用例以 ${var} 引用，如 {"user_id": "data.id"}
     extract: dict[str, str] = field(default_factory=dict)
     operation_id: str = ""
+    # 多账号：用哪个角色的凭据调用（空 = 环境的默认 token）。角色 token 来自钥匙串，或用环境的「接口登录」换取
+    role: str = ""
+    # 流程步骤名（api_flow 中使用），如「买家下单」
+    name: str = ""
 
 
 @dataclass
@@ -123,6 +129,9 @@ class TestCase:
     lint_status: str = LintStatus.UNCHECKED.value
     status: str = CaseStatus.DRAFT.value
     api: ApiSpec | None = None
+    # 接口流程：多个请求按顺序执行（每步可用不同角色），如 下单 → 支付 → 审核 → 退款；
+    # 步骤间用 extract + ${var} 传值，任一步失败即整条用例失败
+    api_flow: list[ApiSpec] = field(default_factory=list)
     source_row: int | None = None
     id: str = field(default_factory=lambda: new_id("tc"))
 
@@ -133,10 +142,17 @@ class TestCase:
     def from_dict(cls, data: dict[str, Any]) -> "TestCase":
         data = dict(data)
         api = data.pop("api", None)
+        flow = data.pop("api_flow", None) or []
         tc = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         if api:
             tc.api = ApiSpec(**api) if isinstance(api, dict) else api
+        tc.api_flow = [ApiSpec(**s) if isinstance(s, dict) else s for s in flow]
         return tc
+
+    @property
+    def is_api_executable(self) -> bool:
+        """单个请求（api）或流程（api_flow）都可生成接口脚本。"""
+        return self.api is not None or bool(self.api_flow)
 
 
 @dataclass

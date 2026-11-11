@@ -13,6 +13,7 @@ export const MODE = {
   capture: { text: "埋点抓包", color: "purple" },
   doc: { text: "文档核对", color: "default" },
   manual: { text: "手工", color: "default" },
+  app: { text: "App", color: "magenta" },
 } as Record<string, { text: string; color: string }>;
 
 export const STATUS = {
@@ -36,7 +37,7 @@ export const FAILURE = {
 } as Record<string, { text: string; color: string }>;
 
 export const PURPOSE: Record<string, string> = {
-  case_gen: "用例生成", api_script: "接口脚本", triage: "失败归因", explore: "UI 探索", heal: "自愈",
+  case_gen: "用例生成", api_script: "接口脚本", triage: "失败归因", explore: "UI 探索", heal: "自愈", app_explore: "App 探索",
 };
 
 export function LabelTag({ map, value }: { map: Record<string, { text: string; color: string }>; value?: string | null }) {

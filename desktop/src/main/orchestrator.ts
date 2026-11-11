@@ -2,9 +2,17 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { checkData as CheckData, runUiSuite as RunUiSuite, seedData as SeedData, UiCaseResult } from "@ai-test/mcp-servers";
+import type {
+  checkData as CheckData,
+  Platform,
+  runAppSuite as RunAppSuite,
+  runUiSuite as RunUiSuite,
+  seedData as SeedData,
+  UiCaseResult,
+} from "@ai-test/mcp-servers";
 import {
   apiScriptPrompt,
+  appExplorePrompt,
   caseGenerationPrompt,
   explorePrompt,
   healPrompt,
@@ -38,6 +46,8 @@ export interface EnvironmentInfo {
   auth_header?: string;
   production?: boolean;
   login?: Record<string, string>;
+  /** 移动端 App：各平台的包名（Android）/ Bundle ID（iOS） */
+  app?: Partial<Record<Platform, string>>;
   data_api?: { check?: string; seed?: string };
   clock_api?: { set?: string };
 }
@@ -111,8 +121,18 @@ export interface OrchestratorDeps {
   /** 取环境凭据与角色账号（来自钥匙串），只注入子进程 */
   secretEnv: (projectId: string, env: string, roles?: string[]) => Record<string, string>;
   ui?: UiDeps;
+  /** App 执行器（Maestro）与工具状态 */
+  app?: AppDeps;
   /** 单次 agent 任务的 token 上限 */
   tokenLimit?: number;
+}
+
+export interface AppDeps {
+  runAppSuite: typeof RunAppSuite;
+  /** maestro 可执行文件（全局设置） */
+  maestroBin?: () => string | undefined;
+  /** 是否已在全局设置中启用 Pinky（agent 通过它操作手机） */
+  pinkyEnabled?: () => boolean;
 }
 
 export class Orchestrator extends EventEmitter {
@@ -204,9 +224,10 @@ export class Orchestrator extends EventEmitter {
     if (!envCfg) throw new Error(`项目未配置环境：${env}`);
     if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     this.emit("progress", { projectId, stage: "run", env });
+    // 接口多账号：注入全部角色的凭据（账号密码与固定 token），流程中每步按角色鉴权
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env],
-      this.deps.secretEnv(projectId, env),
+      this.deps.secretEnv(projectId, env, ["*"]),
     );
     let triage: TriageItem[] | undefined;
     if (opts.autoTriage !== false && run.needs_agent.length) {
@@ -234,6 +255,66 @@ export class Orchestrator extends EventEmitter {
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
   exploreUiCase(projectId: string, env: string, caseId: string) {
     return this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId));
+  }
+
+  // ------------------------------------------------------------------ App 测试
+
+  /** 探索模式：agent 通过 Pinky 操作手机走通用例，写成 Maestro 脚本并试跑 */
+  async exploreAppCase(projectId: string, env: string, platform: Platform, caseId: string, opts: { confirmProduction?: boolean } = {}) {
+    const app = this.requireApp();
+    if (!app.pinkyEnabled?.()) throw new Error("未启用 Pinky：请先安装 Pinky，并在「全局设置 → 运行环境」中启用");
+    const envCfg = await this.appEnv(projectId, env, platform, opts.confirmProduction);
+    return this.agentTask(projectId, "app_explore", appExplorePrompt(projectId, env, platform, caseId, envCfg.app![platform]!));
+  }
+
+  /** App 回归：Maestro 直接执行脚本，不调用模型；失败按规则归因，等待人工确认 */
+  async runAppRegression(projectId: string, env: string, platform: Platform,
+    opts: { device?: string; confirmProduction?: boolean } = {}) {
+    const app = this.requireApp();
+    const project = await this.project(projectId);
+    const envCfg = await this.appEnv(projectId, env, platform, opts.confirmProduction);
+    const scripts = await this.deps.engine<{ case_id: string; framework: string }[]>(["list-scripts"]);
+    const flows = new Set(scripts.filter((s) => s.framework === "maestro").map((s) => s.case_id));
+    const cases = (await this.listCases(projectId)) as CaseRow[];
+    const caseIds = cases.filter((c) => flows.has(c.id) && c.status !== "deprecated").map((c) => c.id);
+    if (!caseIds.length) throw new Error("没有可执行的 App 脚本，请先用探索模式生成");
+
+    const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    const secret = this.deps.secretEnv(projectId, env, roles);
+    this.emit("progress", { projectId, stage: "app-run", env, platform, cases: caseIds.length });
+    const out = await app.runAppSuite({
+      workspace: project.workspace_path, platform, appId: envCfg.app![platform]!, caseIds, device: opts.device || undefined,
+      roles: secret.AITEST_ROLES ? JSON.parse(secret.AITEST_ROLES) : [], maestroBin: app.maestroBin?.(),
+    });
+    if (!out.results.length) throw new Error(`Maestro 没有产出结果：${out.errors.join("；") || "未知错误"}`);
+    const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
+    writeFileSync(file, JSON.stringify(out.results));
+    const run = await this.deps.engine<RunSummary>([
+      "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "maestro",
+    ]);
+    const saved = await this.deps.engine<UiFailure[]>(["list-run-results", "--run", run.run_id]);
+    const failures: UiFailure[] = (Array.isArray(saved) ? saved : [])
+      .filter((r) => r.status === "failed" || r.status === "error")
+      .map((r) => ({ case_id: r.case_id, status: r.status, message: (r.message ?? "").slice(0, 500), failure_type: r.failure_type ?? "unknown" }));
+    await this.recordAttributions(run.run_id, failures.map((f) => ({ case_id: f.case_id, failure_type: f.failure_type, reason: "确定性规则判定" })), "rule");
+    return { run, failures, platform, report: out.outDir };
+  }
+
+  /** 已登记的脚本：用例 ID → 脚本路径（按框架过滤，如 maestro / playwright） */
+  async scriptMap(framework: string): Promise<Record<string, string>> {
+    const rows = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
+    return Object.fromEntries(rows.filter((r) => r.framework === framework).map((r) => [r.case_id, r.path]));
+  }
+
+  private async appEnv(projectId: string, env: string, platform: Platform, confirmProduction?: boolean) {
+    const project = await this.project(projectId);
+    const envCfg = project.environments[env];
+    if (!envCfg) throw new Error(`项目未配置环境：${env}`);
+    if (envCfg.production && !confirmProduction) throw new ProductionConfirmRequired(env);
+    if (!envCfg.app?.[platform]) {
+      throw new Error(`环境「${env}」没有配置${platform === "ios" ? " iOS Bundle ID" : " Android 包名"}，请在项目设置的执行环境中填写`);
+    }
+    return envCfg;
   }
 
   /** 执行前检查用例依赖的测试数据；缺失则造数，仍缺失的用例降级为手工（本次不执行） */
@@ -447,6 +528,11 @@ export class Orchestrator extends EventEmitter {
 
   importWorkspace(workspace: string) {
     return this.deps.engine(["import-workspace", "--workspace", workspace]);
+  }
+
+  private requireApp(): AppDeps {
+    if (!this.deps.app) throw new Error("未启用 App 执行器");
+    return this.deps.app;
   }
 
   private requireUi(): UiDeps {

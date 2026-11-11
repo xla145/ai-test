@@ -81,3 +81,25 @@ describe("secrets inherited from the big project", () => {
     expect(store.deletePrefix("aitest:grp:")).toBe(2);
   });
 });
+
+describe("API multi-account secrets", () => {
+  it("injects all roles' accounts and tokens, inheriting from the big project", async () => {
+    const { secretEnvFor, ALL_ROLES } = await import("../src/main/secrets.js");
+    const file = join(mkdtempSync(join(tmpdir(), "sec-")), "secrets.json");
+    const store = new SecretStore(file, cipher);
+    store.set(SecretStore.roleRef("grp", "运营"), { username: "ops", password: "1", token: "Bearer group-ops" });
+    store.set(SecretStore.roleRef("child", "买家"), { username: "buyer", password: "2" });
+    store.set(SecretStore.roleRef("child", "财务"), { username: "", password: "", token: "Bearer fin" });
+    expect(store.roleNames("child").sort()).toEqual(["买家", "财务"]);
+
+    const env = secretEnvFor(store, "child", "test", [ALL_ROLES], "grp");
+    expect(JSON.parse(env.AITEST_ROLES)).toEqual([
+      { role: "买家", username: "buyer", password: "2" },
+      { role: "运营", username: "ops", password: "1" },
+    ]);
+    // 只有 token、没有账号密码的角色不进入 AITEST_ROLES
+    expect(JSON.parse(env.AITEST_ROLE_TOKENS)).toEqual({ 财务: "Bearer fin", 运营: "Bearer group-ops" });
+    // 不指定角色时不注入任何角色凭据
+    expect(secretEnvFor(store, "child", "test", [], "grp")).toEqual({});
+  });
+});

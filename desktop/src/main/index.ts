@@ -5,7 +5,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkData, initCi, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import { checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
+import yaml from "js-yaml";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
 import { evaluateCommand, evaluateFileChange, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
@@ -23,6 +24,7 @@ import {
   type GlobalSettings,
 } from "./settings.js";
 import { Orchestrator } from "./orchestrator.js";
+import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
 import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo } from "../shared/ipc.js";
 
@@ -60,6 +62,18 @@ function python(): { path: string; source: Source } {
   return configured ? { path: configured, source: "settings" } : { path: "python3", source: "default" };
 }
 
+/** maestro：AITEST_MAESTRO → 全局配置 → PATH 上的 maestro */
+function maestroBin(): { path: string; source: Source } {
+  if (process.env.AITEST_MAESTRO) return { path: process.env.AITEST_MAESTRO, source: "env" };
+  const configured = loadSettings().general.maestroPath;
+  return configured ? { path: configured, source: "settings" } : { path: "maestro", source: "default" };
+}
+
+function pinky(): { path: string; enabled: boolean } {
+  const g = loadSettings().general;
+  return { path: g.pinkyPath || "pinkyctl", enabled: Boolean(g.pinkyEnabled) };
+}
+
 /** agent 单次任务 token 上限：AITEST_TOKEN_LIMIT → 全局配置 → 默认值 */
 function taskTokenLimit(): { value: number; source: Source } {
   const env = Number(process.env.AITEST_TOKEN_LIMIT);
@@ -83,6 +97,7 @@ const paths = {
 };
 
 let mainWindow: BrowserWindow | undefined;
+let updater: Updater | undefined;
 /** 被测页面视图：每个「项目 + 角色」一个独立 session partition，Playwright 经 CDP 连接后按 URL 标记找到它 */
 const testViews = new Map<string, WebContentsView>();
 let visibleView: WebContentsView | undefined;
@@ -128,19 +143,22 @@ const modelKey = (slot: "agent" | "vision") => {
 };
 
 function runtimeInfo(): RuntimeInfo {
-  const envOverrides = ["AITEST_PYTHON", "AITEST_CODEX_BIN", "AITEST_TOKEN_LIMIT", "AITEST_DB"].filter((k) => process.env[k]);
+  const envOverrides = ["AITEST_PYTHON", "AITEST_CODEX_BIN", "AITEST_TOKEN_LIMIT", "AITEST_DB", "AITEST_MAESTRO"].filter((k) => process.env[k]);
   return {
     appVersion: app.getVersion(), dataDir: paths.data(), dbPath: paths.db(),
-    python: python(), codex: codexBin(), taskTokenLimit: taskTokenLimit(), envOverrides,
+    python: python(), codex: codexBin(), taskTokenLimit: taskTokenLimit(), maestro: maestroBin(), pinky: pinky(), envOverrides,
   };
 }
 
-/** 运行 `<bin> --version` 检查可用性 */
+/** 运行 `<bin> --version` 检查可用性；能启动但不支持 --version 的程序也视为已安装 */
 function versionOf(bin: string): Promise<RuntimeCheck> {
   return new Promise((done) => {
     execFile(bin, ["--version"], { timeout: 15_000, windowsHide: true }, (err, stdout, stderr) => {
       const out = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
-      done(err ? { ok: false, detail: (err as NodeJS.ErrnoException).code === "ENOENT" ? `找不到 ${bin}` : err.message } : { ok: true, detail: out });
+      if (!err) return done({ ok: true, detail: out });
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "EACCES") return done({ ok: false, detail: `找不到 ${bin}` });
+      done(out ? { ok: true, detail: `已安装（${out.slice(0, 80)}）` } : { ok: false, detail: err.message });
     });
   });
 }
@@ -163,7 +181,7 @@ async function getCodex(): Promise<CodexAppServer> {
   if (!broker) throw new Error("凭据代理未启动");
   const codexHome = paths.codexHome();
   mkdirSync(codexHome, { recursive: true });
-  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support"];
+  const servers = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support", "app"];
   const models = loadModelSettings();
   const vision = models.vision ? midsceneEnv(models, modelKey("vision")) : {};
   const mcpEnv: Record<string, string> = {
@@ -183,9 +201,14 @@ async function getCodex(): Promise<CodexAppServer> {
       ...codexProvider(models),
       model: codexProvider(models).model ?? process.env.AITEST_MODEL,
       // 视觉模型的配置只给 browser 服务（Midscene 在其中运行）
-      mcpServers: servers.map((name) => ({
-        name, command: process.execPath, args: [paths.mcpEntry(), name], env: name === "browser" ? { ...mcpEnv, ...vision } : mcpEnv,
-      })),
+      mcpServers: [
+        ...servers.map((name) => ({
+          name, command: process.execPath, args: [paths.mcpEntry(), name],
+          env: name === "browser" ? { ...mcpEnv, ...vision } : name === "app" ? { ...mcpEnv, AITEST_MAESTRO: maestroBin().path } : mcpEnv,
+        })),
+        // App 探索：Pinky 操作手机，关键步骤在 Pinky 中由用户确认
+        ...(pinky().enabled ? [{ name: "pinky", command: pinky().path, args: ["mcp"] }] : []),
+      ],
     }),
   );
   codex = new CodexAppServer({
@@ -306,9 +329,29 @@ function registerIpc(orch: Orchestrator): void {
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
       secretStore.set(SecretStore.ref(p, env), { authToken, authHeader }),
-    setRoleSecret: async (p: string, role: string, username: string, password: string) => {
+    // 留空的字段保留原值：只补接口 token 时不必重新输入账号密码
+    setRoleSecret: async (p: string, role: string, username: string, password: string, token?: string) => {
       await orch.addRole(p, role);
-      secretStore.set(SecretStore.roleRef(p, role), { username, password });
+      const prev = secretStore.getRole(p, role);
+      const next = {
+        username: username || prev?.username || "",
+        password: password || prev?.password || "",
+        ...(token !== undefined ? (token ? { token } : {}) : prev?.token ? { token: prev.token } : {}),
+      };
+      if (!next.username && !next.token) throw new Error("请填写账号密码或接口 token");
+      secretStore.set(SecretStore.roleRef(p, role), next);
+    },
+    /** 各角色已保存哪些凭据（不返回明文）：账号密码 / 接口 token，以及是否继承自大项目 */
+    roleSecretStatus: (p: string) => {
+      const parent = projectParents.get(p);
+      const status: Record<string, { account: boolean; token: boolean; inherited: boolean }> = {};
+      for (const [pid, inherited] of [...(parent ? [[parent, true] as const] : []), [p, false] as const]) {
+        for (const role of secretStore.roleNames(pid)) {
+          const s = secretStore.getRole(pid, role);
+          status[role] = { account: Boolean(s?.username), token: Boolean(s?.token), inherited };
+        }
+      }
+      return status;
     },
     listRoles: (p: string) => orch.listRoles(p),
     setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),
@@ -326,10 +369,19 @@ function registerIpc(orch: Orchestrator): void {
       return out;
     },
     getCase: (c: string) => orch.getCase(c),
+    scriptMap: (framework: string) => orch.scriptMap(framework),
     caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
     exploreUiCase: async (p: string, env: string, caseId: string) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId);
+    },
+    runAppRegression: async (p: string, env: string, platform: "android" | "ios", opts?: { device?: string; confirmProduction?: boolean }) => {
+      await setApprovalContext(orch, p);
+      return orch.runAppRegression(p, env, platform, opts ?? {});
+    },
+    exploreAppCase: async (p: string, env: string, platform: "android" | "ios", caseId: string, opts?: { confirmProduction?: boolean }) => {
+      await setApprovalContext(orch, p);
+      return orch.exploreAppCase(p, env, platform, caseId, opts ?? {});
     },
     runUiRegression: async (p: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
@@ -364,11 +416,16 @@ function registerIpc(orch: Orchestrator): void {
       return checkModel(m, usageOf(s, id), keyOf(id));
     },
     checkRuntime: async () => {
-      const [py, cx] = await Promise.all([versionOf(paths.python()), versionOf(paths.codexBin())]);
-      return { python: py, codex: cx };
+      const [py, cx, ma, pk] = await Promise.all([
+        versionOf(paths.python()), versionOf(paths.codexBin()), versionOf(maestroBin().path), versionOf(pinky().path),
+      ]);
+      return { python: py, codex: cx, maestro: ma, pinky: pk };
     },
     openDataDir: () => shell.openPath(paths.data()),
     getUserInfo: () => localUser(),
+    getUpdateState: () => updater?.current,
+    checkForUpdates: () => updater?.check(),
+    installUpdate: () => updater?.install(),
     resolveProposal: (p: string, id: string, accept: boolean) => orch.resolveProposal(p, id, accept),
     listReviews: (status?: string) => orch.listReviews(status),
     resolveReview: (id: string, passed: boolean) => orch.resolveReview(id, passed),
@@ -432,6 +489,40 @@ async function refreshParents(orch: Orchestrator): Promise<void> {
   rememberParents(await orch.listProjects());
 }
 
+/**
+ * 更新地址：AITEST_UPDATE_URL 优先，否则读安装包内 electron-builder 写入的 app-update.yml（publish.url）。
+ * 开发模式、非 AppImage 的 Linux 不启用。
+ */
+function createUpdater(): Updater {
+  let feedUrl = process.env.AITEST_UPDATE_URL;
+  let disabledReason: string | undefined;
+  if (!feedUrl) {
+    try {
+      const cfg = yaml.load(readFileSync(join(process.resourcesPath, "app-update.yml"), "utf8")) as { url?: string } | undefined;
+      feedUrl = cfg?.url;
+    } catch {
+      // 开发模式或旧安装包没有 app-update.yml
+    }
+  }
+  if (!app.isPackaged && !process.env.AITEST_UPDATE_URL) disabledReason = "开发模式不检查更新";
+  else if (process.platform === "linux" && !process.env.APPIMAGE) disabledReason = "Linux 仅 AppImage 支持自动更新";
+  const u = new Updater({
+    currentVersion: app.getVersion(), feedUrl, disabledReason,
+    platform: process.platform, arch: process.arch, execPath: process.execPath,
+    downloadDir: join(app.getPath("userData"), "updates"),
+    quit: () => app.quit(),
+  });
+  u.on("state", (s) => mainWindow?.webContents.send(CHANNELS.update, s));
+  return u;
+}
+
+/** 启动 15 秒后检查一次，之后每 4 小时一次（全局设置可关闭） */
+function scheduleUpdateChecks(u: Updater): void {
+  const auto = () => loadSettings().general.autoUpdate !== false;
+  setTimeout(() => auto() && void u.check(), 15_000);
+  setInterval(() => auto() && void u.check(), 4 * 60 * 60_000);
+}
+
 async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
   const p = await orch.project(projectId);
   const hosts = (prod: boolean) =>
@@ -449,6 +540,7 @@ app.whenReady().then(async () => {
     agent: getCodex,
     secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles, projectParents.get(projectId)),
     ui: { runUiSuite, checkData, seedData },
+    app: { runAppSuite, maestroBin: () => maestroBin().path, pinkyEnabled: () => pinky().enabled },
     // 每次 agent 任务时读取，全局配置修改后立即生效
     get tokenLimit() {
       return taskTokenLimit().value;
@@ -458,6 +550,8 @@ app.whenReady().then(async () => {
   orch.on("progress", (p) => mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p }));
   registerIpc(orch);
   createWindow();
+  updater = createUpdater();
+  scheduleUpdateChecks(updater);
 });
 
 app.on("window-all-closed", () => {

@@ -25,6 +25,9 @@ interface EnvForm {
   base_url: string;
   production?: boolean;
   auth_header?: string;
+  /** App 测试：Android 包名 / iOS Bundle ID（该环境安装的那个包，如测试包） */
+  app_android?: string;
+  app_ios?: string;
 }
 
 /**
@@ -50,6 +53,9 @@ export function EnvTable({ project }: { project: Project }) {
     for (const k of ["inherited", "overrides"]) delete cfg[k];
     if (v.auth_header?.trim()) cfg.auth_header = v.auth_header.trim();
     else delete cfg.auth_header;
+    const app = { android: v.app_android?.trim() || undefined, ios: v.app_ios?.trim() || undefined };
+    if (app.android || app.ios) cfg.app = Object.fromEntries(Object.entries(app).filter(([, x]) => x));
+    else delete cfg.app;
     if (!cfg.production) delete cfg.production;
     await api().setEnvironment(project.id, v.name.trim(), cfg);
     await reload();
@@ -70,7 +76,16 @@ export function EnvTable({ project }: { project: Project }) {
             </Space>
           ) },
           { title: "被测地址", dataIndex: "base_url", ellipsis: true, render: (u: string, e) => (
-            <Typography.Text className="mono" type={e.inherited ? "secondary" : undefined}>{u}</Typography.Text>
+            <>
+              <Typography.Text className="mono" type={e.inherited ? "secondary" : undefined}>{u}</Typography.Text>
+              {e.app && (
+                <div>
+                  {Object.entries(e.app as Record<string, string>).map(([p, id]) => (
+                    <Tag key={p} bordered={false} style={{ fontSize: 11 }}>{p === "ios" ? "iOS" : "Android"} {id}</Tag>
+                  ))}
+                </div>
+              )}
+            </>
           ) },
           { title: "", width: 96, render: (_: unknown, e) => e.inherited ? (
             <Tooltip title="在本项目中使用不同的配置（如另一个测试地址）">
@@ -229,7 +244,10 @@ function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSu
     if (!open) return;
     form.resetFields();
     form.setFieldsValue(base
-      ? { name: name ?? base.name, base_url: base.base_url, production: Boolean(base.production), auth_header: (base.auth_header as string) ?? "" }
+      ? {
+          name: name ?? base.name, base_url: base.base_url, production: Boolean(base.production), auth_header: (base.auth_header as string) ?? "",
+          app_android: (base.app as { android?: string } | undefined)?.android ?? "", app_ios: (base.app as { ios?: string } | undefined)?.ios ?? "",
+        }
       : { production: false });
   }, [open, name, base, form]);
   const submit = async () => {
@@ -261,6 +279,18 @@ function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSu
         </Form.Item>
         <Form.Item name="production" label="生产环境" valuePropName="checked" extra="执行回归前需要二次确认">
           <Switch />
+        </Form.Item>
+        <Form.Item label="App（可选）" extra="测 App 时填写该环境安装的包，如测试包；脚本中以 ${APP_ID} 引用，Android 与 iOS 共用一份脚本" style={{ marginBottom: 0 }}>
+          <Space.Compact block>
+            <Form.Item name="app_android" noStyle rules={[{ pattern: /^[\w.]+$/, message: "包名格式不正确" }]}>
+              <Input className="mono" addonBefore="Android" placeholder="com.example.app" />
+            </Form.Item>
+          </Space.Compact>
+          <Space.Compact block style={{ marginTop: 8 }}>
+            <Form.Item name="app_ios" noStyle rules={[{ pattern: /^[\w.-]+$/, message: "Bundle ID 格式不正确" }]}>
+              <Input className="mono" addonBefore="iOS" placeholder="com.example.app" />
+            </Form.Item>
+          </Space.Compact>
         </Form.Item>
       </Form>
     </Modal>

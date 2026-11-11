@@ -52,6 +52,21 @@ export function explorePrompt(projectId: string, env: string, caseId: string): s
   ].join("\n");
 }
 
+export function appExplorePrompt(projectId: string, env: string, platform: string, caseId: string, appId: string): string {
+  const name = platform === "ios" ? "iOS" : "Android";
+  return [
+    `任务：App 探索模式。为项目 ${projectId} 的用例 ${caseId} 在 ${name} 设备上走通一遍，生成确定性的 Maestro 脚本。`,
+    `执行环境：${env}；平台：${platform}；App：${appId}。`,
+    "按 .agents/skills/app-explore.md：",
+    `1. case-store.list_cases 读取该用例；app.app_info（project_id=${projectId}, env=${env}, platform=${platform}）确认 App 与可用变量。`,
+    `2. 用 pinky 的手机工具打开 ${appId}，按用例步骤逐步操作并记录定位方式（优先 accessibility id，其次可见文字）。`,
+    "   Pinky 要求用户确认的步骤被拒绝或超时时不要绕过，在结论中说明。",
+    `3. 写成 Maestro 脚本（appId: \${APP_ID}，每个预期结果都要有 assertVisible / assertNotVisible，账号只用变量），`,
+    `   app.save_app_flow（case_id=${caseId}）保存，再 app.run_app_flow（platform=${platform}）试跑，失败则修正后重新保存。`,
+    "最后输出：脚本路径、试跑结果、仍需人工处理的步骤。",
+  ].join("\n");
+}
+
 export interface UiFailureBrief {
   case_id: string;
   message: string;
