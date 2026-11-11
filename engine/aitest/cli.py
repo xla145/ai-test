@@ -221,7 +221,7 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_cases(store: Store, a: argparse.Namespace) -> Any:
-    filters = {"query": a.query, "ids": a.ids, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
+    filters = {"query": a.query, "ids": a.ids, "exclude_ids": a.exclude_ids, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
                "status": a.status, "lint_status": a.lint_status}
     return _paged(a, lambda limit, offset: [c.to_dict() for c in store.list_cases(
                       a.project, limit=limit, offset=offset, **filters)],
@@ -692,7 +692,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
         (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))
     # 过滤值可用逗号分隔多个（如 --execution-mode ui,capture）；--query 匹配标题、用例 ID 与模块路径
-    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}), (("--ids",), {"help": "逗号分隔的用例 ID"}),
+    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}), (("--ids",), {"help": "逗号分隔的用例 ID"}), (("--exclude-ids",), {"help": "排除的用例 ID，逗号分隔"}),
         *[((f"--{k}",), {}) for k in ("type", "priority", "execution-mode", "status", "lint-status")], *paging)
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
     add("route", cmd_route, (("--project",), req), (("--overwrite",), {"action": "store_true"}))
