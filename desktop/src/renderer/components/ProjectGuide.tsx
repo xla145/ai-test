@@ -6,6 +6,7 @@ import {
   CloseOutlined,
   DownOutlined,
   FileExcelOutlined,
+  MobileOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   UpOutlined,
@@ -14,6 +15,7 @@ import { Button, Card, Flex, Space, Steps, Tooltip, Typography, theme } from "an
 import { useState, type ReactNode } from "react";
 import { api, type Project } from "../api";
 import { useLoad, useNarrow, useProjectChanged } from "../hooks";
+import { visibleProjectTab } from "../projectTypes";
 import { useProjects } from "./ProjectSettings";
 
 /** 本机记住的界面状态（关闭、收起）；存储不可用时只在本次会话中生效 */
@@ -105,7 +107,10 @@ export function ProjectGuide({ project }: { project: Project }) {
     </Button>,
     <Space key="run" size={8} wrap>
       <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => go("run")}>接口回归</Button>
-      <Button size="small" icon={<ChromeOutlined />} onClick={() => go("ui")}>UI 测试</Button>
+      {visibleProjectTab("ui", project.project_type) &&
+        <Button size="small" icon={<ChromeOutlined />} onClick={() => go("ui")}>Web UI 测试</Button>}
+      {visibleProjectTab("app", project.project_type) &&
+        <Button size="small" icon={<MobileOutlined />} onClick={() => go("app")}>App 测试</Button>}
     </Space>,
   ];
   const descriptions = [
@@ -140,7 +145,7 @@ export function ProjectGuide({ project }: { project: Project }) {
         <Flex align="center" gap={8} wrap>
           {title}
           <Typography.Text type="secondary" style={{ flex: 1, minWidth: 200 }}>
-            环境、用例、审核、回归都已走通。之后日常回归直接在「接口回归」「UI 测试」中执行。
+            环境、用例、审核、回归都已走通。之后在对应的测试页面直接执行日常回归。
           </Typography.Text>
           <Button size="small" type="primary" onClick={dismiss}>知道了</Button>
         </Flex>
