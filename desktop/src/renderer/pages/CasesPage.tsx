@@ -5,7 +5,7 @@ import { api, type Project, type TestCase } from "../api";
 import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
 import { LabelTag, LINT, MODE, STATUS } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction, useDebounced, usePaged } from "../hooks";
+import { useAction, useDebounced, usePaged, notifyProjectChanged } from "../hooks";
 
 
 export function CasesPage({ project }: { project: Project }) {
@@ -26,6 +26,7 @@ export function CasesPage({ project }: { project: Project }) {
 
   const setStatus = (ids: string[], status: string) => run(async () => {
     for (const id of ids) await api().updateCase(id, { status }, "human");
+    notifyProjectChanged(project.id);
     setSelected([]);
     await reload();
   }, `已更新 ${ids.length} 条用例`);

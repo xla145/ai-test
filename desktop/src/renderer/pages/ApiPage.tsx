@@ -3,7 +3,8 @@ import { Alert, Button, Card, Descriptions, Input, Result, Segmented, Space, Ste
 import { useState } from "react";
 import { api, type Project } from "../api";
 import { PageHeader } from "../components/PageHeader";
-import { useAction } from "../hooks";
+import { useProjects } from "../components/ProjectSettings";
+import { useAction, notifyProjectChanged } from "../hooks";
 
 interface SuiteResult {
   generated?: { generated: number };
@@ -18,10 +19,13 @@ export function ApiPage({ project }: { project: Project }) {
   const [result, setResult] = useState<SuiteResult>();
   const [agentResult, setAgentResult] = useState<{ message: string; tokens: number }>();
   const { busy, run } = useAction();
+  const { goTab } = useProjects();
 
   const fromOpenapi = () => run(async () => {
     const file = await api().pickFile([{ name: "OpenAPI / Swagger", extensions: ["json", "yaml", "yml"] }]);
-    if (file) setResult((await api().generateApiSuite(project.id, file, enrich)) as SuiteResult);
+    if (!file) return;
+    setResult((await api().generateApiSuite(project.id, file, enrich)) as SuiteResult);
+    notifyProjectChanged(project.id);
   }, "接口用例与脚本已生成");
 
   const fromOpenapiUrl = () => run(async () => {
@@ -38,7 +42,9 @@ export function ApiPage({ project }: { project: Project }) {
 
   const fromRequirement = () => run(async () => {
     const file = await api().pickFile([{ name: "需求文档", extensions: ["md", "docx", "pdf", "txt"] }]);
-    if (file) setAgentResult((await api().generateCases(project.id, file)) as { message: string; tokens: number });
+    if (!file) return;
+    setAgentResult((await api().generateCases(project.id, file)) as { message: string; tokens: number });
+    notifyProjectChanged(project.id);
   }, "agent 已完成用例生成，请在用例库中审核");
 
   return (
@@ -86,7 +92,11 @@ export function ApiPage({ project }: { project: Project }) {
           <Result
             status="success"
             title={`生成 ${result.generated?.generated ?? 0} 条接口用例，${result.suite?.cases ?? 0} 条进入脚本`}
-            subTitle={result.suite?.skipped ? `${result.suite.skipped} 条因阻断级问题或已废弃未生成脚本` : "可在「接口回归」中执行"}
+            subTitle={result.suite?.skipped ? `${result.suite.skipped} 条因阻断级问题或已废弃未生成脚本` : "审核用例后即可执行回归"}
+            extra={goTab && [
+              <Button key="cases" onClick={() => goTab("cases")}>去用例库审核</Button>,
+              <Button key="run" type="primary" onClick={() => goTab("run")}>去执行回归</Button>,
+            ]}
           />
           <Descriptions size="small" column={1} bordered items={[
             { key: "f", label: "脚本", children: <span className="mono">{result.suite?.test}</span> },
@@ -97,7 +107,8 @@ export function ApiPage({ project }: { project: Project }) {
       )}
       {agentResult && (
         <Alert style={{ marginTop: 16 }} type="info" showIcon message={`agent 已完成（${agentResult.tokens} tokens）`}
-          description={<Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>{agentResult.message}</Typography.Paragraph>} />
+          description={<Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }}>{agentResult.message}</Typography.Paragraph>}
+          action={goTab && <Button size="small" type="primary" onClick={() => goTab("cases")}>去用例库审核</Button>} />
       )}
     </>
   );

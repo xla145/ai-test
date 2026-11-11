@@ -133,3 +133,23 @@ export function useNarrow<T extends HTMLElement>(threshold = 760) {
   }, [el, threshold]);
   return [setEl, narrow] as const;
 }
+
+const PROJECT_CHANGED = "aitest:project-changed";
+
+/** 用例、执行记录等变化后通知（如「快速开始」据此刷新进度） */
+export function notifyProjectChanged(projectId: string) {
+  window.dispatchEvent(new CustomEvent(PROJECT_CHANGED, { detail: projectId }));
+}
+
+/** 订阅某个项目的数据变化 */
+export function useProjectChanged(projectId: string, cb: () => void) {
+  const cbRef = useRef(cb);
+  cbRef.current = cb;
+  useEffect(() => {
+    const on = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === projectId) cbRef.current();
+    };
+    window.addEventListener(PROJECT_CHANGED, on);
+    return () => window.removeEventListener(PROJECT_CHANGED, on);
+  }, [projectId]);
+}

@@ -1,5 +1,5 @@
 import { ChromeOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Collapse, Empty, Progress, Space, Statistic, Table, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Progress, Space, Statistic, Table, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { ApiCasePicker } from "../components/ApiCasePicker";
@@ -7,10 +7,10 @@ import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { ApiLoginCard } from "../components/ApiLogin";
 import { EnvCredentials } from "../components/EnvCredentials";
 import { RoleAccounts } from "../components/RoleAccounts";
-import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
+import { EnvSelect, RunButton, useEnvChoice, NoEnvironment } from "../components/EnvPicker";
 import { FAILURE, LabelTag } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
-import { useAction } from "../hooks";
+import { useAction, notifyProjectChanged } from "../hooks";
 
 interface RunResult {
   run: { run_id: string; total: number; passed: number; failed: number; error: number; skipped: number; pass_rate: number };
@@ -30,7 +30,7 @@ function ApiRunPage({ project }: { project: Project }) {
   const [preparing, setPreparing] = useState(false);
   const { busy, run } = useAction();
 
-  if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
+  if (!envs.length) return <NoEnvironment project={project} purpose="执行接口回归" />;
   const failed = result ? result.run.failed + result.run.error : 0;
 
   return (
@@ -42,8 +42,11 @@ function ApiRunPage({ project }: { project: Project }) {
           <EnvSelect project={project} value={env} onChange={setEnv} showUrl />
           <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</Button>
           <RunButton project={project} env={env} loading={busy} disabled={preparing || !available.length}
-            onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env,
-              { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult))}>
+            onRun={(confirmProduction) => run(async () => {
+              setResult((await api().runRegression(project.id, env,
+                { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult);
+              notifyProjectChanged(project.id);
+            })}>
             全量回归（{available.length} 条已审核用例）
           </RunButton>
         </>}
@@ -53,8 +56,10 @@ function ApiRunPage({ project }: { project: Project }) {
       <Space style={{ marginBottom: 16 }}>
         <RunButton project={project} env={env} loading={busy}
           disabled={preparing || !selected.length || selected.some((id) => !available.some((c) => c.id === id))}
-          onRun={(confirmProduction) => run(async () => setResult((await api().runRegression(project.id, env,
-            { confirmProduction, caseIds: selected })) as RunResult))}>
+          onRun={(confirmProduction) => run(async () => {
+            setResult((await api().runRegression(project.id, env, { confirmProduction, caseIds: selected })) as RunResult);
+            notifyProjectChanged(project.id);
+          })}>
           执行选中项（{selected.length} 条）
         </RunButton>
         <Typography.Text type="secondary">仅向选中用例涉及的接口发送请求</Typography.Text>

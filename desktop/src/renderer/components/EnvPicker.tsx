@@ -1,7 +1,8 @@
-import { CaretRightOutlined, WarningFilled } from "@ant-design/icons";
-import { App, Button, Select, Space, Tag, Typography } from "antd";
+import { CaretRightOutlined, PlusOutlined, WarningFilled } from "@ant-design/icons";
+import { App, Button, Empty, Select, Space, Tag, Typography } from "antd";
 import { useEffect, useState, type ReactNode } from "react";
 import type { Project } from "../api";
+import { useProjects } from "./ProjectSettings";
 
 /** 当前选择的环境：默认取第一个非生产环境；环境被删除或改名后自动回到默认值 */
 export function useEnvChoice(project: Project): [string, (env: string) => void] {
@@ -74,5 +75,28 @@ export function RunButton({ project, env, loading, disabled, onRun, children }: 
     <Button type="primary" danger={production} disabled={disabled} icon={production ? <WarningFilled /> : <CaretRightOutlined />} loading={loading} onClick={click}>
       {production ? <>{children}（生产）</> : children}
     </Button>
+  );
+}
+
+/** 还没有执行环境时的空状态：直接打开项目设置添加，而不是让用户自己找入口 */
+export function NoEnvironment({ project, purpose = "执行回归" }: { project: Project; purpose?: string }) {
+  const { openSettings, projects } = useProjects();
+  const parent = project.parent_id ? projects.find((p) => p.id === project.parent_id) : undefined;
+  return (
+    <Empty
+      style={{ marginTop: 48 }}
+      description={
+        <Space direction="vertical" size={4}>
+          <Typography.Text>项目还没有配置执行环境</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {parent
+              ? `添加被测地址后才能${purpose}；也可以在大项目「${parent.name}」中添加，所有子项目共用`
+              : `添加被测地址（如 https://test.example.com）后才能${purpose}`}
+          </Typography.Text>
+        </Space>
+      }
+    >
+      {openSettings && <Button type="primary" icon={<PlusOutlined />} onClick={() => openSettings({ addEnv: true })}>添加执行环境</Button>}
+    </Empty>
   );
 }

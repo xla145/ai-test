@@ -43,11 +43,13 @@ import {
   theme,
   type MenuProps,
 } from "antd";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { InputRef } from "antd";
 import type { ApprovalRequest, ProjectType } from "../shared/ipc";
 import { projectTypeOptions, visibleProjectTab } from "./projectTypes";
 import { api, isGroup, type Project } from "./api";
 import { ProjectSettings, ProjectsContext } from "./components/ProjectSettings";
+import { ProjectGuide } from "./components/ProjectGuide";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad } from "./hooks";
@@ -126,7 +128,7 @@ export function App() {
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
   const [showSettings, setShowSettings] = useState(false);
-  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState<false | { addEnv?: boolean }>(false);
   const { data: user } = useLoad(() => api().getUserInfo(), []);
   const update = useUpdateState();
   const { notification } = AntApp.useApp();
@@ -144,7 +146,6 @@ export function App() {
   const current = projects.find((p) => p.id === currentId) ?? projects.find((p) => !isGroup(p)) ?? projects[0];
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
   const compact = viewVisible;
-  const projectsCtx = useMemo(() => ({ reload, projects }), [reload, projects]);
   const parent = current?.parent_id ? projects.find((x) => x.id === current.parent_id) : undefined;
   const group = isGroup(current);
 
@@ -158,12 +159,15 @@ export function App() {
 
   const go = useCallback((key: string) => {
     if (!current) return;
-    if (key === "settings") return setProjectSettingsOpen(true);
+    if (key === "settings") return setProjectSettingsOpen({});
     setShowSettings(false);
     setNavByProject((m) => ({ ...m, [current.id]: key }));
     rememberNav(current.id, key);
   }, [current]);
   const navCtx = useMemo(() => ({ go }), [go]);
+  const projectsCtx = useMemo(() => ({ reload, projects, goTab: go,
+    openSettings: (opts?: { addEnv?: boolean }) => setProjectSettingsOpen(opts ?? {}),
+  }), [reload, projects, go]);
   const openProject = (id: string) => {
     setCurrentId(id);
     setShowSettings(false);
@@ -343,7 +347,7 @@ export function App() {
                 ))}
                 {!group && (
                   <Tooltip title="项目设置：名称、测试端、执行环境">
-                    <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen(true)} />
+                    <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
                   </Tooltip>
                 )}
                 {viewVisible && (
@@ -361,7 +365,10 @@ export function App() {
               <GroupPage group={current} onOpen={openProject} onNewChild={() => setCreating({ parent: current.id })} />
             </div>
           ) : current ? (
-            <div className="page" key={`${current.id}:${nav}`}>{page(current, nav)}</div>
+            <div className="page" key={`${current.id}:${nav}`}>
+              {!compact && <ProjectGuide key={current.id} project={current} />}
+              {page(current, nav)}
+            </div>
           ) : (
             <Flex align="center" justify="center" style={{ height: "100%" }}>
               <Empty description="还没有项目">
@@ -376,7 +383,7 @@ export function App() {
       </Layout>
 
       {current && (
-        <ProjectSettings project={current} open={projectSettingsOpen} onClose={() => setProjectSettingsOpen(false)}
+        <ProjectSettings project={current} open={!!projectSettingsOpen} addEnv={projectSettingsOpen ? projectSettingsOpen.addEnv : false} onClose={() => setProjectSettingsOpen(false)}
           onDeleted={() => setCurrentId(undefined)} />
       )}
 
@@ -442,6 +449,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const kind = Form.useWatch("kind", form);
   const parent = Form.useWatch("parent", form);
   const { busy, run } = useAction();
+  const nameRef = useRef<InputRef>(null);
   useEffect(() => {
     if (open) form.setFieldsValue({ kind: preset.kind ?? "project", parent: preset.parent, env: "test", projectType: "web" });
   }, [open, preset, form]);
@@ -456,7 +464,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
     const p = await run(() => api().createProject(v.name, v.workspace ?? "", envs,
       { kind: v.kind, parent: v.kind === "project" ? v.parent : undefined,
         projectType: v.kind === "project" ? v.projectType : undefined }) as Promise<Project>,
-      v.kind === "group" ? "大项目已创建，可以在其下新建子项目" : "项目已创建");
+      v.kind === "group" ? "大项目已创建，可以在其下新建子项目" : "项目已创建，按「快速开始」完成配置");
     if (p) {
       form.resetFields();
       onClose();
@@ -466,7 +474,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const group = kind === "group";
   return (
     <Modal open={open} title={group ? "新建大项目" : parent ? "新建子项目" : "新建项目"} onCancel={onClose} onOk={submit}
-      okText="创建" confirmLoading={busy} destroyOnHidden>
+      okText="创建" confirmLoading={busy} destroyOnHidden afterOpenChange={(v) => v && nameRef.current?.focus()}>
       <Form form={form} layout="vertical" initialValues={{ env: "test", kind: "project", projectType: "web" }} preserve={false}>
         <Form.Item name="kind" label="类型" extra={group
           ? "大项目不含用例，只存放执行环境、凭据、角色账号与预算，其下的子项目自动继承"
@@ -479,7 +487,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
           </Form.Item>
         )}
         <Form.Item name="name" label={group ? "大项目名" : "项目名"} rules={[{ required: true, whitespace: true, message: "请输入名称" }]}>
-          <Input placeholder={group ? "如：特征中心" : parent ? "如：v4.4、标签管理" : "如：订单服务"} />
+          <Input ref={nameRef} onPressEnter={submit} placeholder={group ? "如：特征中心" : parent ? "如：v4.4、标签管理" : "如：订单服务"} />
         </Form.Item>
         {!group && <Form.Item name="projectType" label="测试端" rules={[{ required: true, message: "请选择测试端" }]}
           extra="按测试端显示相关功能；所有项目都支持接口测试，可在项目设置中调整。">
@@ -499,7 +507,7 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
           <Form.Item name="env" label="环境名" style={{ width: 120 }}><Input /></Form.Item>
           <Form.Item name="baseUrl" label={parent && !group ? "被测地址（留空则继承大项目的环境）" : "被测地址（可稍后配置）"} style={{ flex: 1 }}
             rules={[{ type: "url", message: "请输入完整地址，如 https://test.example.com" }]}>
-            <Input placeholder="https://test.example.com" />
+            <Input onPressEnter={submit} placeholder="https://test.example.com" />
           </Form.Item>
         </Flex>
       </Form>
