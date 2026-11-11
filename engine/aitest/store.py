@@ -123,6 +123,35 @@ class Store:
         self.conn.commit()
         return p
 
+    def delete_project(self, project_id: str) -> dict[str, int]:
+        """删除项目在数据库中的全部记录（用例、脚本登记、执行记录、建议、复核等）；workspace 目录不动。"""
+        cases = "SELECT id FROM testcase WHERE project_id=?"
+        runs = "SELECT id FROM run WHERE project_id=?"
+        statements = [
+            ("lint_issue", f"DELETE FROM lint_issue WHERE case_id IN ({cases})"),
+            ("case_requirement", f"DELETE FROM case_requirement WHERE case_id IN ({cases})"),
+            ("script", f"DELETE FROM script WHERE case_id IN ({cases})"),
+            ("heal_proposal", f"DELETE FROM heal_proposal WHERE case_id IN ({cases})"),
+            ("review_item", f"DELETE FROM review_item WHERE case_id IN ({cases})"),
+            ("run_result", f"DELETE FROM run_result WHERE run_id IN ({runs})"),
+            ("run", "DELETE FROM run WHERE project_id=?"),
+            ("testcase", "DELETE FROM testcase WHERE project_id=?"),
+            ("requirement", "DELETE FROM requirement WHERE project_id=?"),
+            ("test_data", "DELETE FROM test_data WHERE project_id=?"),
+            ("role_account", "DELETE FROM role_account WHERE project_id=?"),
+            ("agent_session", "DELETE FROM agent_session WHERE project_id=?"),
+        ]
+        # 三期的表由 ops.ensure_schema 创建，可能不存在
+        existing = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        statements += [(t, f"DELETE FROM {t} WHERE project_id=?") for t in ("event_log", "attribution", "project_setting")
+                       if t in existing]
+        counts: dict[str, int] = {}
+        with self.conn:
+            for table, sql in statements:
+                counts[table] = self.conn.execute(sql, (project_id,)).rowcount
+            self.conn.execute("DELETE FROM project WHERE id=?", (project_id,))
+        return counts
+
     def get_project(self, project_id: str) -> Project | None:
         r = self.conn.execute("SELECT * FROM project WHERE id=?", (project_id,)).fetchone()
         if not r:
@@ -176,6 +205,9 @@ class Store:
             if filters.get(col):
                 s, a = _match(col, filters[col])
                 sql, args = sql + s, args + a
+        if filters.get("ids"):
+            s, a = _match("id", filters["ids"])
+            sql, args = sql + s, args + a
         if query:
             sql += (" AND (title LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\'"
                     " OR json_extract(data, '$.module_path') LIKE ? ESCAPE '\\')")

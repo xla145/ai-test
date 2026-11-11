@@ -119,3 +119,17 @@ export function useDebounced<T>(value: T, ms = 300): T {
   }, [value, ms]);
   return v;
 }
+
+/** 容器宽度低于阈值时返回 true（内嵌浏览器打开后内容区只有半屏，按容器而不是窗口判断）。
+ *  返回回调 ref：容器晚于首次渲染出现（如先显示加载状态）也能开始监听 */
+export function useNarrow<T extends HTMLElement>(threshold = 760) {
+  const [el, setEl] = useState<T | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setNarrow(e.contentRect.width < threshold));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el, threshold]);
+  return [setEl, narrow] as const;
+}

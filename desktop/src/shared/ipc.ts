@@ -123,14 +123,22 @@ export interface AitestApi {
   applyFix(caseId: string, field: string, value: unknown): Promise<unknown>;
   generateApiSuite(projectId: string, openapiFile: string, enrich: boolean): Promise<unknown>;
   generateCases(projectId: string, requirementFile: string): Promise<unknown>;
-  runRegression(projectId: string, env: string): Promise<unknown>;
+  /** 生产环境需要 confirmProduction，否则主进程拒绝执行 */
+  runRegression(projectId: string, env: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
   setRoleSecret(projectId: string, role: string, username: string, password: string): Promise<void>;
   listRoles(projectId: string): Promise<{ role_name: string }[]>;
   setEnvironment(projectId: string, env: string, cfg: Record<string, unknown>): Promise<unknown>;
+  /** 同时删除该环境保存在钥匙串中的 token */
+  deleteEnvironment(projectId: string, env: string): Promise<unknown>;
+  renameProject(projectId: string, name: string): Promise<unknown>;
+  /** 从客户端移除项目（数据库记录与凭据）；workspace 目录保留 */
+  deleteProject(projectId: string): Promise<{ id: string; workspace_path: string }>;
+  getCase(caseId: string): Promise<unknown>;
+  caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
   exploreUiCase(projectId: string, env: string, caseId: string): Promise<unknown>;
-  runUiRegression(projectId: string, env: string, headed: boolean): Promise<unknown>;
+  runUiRegression(projectId: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   listProposals(status?: string): Promise<unknown[]>;
   pageProposals(projectId: string, q: PageQuery & { status?: string }): Promise<Page<unknown>>;
   resolveProposal(projectId: string, id: string, accept: boolean): Promise<unknown>;

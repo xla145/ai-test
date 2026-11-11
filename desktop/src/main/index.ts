@@ -288,9 +288,9 @@ function registerIpc(orch: Orchestrator): void {
       await setApprovalContext(orch, p);
       return orch.generateCases(p, f);
     },
-    runRegression: async (p: string, env: string) => {
+    runRegression: async (p: string, env: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
-      return orch.runRegression(p, env);
+      return orch.runRegression(p, env, { confirmProduction: opts?.confirmProduction });
     },
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
@@ -301,13 +301,27 @@ function registerIpc(orch: Orchestrator): void {
     },
     listRoles: (p: string) => orch.listRoles(p),
     setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),
+    deleteEnvironment: async (p: string, env: string) => {
+      const out = await orch.deleteEnvironment(p, env);
+      secretStore.delete(SecretStore.ref(p, env));
+      return out;
+    },
+    renameProject: (p: string, name: string) => orch.renameProject(p, name),
+    deleteProject: async (p: string) => {
+      const out = await orch.deleteProject(p);
+      // 该项目的环境 token 与角色账号一并从钥匙串删除
+      secretStore.deletePrefix(`aitest:${p}:`);
+      return out;
+    },
+    getCase: (c: string) => orch.getCase(c),
+    caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
     exploreUiCase: async (p: string, env: string, caseId: string) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId);
     },
-    runUiRegression: async (p: string, env: string, headed: boolean) => {
+    runUiRegression: async (p: string, env: string, headed: boolean, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
-      return orch.runUiRegression(p, env, { headed });
+      return orch.runUiRegression(p, env, { headed, confirmProduction: opts?.confirmProduction });
     },
     listProposals: (status?: string) => orch.listProposals(status),
     // ---- 三期 ----

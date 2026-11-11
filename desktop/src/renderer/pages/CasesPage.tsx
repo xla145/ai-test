@@ -1,12 +1,12 @@
 import { CheckOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
-import { Button, Card, Descriptions, Drawer, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
+import { Button, Card, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
+import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
 import { LabelTag, LINT, MODE, STATUS } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { useAction, useDebounced, usePaged } from "../hooks";
 
-const PRIORITY_COLOR: Record<string, string> = { P0: "red", P1: "orange", P2: "blue", P3: "default" };
 
 export function CasesPage({ project }: { project: Project }) {
   const [query, setQuery] = useState("");
@@ -60,12 +60,13 @@ export function CasesPage({ project }: { project: Project }) {
         rowKey="id"
         loading={loading}
         dataSource={rows}
+        scroll={{ x: 760 }}
         // 翻页后保留其它页已选的用例，可跨页批量审核
         rowSelection={{ selectedRowKeys: selected, preserveSelectedRowKeys: true, onChange: (k) => setSelected(k as string[]) }}
         pagination={pagination}
         onRow={(r) => ({ onDoubleClick: () => setDetail(r) })}
         columns={[
-          { title: "标题", dataIndex: "title", render: (t: string, r: TestCase) => (
+          { title: "标题", dataIndex: "title", width: 280, render: (t: string, r: TestCase) => (
             <a onClick={() => setDetail(r)}>{t}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.module_path.join(" / ")}</Typography.Text></div></a>
           ) },
           { title: "等级", dataIndex: "priority", width: 80,
@@ -78,32 +79,10 @@ export function CasesPage({ project }: { project: Project }) {
           ) },
         ]}
       />
-      <Drawer open={!!detail} onClose={() => setDetail(undefined)} width={560} title={detail?.title}
-        extra={detail?.status === "draft" && <Button type="primary" onClick={() => detail && setStatus([detail.id], "reviewed").then(() => setDetail(undefined))}>审核通过</Button>}>
-        {detail && (
-          <>
-            <Descriptions size="small" column={2} items={[
-              { key: "id", label: "用例 ID", children: <span className="mono">{detail.id}</span>, span: 2 },
-              { key: "m", label: "模块", children: detail.module_path.join(" / ") || "—", span: 2 },
-              { key: "p", label: "等级", children: <Tag color={PRIORITY_COLOR[detail.priority]} bordered={false}>{detail.priority}</Tag> },
-              { key: "c", label: "类型", children: detail.category },
-              { key: "e", label: "执行方式", children: <LabelTag map={MODE} value={detail.execution_mode} /> },
-              { key: "s", label: "状态", children: <><LabelTag map={STATUS} value={detail.status} /><LabelTag map={LINT} value={detail.lint_status} /></> },
-              ...(detail.data_refs?.length ? [{ key: "d", label: "测试数据", children: detail.data_refs.map((d) => <Tag key={d}>{d}</Tag>), span: 2 }] : []),
-            ]} />
-            {detail.preconditions.length > 0 && (
-              <>
-                <Typography.Title level={5} style={{ marginTop: 16 }}>前置条件</Typography.Title>
-                <ol className="case-steps">{detail.preconditions.map((p, i) => <li key={i}>{p}</li>)}</ol>
-              </>
-            )}
-            <Typography.Title level={5} style={{ marginTop: 16 }}>步骤与预期</Typography.Title>
-            <Table size="small" pagination={false} rowKey="i"
-              dataSource={detail.steps.map((s, i) => ({ i: i + 1, s, e: detail.expected[i] ?? "" }))}
-              columns={[{ title: "#", dataIndex: "i", width: 40 }, { title: "步骤", dataIndex: "s" }, { title: "预期结果", dataIndex: "e" }]} />
-          </>
-        )}
-      </Drawer>
+      <CaseDrawer caseId={detail?.id} data={detail} onClose={() => setDetail(undefined)}
+        extra={(c) => c.status === "draft" && (
+          <Button type="primary" disabled={c.lint_status === "blocked"} onClick={() => setStatus([c.id], "reviewed").then(() => setDetail(undefined))}>审核通过</Button>
+        )} />
     </>
   );
 }

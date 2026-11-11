@@ -64,6 +64,14 @@ export class SecretStore {
     return v ? (JSON.parse(this.cipher.decryptString(Buffer.from(v, "base64"))) as T) : undefined;
   }
 
+  /** 删除某个前缀下的全部凭据（移除项目时用） */
+  deletePrefix(prefix: string): number {
+    const keys = Object.keys(this.data).filter((k) => k.startsWith(prefix));
+    for (const k of keys) delete this.data[k];
+    if (keys.length) writeFileSync(this.file, JSON.stringify(this.data), { mode: 0o600 });
+    return keys.length;
+  }
+
   delete(ref: string): void {
     delete this.data[ref];
     writeFileSync(this.file, JSON.stringify(this.data), { mode: 0o600 });

@@ -1,7 +1,8 @@
 import { CheckCircleOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Empty, Row, Segmented, Statistic, Table, Typography } from "antd";
+import { Alert, Button, Card, Empty, Segmented, Statistic, Table } from "antd";
 import { useState } from "react";
 import { api, type LintIssue, type Project } from "../api";
+import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { LabelTag, LEVEL } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { useAction, usePaged } from "../hooks";
@@ -66,17 +67,17 @@ export function ImportPage({ project }: { project: Project }) {
         <Card><Empty description="导入 Excel 或点击「重新检查」查看规范检查结果" /></Card>
       ) : (
         <>
-          <Row gutter={16}>
-            <Col span={6}><Card><Statistic title="用例总数" value={report.total} /></Card></Col>
-            <Col span={6}><Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "#cf1322" : undefined }} /></Card></Col>
-            <Col span={6}><Card><Statistic title="警告" value={counts.warn ?? 0} /></Card></Col>
-            <Col span={6}><Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card></Col>
-          </Row>
+          <div className="stat-grid">
+            <Card><Statistic title="用例总数" value={report.total} /></Card>
+            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "#cf1322" : undefined }} /></Card>
+            <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
+            <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
+          </div>
           {report.blocked_case_ids.length === 0 && (
             <Alert style={{ marginTop: 16 }} type="success" showIcon icon={<CheckCircleOutlined />} message="没有阻断级问题，可以进入脚本生成" />
           )}
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={9}>
+          <div className="split" style={{ marginTop: 16 }}>
+            <div style={{ flex: "2 1 280px" }}>
               <Card title="规则命中" size="small">
                 <Table
                   size="small"
@@ -89,8 +90,8 @@ export function ImportPage({ project }: { project: Project }) {
                   ]}
                 />
               </Card>
-            </Col>
-            <Col span={15}>
+            </div>
+            <div style={{ flex: "3 1 420px" }}>
               <Card
                 title="问题明细"
                 size="small"
@@ -99,23 +100,26 @@ export function ImportPage({ project }: { project: Project }) {
                   ...["block", "block_script", "warn", "info"].filter((k) => counts[k]).map((k) => ({ label: `${LEVEL[k].text} ${counts[k]}`, value: k })),
                 ]} />}
               >
+                <CaseTitles projectId={project.id} ids={issues.items.map((i) => i.case_id)}>
                 <Table
                   size="small"
                   rowKey="id"
+                  scroll={{ x: 520 }}
                   loading={issues.loading}
                   dataSource={issues.items}
                   pagination={{ ...issues.pagination, size: "small" }}
                   columns={[
                     { title: "级别", dataIndex: "level", width: 110, render: (v: string) => <LabelTag map={LEVEL} value={v} /> },
                     { title: "问题", dataIndex: "message", render: (m: string, r: LintIssue) => (
-                      <>{m}<div><Typography.Text type="secondary" className="mono">{r.case_id}</Typography.Text></div></>
+                      <>{m}<div style={{ marginTop: 4 }}><CaseLink id={r.case_id} /></div></>
                     ) },
                     { title: "修改建议", dataIndex: "suggestion", width: "38%" },
                   ]}
                 />
+                </CaseTitles>
               </Card>
-            </Col>
-          </Row>
+            </div>
+          </div>
         </>
       )}
     </>

@@ -111,7 +111,18 @@ const globalView = (): GlobalSettingsView => ({
   },
 });
 
-const listeners: { approval?: (r: ApprovalRequest) => void; event?: (e: { method: string; params: unknown }) => void } = {};
+/** 与主进程一致：生产环境未确认时拒绝执行 */
+const requireConfirm = (id: string, env: string, opts?: { confirmProduction?: boolean }) => {
+  const p = projects.find((x) => x.id === id) as { environments: Record<string, { production?: boolean }> } | undefined;
+  return p?.environments[env]?.production && !opts?.confirmProduction
+    ? Promise.reject(new Error(`「${env}」是生产环境，需要确认后才能执行`)) : undefined;
+};
+
+const listeners: {
+  approval?: (r: ApprovalRequest) => void;
+  event?: (e: { method: string; params: unknown }) => void;
+  view?: (v: { visible: boolean }) => void;
+} = {};
 
 const mockApi: AitestApi = {
   listProjects: () => delay(projects),
@@ -143,7 +154,7 @@ const mockApi: AitestApi = {
   applyFix: () => delay({}),
   generateApiSuite: () => delay({ generated: { generated: 37 }, suite: { cases: 35, skipped: 2, test: "scripts/api/test_api.py", version: "a3f9c21d7e0b" } }, 800),
   generateCases: () => delay({ message: "新增 24 条用例：UI 16、接口 6、埋点抓包 2。仍有 3 条警告（预期写成操作）。用例为草稿，等待审核。", tokens: 18420 }, 900),
-  runRegression: () => delay({
+  runRegression: (id, env, opts) => requireConfirm(id, env, opts) ?? delay({
     run: { run_id: "run_8d2f", total: 35, passed: 33, failed: 2, error: 0, skipped: 0, pass_rate: 0.943 },
     triage: [
       { case_id: "tc_8f2a1c0e08", failure_type: "product_bug", reason: "停用后接口仍返回 200", suggestion: "提交缺陷：授权停用未生效" },
@@ -154,11 +165,38 @@ const mockApi: AitestApi = {
   setEnvSecret: () => delay(undefined),
   setRoleSecret: () => delay(undefined),
   listRoles: () => delay([{ role_name: "管理员" }, { role_name: "运营" }, { role_name: "分析师" }, { role_name: "访客" }]),
-  setEnvironment: () => delay({}),
+  setEnvironment: async (id, env, cfg) => {
+    const p = projects.find((x) => x.id === id) as { environments: Record<string, unknown> } | undefined;
+    if (p) p.environments[env] = cfg;
+    return delay({});
+  },
+  deleteEnvironment: async (id, env) => {
+    const p = projects.find((x) => x.id === id) as { environments: Record<string, unknown> } | undefined;
+    if (p) delete p.environments[env];
+    return delay({});
+  },
+  renameProject: async (id, name) => {
+    const p = projects.find((x) => x.id === id);
+    if (p) p.name = name;
+    return delay({});
+  },
+  deleteProject: async (id) => {
+    const i = projects.findIndex((x) => x.id === id);
+    const [p] = projects.splice(i, 1);
+    return delay({ id, workspace_path: p?.workspace_path ?? "" });
+  },
+  getCase: (id) => delay(cases.find((c) => c.id === id)),
+  caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
   exploreUiCase: () => delay({ message: "已生成脚本 scripts/ui/tc_8f2a1c0e02.spec.ts，试跑通过" }, 900),
-  runUiRegression: () => delay({
+  runUiRegression: (id, env, _headed, opts) => requireConfirm(id, env, opts) ?? delay({
     run: { run_id: "run_9a7b", total: 28, passed: 25, failed: 2, error: 1, reviews: 2 },
     heal: [{ case_id: "tc_8f2a1c0e01", failure_type: "script_error", reason: "按钮 testid 变更" }],
+    failures: [
+      { case_id: "tc_8f2a1c0e01", status: "failed", failure_type: "script_error", reason: "按钮 testid 变更，属于页面改版，已生成修改建议",
+        message: "locator.click: Timeout 10000ms exceeded.\nwaiting for getByTestId('disable-TAG-1001')" },
+      { case_id: "tc_8f2a1c0e03", status: "failed", failure_type: "product_bug", message: "expect(locator).toHaveText: 指标卡片显示 NaN，预期为数值" },
+      { case_id: "tc_imp0005", status: "error", failure_type: "environment", message: "page.goto: net::ERR_CONNECTION_REFUSED at https://feature-test.example.com/tags" },
+    ],
     degraded: ["tc_8f2a1c0e07"], missingData: ["DEM-1002"], htmlReport: "reports/ui/html",
   }, 1000),
   listProposals: (status) => delay(proposals.filter((p) => !status || p.status === status)),
@@ -219,8 +257,9 @@ const mockApi: AitestApi = {
     : { ok: false, latencyMs: 15003, detail: "无法连接 http://10.0.0.8:8000/v1：timeout" }, 700),
   pickFile: () => delay("/Users/demo/Downloads/特征中心v4.4用例.xlsx"),
   pickDirectory: () => delay("/Users/demo/aitest/new-project"),
-  openTestPage: () => delay(undefined),
-  hideTestView: () => delay(undefined),
+  // 预览时模拟内嵌浏览器：界面收窄到左半屏
+  openTestPage: async () => listeners.view?.({ visible: true }),
+  hideTestView: async () => listeners.view?.({ visible: false }),
   onApprovalRequest: (cb) => {
     listeners.approval = cb;
     return () => (listeners.approval = undefined);
@@ -230,7 +269,10 @@ const mockApi: AitestApi = {
     listeners.event = cb;
     return () => (listeners.event = undefined);
   },
-  onViewChange: () => () => undefined,
+  onViewChange: (cb) => {
+    listeners.view = cb;
+    return () => (listeners.view = undefined);
+  },
 };
 
 export function installMock(): void {

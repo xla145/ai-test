@@ -153,7 +153,7 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
 
 
 def cmd_list_cases(store: Store, a: argparse.Namespace) -> Any:
-    filters = {"query": a.query, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
+    filters = {"query": a.query, "ids": a.ids, "type": a.type, "priority": a.priority, "execution_mode": a.execution_mode,
                "status": a.status, "lint_status": a.lint_status}
     return _paged(a, lambda limit, offset: [c.to_dict() for c in store.list_cases(
                       a.project, limit=limit, offset=offset, **filters)],
@@ -255,8 +255,34 @@ def cmd_get_case(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_set_environment(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
-    p.environments[a.env] = json.loads(a.json)
+    cfg = json.loads(a.json)
+    if not isinstance(cfg, dict) or not str(cfg.get("base_url", "")).startswith(("http://", "https://")):
+        raise ValueError("环境配置需要以 http(s):// 开头的 base_url")
+    p.environments[a.env] = cfg
     return asdict(store.add_project(p))
+
+
+def cmd_delete_environment(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    if a.env not in p.environments:
+        raise KeyError(f"项目未配置环境：{a.env}")
+    del p.environments[a.env]
+    return asdict(store.add_project(p))
+
+
+def cmd_update_project(store: Store, a: argparse.Namespace) -> Any:
+    p = _project(store, a.project)
+    if a.name is not None:
+        if not a.name.strip():
+            raise ValueError("项目名不能为空")
+        p.name = a.name.strip()
+    return asdict(store.add_project(p))
+
+
+def cmd_delete_project(store: Store, a: argparse.Namespace) -> Any:
+    """从客户端移除项目：删除数据库记录，workspace 目录（用例、脚本、报告与 git 历史）保留，可再导入。"""
+    p = _project(store, a.project)
+    return {"id": p.id, "workspace_path": p.workspace_path, "deleted": store.delete_project(p.id)}
 
 
 def cmd_add_role(store: Store, a: argparse.Namespace) -> Any:
@@ -487,7 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
         (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))
     # 过滤值可用逗号分隔多个（如 --execution-mode ui,capture）；--query 匹配标题、用例 ID 与模块路径
-    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}),
+    add("list-cases", cmd_list_cases, (("--project",), req), (("--query",), {}), (("--ids",), {"help": "逗号分隔的用例 ID"}),
         *[((f"--{k}",), {}) for k in ("type", "priority", "execution-mode", "status", "lint-status")], *paging)
     add("link-requirement", cmd_link_requirement, (("--case",), req), (("--requirement",), req))
     add("route", cmd_route, (("--project",), req), (("--overwrite",), {"action": "store_true"}))
@@ -505,6 +531,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("get-project", cmd_get_project, (("--project",), req))
     add("get-case", cmd_get_case, (("--case",), req))
     add("set-environment", cmd_set_environment, (("--project",), req), (("--env",), req), (("--json",), req))
+    add("delete-environment", cmd_delete_environment, (("--project",), req), (("--env",), req))
+    add("update-project", cmd_update_project, (("--project",), req), (("--name",), {}))
+    add("delete-project", cmd_delete_project, (("--project",), req))
     add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))
     add("list-roles", cmd_list_roles, (("--project",), req))
     add("add-test-data", cmd_add_test_data, (("--project",), req), (("--key",), req), (("--check-script",), {}),
