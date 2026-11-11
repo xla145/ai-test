@@ -1,14 +1,24 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Space, Switch, Table, Tag, Typography } from "antd";
+import { DeleteOutlined, EditOutlined, PlusOutlined, RollbackOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { createContext, useContext, useEffect, useState } from "react";
-import { api, type Project } from "../api";
+import { api, isGroup, type Project } from "../api";
 import { useAction } from "../hooks";
 
 /** 项目数据变化（改名、改环境、保存登录方式）后刷新项目列表，避免页面拿着旧配置再保存 */
-export const ProjectsContext = createContext<{ reload: () => Promise<void> }>({ reload: async () => undefined });
+export const ProjectsContext = createContext<{ reload: () => Promise<void>; projects: Project[] }>({
+  reload: async () => undefined,
+  projects: [],
+});
 export const useProjects = () => useContext(ProjectsContext);
 
 type Env = Project["environments"][string] & Record<string, unknown>;
+interface EnvRow extends Env {
+  name: string;
+  /** 继承自大项目（未覆盖） */
+  inherited: boolean;
+  /** 子项目自己的配置覆盖了大项目的同名环境 */
+  overrides: boolean;
+}
 
 interface EnvForm {
   name: string;
@@ -17,26 +27,119 @@ interface EnvForm {
   auth_header?: string;
 }
 
+/**
+ * 执行环境表：大项目 / 独立项目直接管理；子项目显示继承来的环境，可「覆盖」为自己的配置，
+ * 删除覆盖即「恢复继承」。
+ */
+export function EnvTable({ project }: { project: Project }) {
+  const { reload, projects } = useProjects();
+  const { busy, run } = useAction();
+  const [editing, setEditing] = useState<{ name?: string; base?: Env & { name?: string } }>();
+  const parent = project.parent_id ? projects.find((p) => p.id === project.parent_id) : undefined;
+  const own = (project.own_environments ?? project.environments) as Record<string, Env>;
+  const rows: EnvRow[] = Object.entries(project.environments as Record<string, Env>).map(([name, e]) => ({
+    ...e, name,
+    inherited: Boolean(project.inherited_environments?.[name]),
+    overrides: Boolean(parent && name in own && name in parent.environments),
+  }));
+
+  const save = (v: EnvForm) => run(async () => {
+    const { name: _n, ...prev } = editing?.base ?? {};
+    // 保留登录方式、造数接口等其它配置
+    const cfg: Record<string, unknown> = { ...prev, base_url: v.base_url.trim(), production: Boolean(v.production) };
+    for (const k of ["inherited", "overrides"]) delete cfg[k];
+    if (v.auth_header?.trim()) cfg.auth_header = v.auth_header.trim();
+    else delete cfg.auth_header;
+    if (!cfg.production) delete cfg.production;
+    await api().setEnvironment(project.id, v.name.trim(), cfg);
+    await reload();
+    setEditing(undefined);
+  }, "环境已保存");
+
+  return (
+    <>
+      <Table<EnvRow> size="small" rowKey="name" pagination={false} dataSource={rows}
+        locale={{ emptyText: parent ? "大项目还没有执行环境" : "还没有执行环境，添加后才能执行回归" }}
+        columns={[
+          { title: "名称", dataIndex: "name", width: 170, render: (n: string, e) => (
+            <Space size={4} wrap>
+              {n}
+              {e.production && <Tag color="red" bordered={false}>生产</Tag>}
+              {e.inherited && <Tag bordered={false}>继承</Tag>}
+              {e.overrides && <Tag color="blue" bordered={false}>已覆盖</Tag>}
+            </Space>
+          ) },
+          { title: "被测地址", dataIndex: "base_url", ellipsis: true, render: (u: string, e) => (
+            <Typography.Text className="mono" type={e.inherited ? "secondary" : undefined}>{u}</Typography.Text>
+          ) },
+          { title: "", width: 96, render: (_: unknown, e) => e.inherited ? (
+            <Tooltip title="在本项目中使用不同的配置（如另一个测试地址）">
+              <Button size="small" type="link" onClick={() => setEditing({ base: e })}>覆盖</Button>
+            </Tooltip>
+          ) : (
+            <Space size={0}>
+              <Button size="small" type="text" icon={<EditOutlined />} aria-label="编辑"
+                onClick={() => setEditing({ name: e.name, base: { ...own[e.name], name: e.name } })} />
+              <Popconfirm
+                title={e.overrides ? `恢复继承「${e.name}」？` : `删除环境「${e.name}」？`}
+                description={e.overrides ? `删除本项目的配置，改用大项目「${parent?.name}」的` : "同时删除该环境保存在钥匙串中的 token"}
+                okButtonProps={{ danger: !e.overrides }}
+                onConfirm={() => run(async () => {
+                  await api().deleteEnvironment(project.id, e.name);
+                  await reload();
+                }, e.overrides ? "已恢复继承" : "环境已删除")}>
+                <Button size="small" type="text" danger={!e.overrides} aria-label={e.overrides ? "恢复继承" : "删除"}
+                  icon={e.overrides ? <RollbackOutlined /> : <DeleteOutlined />} />
+              </Popconfirm>
+            </Space>
+          ) },
+        ]} />
+      <Space style={{ marginTop: 8, width: "100%", justifyContent: "space-between" }} wrap>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {isGroup(project)
+            ? "子项目自动继承这里的环境；生产环境执行前需要二次确认，agent 访问生产地址的命令一律需要审批。"
+            : parent
+              ? `继承自大项目「${parent.name}」的环境在大项目中修改；也可以在本项目中覆盖。`
+              : "标记为生产的环境：执行回归前需要二次确认；agent 访问生产地址的命令一律需要审批。"}
+        </Typography.Text>
+        <Button size="small" icon={<PlusOutlined />} onClick={() => setEditing({})}>添加环境</Button>
+      </Space>
+      <EnvModal
+        open={!!editing}
+        name={editing?.name}
+        base={editing?.base}
+        overriding={Boolean(editing && !editing.name && editing.base)}
+        existing={rows.filter((r) => !r.inherited).map((r) => r.name)}
+        busy={busy}
+        onCancel={() => setEditing(undefined)}
+        onSubmit={save}
+      />
+    </>
+  );
+}
+
 export function ProjectSettings({ project, open, onClose, onDeleted }: {
   project: Project;
   open: boolean;
   onClose: () => void;
   onDeleted: () => void;
 }) {
-  const { reload } = useProjects();
+  const { reload, projects } = useProjects();
   const { busy, run } = useAction();
   const { modal } = App.useApp();
   const [nameForm] = Form.useForm<{ name: string }>();
-  const [editing, setEditing] = useState<string | "new">();
   useEffect(() => {
     if (open) nameForm.setFieldsValue({ name: project.name });
   }, [open, project.name, nameForm]);
-
-  const envs = Object.entries(project.environments as Record<string, Env>);
+  const group = isGroup(project);
+  const groups = projects.filter(isGroup);
+  const childCount = project.children?.length ?? 0;
 
   const remove = () => modal.confirm({
     title: `从客户端移除「${project.name}」？`,
-    content: (
+    content: group ? (
+      <Typography.Paragraph style={{ marginBottom: 0 }}>将删除大项目的共享环境、角色账号、设置，以及钥匙串中的 token 与账号密码。</Typography.Paragraph>
+    ) : (
       <>
         <Typography.Paragraph>将删除该项目在客户端中的记录：用例库、执行记录、归因、修改建议与复核，以及钥匙串中的环境 token 和角色账号。</Typography.Paragraph>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
@@ -56,84 +159,66 @@ export function ProjectSettings({ project, open, onClose, onDeleted }: {
   });
 
   return (
-    <Drawer open={open} onClose={onClose} width={640} title="项目设置" destroyOnHidden>
+    <Drawer open={open} onClose={onClose} width={640} title={group ? "大项目设置" : "项目设置"} destroyOnHidden>
       <Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
         <Form form={nameForm} layout="vertical" onFinish={(v) => run(async () => {
           await api().renameProject(project.id, v.name.trim());
           await reload();
         }, "已保存")}>
-          <Form.Item name="name" label="项目名" rules={[{ required: true, whitespace: true, message: "请输入项目名" }]}>
+          <Form.Item name="name" label={group ? "大项目名" : "项目名"} rules={[{ required: true, whitespace: true, message: "请输入名称" }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="workspace 目录" extra="用例、脚本与报告保存在这里并用 git 管理；创建后不能修改">
-            <Typography.Text className="mono" copyable>{project.workspace_path}</Typography.Text>
-          </Form.Item>
+          {!group && (
+            <Form.Item label="workspace 目录" extra="用例、脚本与报告保存在这里并用 git 管理；创建后不能修改">
+              <Typography.Text className="mono" copyable>{project.workspace_path}</Typography.Text>
+            </Form.Item>
+          )}
           <Button type="primary" htmlType="submit" loading={busy}>保存</Button>
         </Form>
       </Card>
 
-      <Card size="small" title="执行环境" style={{ marginBottom: 16 }}
-        extra={<Button size="small" icon={<PlusOutlined />} onClick={() => setEditing("new")}>添加环境</Button>}>
-        <Table<Env & { name: string }> size="small" rowKey="name" pagination={false}
-          dataSource={envs.map(([name, e]) => ({ name, ...e }))}
-          locale={{ emptyText: "还没有执行环境，添加后才能执行回归" }}
-          columns={[
-            { title: "名称", dataIndex: "name", width: 140, render: (n: string, e) => (
-              <Space size={4}>{n}{e.production && <Tag color="red" bordered={false}>生产</Tag>}</Space>
-            ) },
-            { title: "被测地址", dataIndex: "base_url", ellipsis: true, render: (u: string) => <span className="mono">{u}</span> },
-            { title: "", width: 80, render: (_: unknown, e) => (
-              <Space size={0}>
-                <Button size="small" type="text" icon={<EditOutlined />} aria-label="编辑" onClick={() => setEditing(e.name)} />
-                <Popconfirm title={`删除环境「${e.name}」？`} description="同时删除该环境保存在钥匙串中的 token"
-                  okButtonProps={{ danger: true }} onConfirm={() => run(async () => {
-                    await api().deleteEnvironment(project.id, e.name);
-                    await reload();
-                  }, "环境已删除")}>
-                  <Button size="small" type="text" danger icon={<DeleteOutlined />} aria-label="删除" />
-                </Popconfirm>
-              </Space>
-            ) },
-          ]} />
-        <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
-          标记为生产的环境：执行回归前需要二次确认；agent 访问生产地址的命令一律需要审批。鉴权 token 在「接口回归」页保存到钥匙串。
-        </Typography.Paragraph>
+      {!group && groups.length > 0 && (
+        <Card size="small" title="所属大项目" style={{ marginBottom: 16 }}>
+          <Select style={{ width: 260 }} value={project.parent_id || ""} disabled={busy}
+            options={[{ value: "", label: "无（独立项目）" }, ...groups.map((g) => ({ value: g.id, label: g.name }))]}
+            onChange={(parent) => run(async () => {
+              await api().moveProject(project.id, parent);
+              await reload();
+            }, parent ? "已移入大项目，环境与账号改为继承" : "已移出，成为独立项目")} />
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 8, marginBottom: 0 }}>
+            放入大项目后继承其执行环境、凭据、角色账号与设置；本项目已有的同名配置会保留并覆盖继承的值。
+          </Typography.Paragraph>
+        </Card>
+      )}
+
+      <Card size="small" title={group ? "共享执行环境" : "执行环境"} style={{ marginBottom: 16 }}>
+        <EnvTable project={project} />
       </Card>
 
-      <Card size="small" title={<Typography.Text type="danger">移除项目</Typography.Text>}>
+      <Card size="small" title={<Typography.Text type="danger">移除{group ? "大项目" : "项目"}</Typography.Text>}>
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Alert type="warning" showIcon message="只删除客户端中的记录与凭据，workspace 目录与其中的 git 历史保留。" />
-          <Button danger loading={busy} onClick={remove}>从客户端移除</Button>
+          {group && childCount > 0 ? (
+            <Alert type="info" showIcon message={`其下还有 ${childCount} 个子项目，需先移除或移出子项目`} />
+          ) : (
+            <Alert type="warning" showIcon message={group
+              ? "只删除大项目的共享配置与凭据。"
+              : "只删除客户端中的记录与凭据，workspace 目录与其中的 git 历史保留。"} />
+          )}
+          <Button danger loading={busy} disabled={group && childCount > 0} onClick={remove}>从客户端移除</Button>
         </Space>
       </Card>
-
-      <EnvModal
-        open={!!editing}
-        name={editing === "new" ? undefined : editing}
-        env={editing && editing !== "new" ? (project.environments as Record<string, Env>)[editing] : undefined}
-        existing={envs.map(([n]) => n)}
-        busy={busy}
-        onCancel={() => setEditing(undefined)}
-        onSubmit={(v) => run(async () => {
-          const prev = editing && editing !== "new" ? (project.environments as Record<string, Env>)[editing] : {};
-          // 保留登录方式、造数接口等其它配置
-          const cfg: Record<string, unknown> = { ...prev, base_url: v.base_url.trim(), production: Boolean(v.production) };
-          if (v.auth_header?.trim()) cfg.auth_header = v.auth_header.trim();
-          else delete cfg.auth_header;
-          if (!cfg.production) delete cfg.production;
-          await api().setEnvironment(project.id, v.name.trim(), cfg);
-          await reload();
-          setEditing(undefined);
-        }, "环境已保存")}
-      />
     </Drawer>
   );
 }
 
-function EnvModal({ open, name, env, existing, busy, onCancel, onSubmit }: {
+function EnvModal({ open, name, base, overriding, existing, busy, onCancel, onSubmit }: {
   open: boolean;
+  /** 编辑已有环境时的环境名（不可改） */
   name?: string;
-  env?: Env;
+  /** 预填的配置（编辑或覆盖继承的环境） */
+  base?: Env & { name?: string };
+  /** 覆盖继承来的环境：环境名固定为继承的名字 */
+  overriding: boolean;
   existing: string[];
   busy: boolean;
   onCancel: () => void;
@@ -143,25 +228,27 @@ function EnvModal({ open, name, env, existing, busy, onCancel, onSubmit }: {
   useEffect(() => {
     if (!open) return;
     form.resetFields();
-    form.setFieldsValue(name && env
-      ? { name, base_url: env.base_url, production: Boolean(env.production), auth_header: (env.auth_header as string) ?? "" }
+    form.setFieldsValue(base
+      ? { name: name ?? base.name, base_url: base.base_url, production: Boolean(base.production), auth_header: (base.auth_header as string) ?? "" }
       : { production: false });
-  }, [open, name, env, form]);
+  }, [open, name, base, form]);
   const submit = async () => {
     const v = await form.validateFields().catch(() => undefined);
     if (v) onSubmit(v);
   };
+  const fixedName = Boolean(name) || overriding;
   return (
-    <Modal open={open} title={name ? `编辑环境：${name}` : "添加环境"} onCancel={onCancel} onOk={submit} okText="保存"
-      confirmLoading={busy} destroyOnHidden>
+    <Modal open={open} title={name ? `编辑环境：${name}` : overriding ? `在本项目中覆盖：${base?.name}` : "添加环境"}
+      onCancel={onCancel} onOk={submit} okText="保存" confirmLoading={busy} destroyOnHidden>
+      {overriding && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="覆盖后本项目使用这里的配置，大项目及其它子项目不受影响；之后可以「恢复继承」。" />}
       <Form form={form} layout="vertical" preserve={false}>
-        <Form.Item name="name" label="环境名" extra={name ? "环境名创建后不能修改（钥匙串中的 token 按环境名保存）" : "如 test、staging、prod"}
+        <Form.Item name="name" label="环境名" extra={fixedName ? "环境名不能修改（钥匙串中的 token 按环境名保存）" : "如 test、staging、prod"}
           rules={[
             { required: true, whitespace: true, message: "请输入环境名" },
             { pattern: /^[\w.-]+$/, message: "只能包含字母、数字、下划线、点和短横线" },
-            { validator: (_, v: string) => (!name && existing.includes(v?.trim()) ? Promise.reject(new Error("环境已存在")) : Promise.resolve()) },
+            { validator: (_, v: string) => (!fixedName && existing.includes(v?.trim()) ? Promise.reject(new Error("环境已存在")) : Promise.resolve()) },
           ]}>
-          <Input disabled={!!name} />
+          <Input disabled={fixedName} />
         </Form.Item>
         <Form.Item name="base_url" label="被测地址" rules={[
           { required: true, message: "请输入被测地址" },

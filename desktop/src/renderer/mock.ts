@@ -11,16 +11,33 @@ const page = <T,>(rows: T[], q: PageQuery, extra: Partial<Page<T>> = {}): Promis
   delay({ items: rows.slice((q.page - 1) * q.pageSize, q.page * q.pageSize), total: rows.length, page: q.page, page_size: q.pageSize, ...extra });
 const matches = (value: string, filter?: string) => !filter || filter.split(",").includes(value);
 
-const projects = [
+const projects: any[] = [
   {
-    id: "proj_feature", name: "特征中心 v4.4", workspace_path: "/Users/demo/aitest/feature-center",
+    id: "grp_feature", name: "特征中心", workspace_path: "", kind: "group", parent_id: "",
     environments: {
       test: { base_url: "https://feature-test.example.com", login: { url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "/overview" } },
       prod: { base_url: "https://feature.example.com", production: true },
     },
   },
-  { id: "proj_order", name: "订单服务", workspace_path: "/Users/demo/aitest/order-service", environments: { test: { base_url: "https://order-test.example.com" } } },
+  { id: "proj_feature", name: "v4.4", workspace_path: "/Users/demo/aitest/feature-v44", parent_id: "grp_feature", kind: "project", environments: {} },
+  {
+    id: "proj_feature45", name: "v4.5", workspace_path: "/Users/demo/aitest/feature-v45", parent_id: "grp_feature", kind: "project",
+    environments: { test: { base_url: "https://feature-test-v45.example.com" } },
+  },
+  { id: "proj_order", name: "订单服务", workspace_path: "/Users/demo/aitest/order-service", kind: "project", parent_id: "", environments: { test: { base_url: "https://order-test.example.com" } } },
 ];
+
+/** 与引擎一致的项目视图：子项目继承大项目的环境 */
+const view = (p: any) => {
+  const parent = p.parent_id ? projects.find((x) => x.id === p.parent_id) : undefined;
+  const inherited = Object.fromEntries(Object.keys(parent?.environments ?? {}).filter((k) => !(k in p.environments)).map((k) => [k, parent.id]));
+  return {
+    ...p, own_environments: p.environments, environments: { ...(parent?.environments ?? {}), ...p.environments },
+    inherited_environments: inherited, parent_name: parent?.name ?? "",
+    children: p.kind === "group" ? projects.filter((x) => x.parent_id === p.id).map((x) => x.id) : [],
+  };
+};
+
 
 const mk = (id: string, title: string, mode: string, priority: string, lint: string, status: string, extra: Record<string, unknown> = {}) => ({
   id, title, type: mode === "api" ? "api" : "ui", priority, category: "功能测试", module_path: ["特征中心", title.split("-")[0]],
@@ -113,8 +130,8 @@ const globalView = (): GlobalSettingsView => ({
 
 /** 与主进程一致：生产环境未确认时拒绝执行 */
 const requireConfirm = (id: string, env: string, opts?: { confirmProduction?: boolean }) => {
-  const p = projects.find((x) => x.id === id) as { environments: Record<string, { production?: boolean }> } | undefined;
-  return p?.environments[env]?.production && !opts?.confirmProduction
+  const p = projects.find((x) => x.id === id);
+  return p && view(p).environments[env]?.production && !opts?.confirmProduction
     ? Promise.reject(new Error(`「${env}」是生产环境，需要确认后才能执行`)) : undefined;
 };
 
@@ -125,11 +142,32 @@ const listeners: {
 } = {};
 
 const mockApi: AitestApi = {
-  listProjects: () => delay(projects),
-  createProject: async (name, workspace, environments) => {
-    const p = { id: `proj_${Date.now()}`, name, workspace_path: workspace, environments: environments as never };
-    projects.push(p as never);
-    return delay(p);
+  listProjects: () => delay(projects.map(view)),
+  createProject: async (name, workspace, environments, opts) => {
+    const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
+      environments, kind: opts?.kind ?? "project", parent_id: opts?.parent ?? "" };
+    projects.push(p);
+    return delay(view(p));
+  },
+  moveProject: async (id, parent) => {
+    const p = projects.find((x) => x.id === id);
+    if (p) p.parent_id = parent;
+    return delay(view(p));
+  },
+  projectOverview: (id) => delay({
+    children: projects.filter((x) => x.parent_id === id).map((c, i) => ({
+      id: c.id, name: c.name, workspace_path: c.workspace_path, cases: [66, 41][i] ?? 0, reviewed: [24, 12][i] ?? 0, blocked: [8, 1][i] ?? 0,
+      last_run: i === 0 ? { run_id: "run_8d2f", started_at: "2026-11-10T15:20:00Z", env: "test", framework: "pytest", total: 35, passed: 33, pass_rate: 0.943 } : null,
+      month_tokens: [412300, 86000][i] ?? 0,
+    })),
+    budget: { month_used: 498300, monthly_budget: 2000000, allowed: true },
+  }),
+  getSettingsDetail: (id) => {
+    const p = projects.find((x) => x.id === id);
+    const group = { monthly_token_budget: 2000000, price_per_mtok: 20, currency: "CNY", stability_threshold: 0.95 };
+    if (p?.kind === "group" || !p?.parent_id) return delay({ effective: group, own: group, inherited: {}, parent_id: "", parent_name: "" });
+    const own = { per_task_token_limit: 200000 };
+    return delay({ effective: { ...group, ...own }, own, inherited: group, parent_id: p.parent_id, parent_name: "特征中心" });
   },
   importExcel: () => delay({ imported: 349 }, 600),
   lint: () => delay((({ issues: _, ...summary }) => summary)(lint), 400),
@@ -164,14 +202,17 @@ const mockApi: AitestApi = {
   tokenUsage: () => delay({ tokens: 412300 }),
   setEnvSecret: () => delay(undefined),
   setRoleSecret: () => delay(undefined),
-  listRoles: () => delay([{ role_name: "管理员" }, { role_name: "运营" }, { role_name: "分析师" }, { role_name: "访客" }]),
+  listRoles: (id) => delay(id === "grp_feature" || projects.find((x) => x.id === id)?.parent_id === "grp_feature"
+    ? [{ role_name: "管理员" }, { role_name: "运营" }, { role_name: "分析师" }, { role_name: "访客" }]
+        .map((r) => (id === "grp_feature" ? r : { ...r, inherited_from: "grp_feature" }))
+    : [{ role_name: "管理员" }]),
   setEnvironment: async (id, env, cfg) => {
-    const p = projects.find((x) => x.id === id) as { environments: Record<string, unknown> } | undefined;
+    const p = projects.find((x) => x.id === id);
     if (p) p.environments[env] = cfg;
     return delay({});
   },
   deleteEnvironment: async (id, env) => {
-    const p = projects.find((x) => x.id === id) as { environments: Record<string, unknown> } | undefined;
+    const p = projects.find((x) => x.id === id);
     if (p) delete p.environments[env];
     return delay({});
   },

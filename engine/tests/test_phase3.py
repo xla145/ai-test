@@ -62,7 +62,8 @@ def test_usage_report_and_budget(cli, project):
     cli("set-setting", "--project", project, "--key", "monthly_token_budget", "--value", "2000")
     cli("set-setting", "--project", project, "--key", "per_task_token_limit", "--value", "1500")
     b = cli("check-budget", "--project", project)
-    assert b == {"month_used": 1200, "monthly_budget": 2000, "remaining": 800, "allowed": True, "per_task_limit": 800}
+    assert b == {"month_used": 1200, "monthly_budget": 2000, "remaining": 800, "allowed": True, "per_task_limit": 800,
+                 "shared": False}
     cli("add-tokens", "--session", s1, "--tokens", "900")
     assert cli("check-budget", "--project", project)["allowed"] is False
     assert "参数错误" in cli("set-setting", "--project", project, "--key", "x", "--value", "1", ok=False)

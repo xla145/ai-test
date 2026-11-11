@@ -91,3 +91,21 @@ describe("paged lists", () => {
     ]);
   });
 });
+
+describe("two-level projects", () => {
+  it("creates groups without a workspace, sub-projects with a parent, and clears settings to inherit", async () => {
+    const { engine, calls } = fakeEngine({});
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({}) });
+    await orch.createProject("特征中心", "", {}, { kind: "group" });
+    await orch.createProject("v4.4", "/ws/a", {}, { parent: "grp_1" });
+    await orch.moveProject("p1", "");
+    await orch.setSettings("p1", { currency: null, price_per_mtok: 20, per_task_token_limit: undefined });
+    expect(calls.map(([a]) => a).filter((a) => a[0] !== "get-settings")).toEqual([
+      ["init-project", "--name", "特征中心", "--kind", "group", "--environments", "{}"],
+      ["init-project", "--name", "v4.4", "--workspace", "/ws/a", "--environments", "{}", "--parent", "grp_1"],
+      ["update-project", "--project", "p1", "--parent", ""],
+      ["set-setting", "--project", "p1", "--key", "currency", "--value", ""],
+      ["set-setting", "--project", "p1", "--key", "price_per_mtok", "--value", "20"],
+    ]);
+  });
+});

@@ -51,3 +51,33 @@ describe("secrets", () => {
     expect(() => store.set("r", { authToken: "x" })).toThrow("钥匙串");
   });
 });
+
+describe("secrets inherited from the big project", () => {
+  it("falls back to the parent's token and role accounts, own values win", async () => {
+    const { secretEnvFor } = await import("../src/main/secrets.js");
+    const file = join(mkdtempSync(join(tmpdir(), "sec-")), "secrets.json");
+    const store = new SecretStore(file, cipher);
+    store.set(SecretStore.ref("grp", "test"), { authToken: "Bearer group" });
+    store.set(SecretStore.roleRef("grp", "admin"), { username: "g-admin", password: "1" });
+    store.set(SecretStore.roleRef("child", "guest"), { username: "c-guest", password: "2" });
+
+    const inherited = secretEnvFor(store, "child", "test", ["admin", "guest"], "grp");
+    expect(inherited.AITEST_AUTH_TOKEN).toBe("Bearer group");
+    expect(JSON.parse(inherited.AITEST_ROLES).map((r: { username: string }) => r.username)).toEqual(["g-admin", "c-guest"]);
+    // 没有大项目时不会串用其它项目的凭据
+    expect(secretEnvFor(store, "child", "test", ["admin"])).toEqual({});
+
+    store.set(SecretStore.ref("child", "test"), { authToken: "Bearer child" });
+    expect(secretEnvFor(store, "child", "test", [], "grp").AITEST_AUTH_TOKEN).toBe("Bearer child");
+
+    const broker = await startSecretBroker(store, { parentOf: (id) => (id === "child" ? "grp" : undefined) });
+    try {
+      store.delete(SecretStore.ref("child", "test"));
+      expect(await new BrokerSecretResolver(broker.url, broker.token).resolve("child", "test"))
+        .toEqual({ AITEST_AUTH_TOKEN: "Bearer group" });
+    } finally {
+      await broker.close();
+    }
+    expect(store.deletePrefix("aitest:grp:")).toBe(2);
+  });
+});

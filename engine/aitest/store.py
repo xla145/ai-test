@@ -110,6 +110,16 @@ class Store:
         self.conn = sqlite3.connect(str(path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """旧库补列：两层项目（parent_id / kind）。"""
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(project)")}
+        if "parent_id" not in cols:
+            self.conn.execute("ALTER TABLE project ADD COLUMN parent_id TEXT NOT NULL DEFAULT ''")
+        if "kind" not in cols:
+            self.conn.execute("ALTER TABLE project ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -117,8 +127,8 @@ class Store:
     # ---- project ----
     def add_project(self, p: Project) -> Project:
         self.conn.execute(
-            "INSERT OR REPLACE INTO project VALUES (?,?,?,?)",
-            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False)),
+            "INSERT OR REPLACE INTO project (id, name, workspace_path, environments, parent_id, kind) VALUES (?,?,?,?,?,?)",
+            (p.id, p.name, p.workspace_path, json.dumps(p.environments, ensure_ascii=False), p.parent_id or "", p.kind),
         )
         self.conn.commit()
         return p
@@ -157,11 +167,19 @@ class Store:
         if not r:
             return None
         return Project(id=r["id"], name=r["name"], workspace_path=r["workspace_path"],
-                       environments=json.loads(r["environments"]))
+                       environments=json.loads(r["environments"]), parent_id=r["parent_id"] or "",
+                       kind=r["kind"] or "project")
 
     def list_projects(self) -> list[Project]:
         rows = self.conn.execute("SELECT id FROM project ORDER BY name").fetchall()
         return [p for p in (self.get_project(r["id"]) for r in rows) if p]
+
+    def child_ids(self, group_id: str) -> list[str]:
+        return [r["id"] for r in self.conn.execute("SELECT id FROM project WHERE parent_id=? ORDER BY name", (group_id,))]
+
+    def parent_of(self, project_id: str) -> Project | None:
+        p = self.get_project(project_id)
+        return self.get_project(p.parent_id) if p and p.parent_id else None
 
     # ---- requirement ----
     def add_requirements(self, reqs: Iterable[Requirement]) -> None:

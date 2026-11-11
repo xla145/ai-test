@@ -1,8 +1,9 @@
-import { ChromeOutlined, KeyOutlined } from "@ant-design/icons";
+import { ChromeOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Empty, Form, Input, Progress, Space, Statistic, Table, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
+import { EnvCredentials } from "../components/EnvCredentials";
 import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
 import { FAILURE, LabelTag } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
@@ -17,7 +18,6 @@ export function RunPage({ project }: { project: Project }) {
   const envs = Object.keys(project.environments);
   const [env, setEnv] = useEnvChoice(project);
   const [result, setResult] = useState<RunResult>();
-  const [tokenForm] = Form.useForm<{ token: string; header?: string }>();
   const { busy, run } = useAction();
 
   if (!envs.length) return <Empty description="项目还没有配置执行环境" />;
@@ -37,19 +37,7 @@ export function RunPage({ project }: { project: Project }) {
           </RunButton>
         </>}
       />
-      <Card size="small" title={<Space><KeyOutlined />环境凭据</Space>} style={{ marginBottom: 16 }}>
-        <Form form={tokenForm} layout="inline" onFinish={(v) => run(async () => {
-          await api().setEnvSecret(project.id, env, v.token, v.header || undefined);
-          tokenForm.resetFields();
-        }, "凭据已存入系统钥匙串")}>
-          <Form.Item name="token" rules={[{ required: true, message: "请输入 token" }]}>
-            <Input.Password placeholder="鉴权 token，如 Bearer xxx" style={{ width: 320 }} />
-          </Form.Item>
-          <Form.Item name="header"><Input placeholder="鉴权头（默认 Authorization）" style={{ width: 220 }} /></Form.Item>
-          <Form.Item><Button htmlType="submit" loading={busy}>保存到钥匙串</Button></Form.Item>
-        </Form>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>凭据只在执行时注入脚本进程，不会进入模型上下文或写入数据库。</Typography.Text>
-      </Card>
+      <EnvCredentials project={project} env={env} />
       {result && (
         <>
           <div className="stat-grid">

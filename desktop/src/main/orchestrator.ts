@@ -46,7 +46,11 @@ export interface ProjectInfo {
   id: string;
   name: string;
   workspace_path: string;
+  /** 生效的环境（子项目含继承自大项目的） */
   environments: Record<string, EnvironmentInfo>;
+  /** 两层项目："group" 为大项目，只存放共享配置 */
+  kind?: "project" | "group";
+  parent_id?: string;
 }
 
 /** UI 执行相关依赖（来自 @ai-test/mcp-servers，测试时可替换） */
@@ -126,10 +130,21 @@ export class Orchestrator extends EventEmitter {
     return p;
   }
 
-  createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {}) {
+  createProject(name: string, workspace: string, environments: ProjectInfo["environments"] = {},
+    opts: { kind?: "project" | "group"; parent?: string } = {}) {
     return this.deps.engine<ProjectInfo>([
-      "init-project", "--name", name, "--workspace", workspace, "--environments", JSON.stringify(environments),
+      "init-project", "--name", name, ...(opts.kind === "group" ? ["--kind", "group"] : ["--workspace", workspace]),
+      "--environments", JSON.stringify(environments), ...(opts.parent ? ["--parent", opts.parent] : []),
     ]);
+  }
+
+  /** 移入大项目；parent 为空字符串表示移出成为独立项目 */
+  moveProject(projectId: string, parent: string) {
+    return this.deps.engine(["update-project", "--project", projectId, "--parent", parent]);
+  }
+
+  projectOverview(groupId: string) {
+    return this.deps.engine(["project-overview", "--project", groupId]);
   }
 
   importExcel(projectId: string, file: string) {
@@ -403,10 +418,16 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine<Record<string, unknown>>(["get-settings", "--project", projectId]);
   }
 
+  /** 生效值、本项目设置的值、继承自大项目的值 */
+  getSettingsDetail(projectId: string) {
+    return this.deps.engine(["get-settings", "--project", projectId, "--detail"]);
+  }
+
+  /** null / 空字符串表示清除本项目的设置（子项目恢复继承大项目的值）；undefined 表示不修改 */
   async setSettings(projectId: string, settings: Record<string, string | number | null | undefined>) {
     for (const [key, value] of Object.entries(settings)) {
-      if (value === undefined || value === null || value === "") continue;
-      await this.deps.engine(["set-setting", "--project", projectId, "--key", key, "--value", String(value)]);
+      if (value === undefined) continue;
+      await this.deps.engine(["set-setting", "--project", projectId, "--key", key, "--value", value === null ? "" : String(value)]);
     }
     return this.getSettings(projectId);
   }

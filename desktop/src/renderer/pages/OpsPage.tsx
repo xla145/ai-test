@@ -31,6 +31,7 @@ import { api, type Project } from "../api";
 import { FAILURE, LabelTag, PURPOSE } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
+import { useProjects } from "../components/ProjectSettings";
 import { useAction, useLoad, useNarrow, usePaged } from "../hooks";
 
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
@@ -127,13 +128,21 @@ function Attributions({ project }: { project: Project }) {
   );
 }
 
-function Usage({ project }: { project: Project }) {
+/** 用量与预算。子项目逐项继承大项目的设置：表单只填本项目自己的值，留空即继承（占位显示继承的值） */
+export function Usage({ project }: { project: Project }) {
   const usage = useLoad(() => api().usageReport(project.id, 30), [project.id]);
   const budget = useLoad(() => api().checkBudget(project.id), [project.id]);
-  const settings = useLoad(() => api().getSettings(project.id), [project.id]);
+  const settings = useLoad(() => api().getSettingsDetail(project.id), [project.id]);
   const [form] = Form.useForm();
   const { busy, run } = useAction();
-  useEffect(() => form.setFieldsValue(settings.data ?? {}), [settings.data, form]);
+  const { projects } = useProjects();
+  useEffect(() => {
+    form.resetFields();
+    form.setFieldsValue(settings.data?.own ?? {});
+  }, [settings.data, form]);
+  const inherited = (settings.data?.inherited ?? {}) as Record<string, number | string>;
+  const hint = (key: string, fallback: string) => (inherited[key] != null ? `继承：${inherited[key]}` : fallback);
+  const nameOf = (id: string) => projects.find((p) => p.id === id)?.name ?? id;
   const u = usage.data;
   const b = budget.data;
   const ratio = b?.monthly_budget ? Math.min(100, Math.round((b.month_used / b.monthly_budget) * 100)) : 0;
@@ -149,6 +158,7 @@ function Usage({ project }: { project: Project }) {
               <>
                 <Progress percent={ratio} status={b.allowed ? (ratio > 80 ? "active" : "normal") : "exception"} />
                 <Typography.Text type="secondary">{b.month_used.toLocaleString()} / {b.monthly_budget.toLocaleString()} tokens{b.allowed ? "" : "（已用完，agent 任务将被拒绝）"}</Typography.Text>
+                {b.shared && <div><Typography.Text type="secondary" style={{ fontSize: 12 }}>与大项目的全部子项目共用</Typography.Text></div>}
               </>
             ) : <div style={{ fontSize: 24, marginTop: 4 }}>不限</div>}
           </Card>
@@ -166,19 +176,36 @@ function Usage({ project }: { project: Project }) {
                 { title: "", dataIndex: "v", width: 120, render: (v: number) => <Progress size="small" showInfo={false} percent={u?.total_tokens ? (v / u.total_tokens) * 100 : 0} /> },
               ]} />
           </Card>
+          {u?.by_project && (
+            <Card size="small" title="按子项目" style={{ marginTop: 16 }}>
+              <Table size="small" pagination={false} rowKey="k"
+                dataSource={Object.entries(u.by_project as Record<string, number>).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ k, v }))}
+                locale={{ emptyText: "暂无用量" }}
+                columns={[
+                  { title: "子项目", dataIndex: "k", render: (k: string) => (k === project.id ? "大项目本身" : nameOf(k)) },
+                  { title: "tokens", dataIndex: "v", align: "right", render: (v: number) => v.toLocaleString() },
+                  { title: "", dataIndex: "v", width: 120, render: (v: number) => <Progress size="small" showInfo={false} percent={u?.total_tokens ? (v / u.total_tokens) * 100 : 0} /> },
+                ]} />
+            </Card>
+          )}
         </div>
         <div style={{ flex: "1 1 320px" }}>
           <Card size="small" title="预算与价格">
+            {settings.data?.parent_name && (
+              <Alert type="info" showIcon style={{ marginBottom: 12 }}
+                message={`留空的项继承大项目「${settings.data.parent_name}」；月度上限继承时按整个大项目累计用量`} />
+            )}
             <Form form={form} layout="vertical" onFinish={(v) => run(async () => {
-              await api().setSettings(project.id, v);
+              // 留空 = 清除本项目的值（子项目恢复继承）
+              await api().setSettings(project.id, Object.fromEntries(Object.entries(v).map(([k, x]) => [k, x === undefined || x === "" ? null : x])) as Record<string, string | number | null>);
               await Promise.all([settings.reload(), budget.reload(), usage.reload()]);
             }, "已保存")}>
               <Row gutter={8}>
-                <Col span={12}><Form.Item name="monthly_token_budget" label="月度 token 上限"><InputNumber min={0} style={{ width: "100%" }} placeholder="不限" /></Form.Item></Col>
-                <Col span={12}><Form.Item name="per_task_token_limit" label="单次任务上限"><InputNumber min={0} style={{ width: "100%" }} placeholder="不限" /></Form.Item></Col>
-                <Col span={12}><Form.Item name="price_per_mtok" label="每百万 token 价格"><InputNumber min={0} style={{ width: "100%" }} /></Form.Item></Col>
-                <Col span={6}><Form.Item name="currency" label="币种"><Input placeholder="CNY" /></Form.Item></Col>
-                <Col span={6}><Form.Item name="stability_threshold" label="门禁通过率"><InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} placeholder="0.95" /></Form.Item></Col>
+                <Col span={12}><Form.Item name="monthly_token_budget" label="月度 token 上限"><InputNumber min={0} style={{ width: "100%" }} placeholder={hint("monthly_token_budget", "不限")} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="per_task_token_limit" label="单次任务上限"><InputNumber min={0} style={{ width: "100%" }} placeholder={hint("per_task_token_limit", "不限")} /></Form.Item></Col>
+                <Col span={12}><Form.Item name="price_per_mtok" label="每百万 token 价格"><InputNumber min={0} style={{ width: "100%" }} placeholder={hint("price_per_mtok", "")} /></Form.Item></Col>
+                <Col span={6}><Form.Item name="currency" label="币种"><Input placeholder={hint("currency", "CNY")} /></Form.Item></Col>
+                <Col span={6}><Form.Item name="stability_threshold" label="门禁通过率"><InputNumber min={0} max={1} step={0.01} style={{ width: "100%" }} placeholder={hint("stability_threshold", "0.95")} /></Form.Item></Col>
               </Row>
               <Button htmlType="submit" type="primary" loading={busy}>保存</Button>
             </Form>

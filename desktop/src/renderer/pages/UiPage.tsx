@@ -17,10 +17,11 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import { useState } from "react";
-import { api, type Project, type TestCase } from "../api";
+import { api, envOwner, type Project, type TestCase } from "../api";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { DiffView } from "../components/DiffView";
 import { EnvSelect, RunButton, useEnvChoice } from "../components/EnvPicker";
@@ -237,12 +238,16 @@ function UiCases({ project, env }: { project: Project; env: string }) {
   );
 }
 
-function Roles({ project, env }: { project: Project; env: string }) {
+/** 角色账号与登录方式。子项目显示继承自大项目的角色；登录方式保存到环境所在的项目（继承的环境保存到大项目） */
+export function Roles({ project, env }: { project: Project; env: string }) {
   const roles = useLoad(() => api().listRoles(project.id), [project.id]);
   const [roleForm] = Form.useForm<{ name: string; username: string; password: string }>();
   const [loginForm] = Form.useForm();
   const { busy, run } = useAction();
-  const { reload: reloadProjects } = useProjects();
+  const { reload: reloadProjects, projects } = useProjects();
+  const owner = env ? envOwner(project, env) : project.id;
+  const ownerName = owner !== project.id ? projects.find((p) => p.id === owner)?.name : undefined;
+  const parentName = project.parent_id ? projects.find((p) => p.id === project.parent_id)?.name : undefined;
   const login = (project.environments[env] as { login?: Record<string, string> })?.login ?? {
     url: "/login", username: "#username", password: "#password", submit: "button[type=submit]", success: "",
   };
@@ -251,7 +256,11 @@ function Roles({ project, env }: { project: Project; env: string }) {
       <div style={{ flex: "1 1 320px" }}>
         <Card size="small" title="角色账号" extra={<Typography.Text type="secondary">存入系统钥匙串，用例只写角色名</Typography.Text>}>
           <Space wrap style={{ marginBottom: 12 }}>
-            {(roles.data ?? []).map((r) => <Tag key={r.role_name} color="blue" bordered={false}>{r.role_name}</Tag>)}
+            {(roles.data ?? []).map((r) => (
+              <Tooltip key={r.role_name} title={r.inherited_from ? `继承自大项目「${parentName}」；在这里保存同名角色可单独设置账号` : undefined}>
+                <Tag color={r.inherited_from ? "default" : "blue"} bordered={false}>{r.role_name}{r.inherited_from ? "（继承）" : ""}</Tag>
+              </Tooltip>
+            ))}
             {!roles.data?.length && <Typography.Text type="secondary">还没有角色</Typography.Text>}
           </Space>
           <Form form={roleForm} layout="vertical" onFinish={(v) => run(async () => {
@@ -269,10 +278,10 @@ function Roles({ project, env }: { project: Project; env: string }) {
         </Card>
       </div>
       <div style={{ flex: "1.2 1 380px" }}>
-        <Card size="small" title={`登录方式（${env} 环境）`} extra={<Typography.Text type="secondary">填写 CSS 选择器</Typography.Text>}>
+        <Card size="small" title={`登录方式（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`} extra={<Typography.Text type="secondary">填写 CSS 选择器</Typography.Text>}>
           <Form form={loginForm} layout="vertical" initialValues={login} key={env}
             onFinish={(v) => run(async () => {
-              await api().setEnvironment(project.id, env, { ...project.environments[env], login: Object.fromEntries(Object.entries(v).filter(([, x]) => x)) });
+              await api().setEnvironment(owner, env, { ...project.environments[env], login: Object.fromEntries(Object.entries(v).filter(([, x]) => x)) });
               // 刷新项目数据，否则之后再保存环境配置会用旧值覆盖登录方式
               await reloadProjects();
             }, "登录方式已保存")}>

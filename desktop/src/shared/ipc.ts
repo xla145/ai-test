@@ -111,9 +111,39 @@ export interface UserInfo {
   source: "git" | "system";
 }
 
+/** 大项目概览 */
+export interface GroupOverview {
+  children: {
+    id: string;
+    name: string;
+    workspace_path: string;
+    cases: number;
+    reviewed: number;
+    blocked: number;
+    last_run: { run_id: string; started_at: string; env: string; framework: string; total: number; passed: number; pass_rate: number | null } | null;
+    month_tokens: number;
+  }[];
+  budget: { month_used: number; monthly_budget: number | null; allowed: boolean };
+}
+
+/** 设置的来源：子项目逐项继承大项目 */
+export interface SettingsDetail {
+  effective: Record<string, number | string>;
+  own: Record<string, number | string>;
+  inherited: Record<string, number | string>;
+  parent_id: string;
+  parent_name: string;
+}
+
 export interface AitestApi {
   listProjects(): Promise<unknown[]>;
-  createProject(name: string, workspace: string, environments: Record<string, unknown>): Promise<unknown>;
+  /** opts.kind="group" 创建大项目（不需要 workspace）；opts.parent 为所属大项目 */
+  createProject(name: string, workspace: string, environments: Record<string, unknown>,
+    opts?: { kind?: "project" | "group"; parent?: string }): Promise<unknown>;
+  /** 移入大项目；parent 为空字符串表示移出 */
+  moveProject(projectId: string, parent: string): Promise<unknown>;
+  projectOverview(groupId: string): Promise<GroupOverview>;
+  getSettingsDetail(projectId: string): Promise<SettingsDetail>;
   importExcel(projectId: string, file: string): Promise<unknown>;
   lint(projectId: string): Promise<unknown>;
   listCases(projectId: string, filters?: Record<string, string>): Promise<unknown[]>;
@@ -128,7 +158,8 @@ export interface AitestApi {
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
   setRoleSecret(projectId: string, role: string, username: string, password: string): Promise<void>;
-  listRoles(projectId: string): Promise<{ role_name: string }[]>;
+  /** 子项目包含继承自大项目的角色（inherited_from 为大项目 ID） */
+  listRoles(projectId: string): Promise<{ role_name: string; inherited_from?: string }[]>;
   setEnvironment(projectId: string, env: string, cfg: Record<string, unknown>): Promise<unknown>;
   /** 同时删除该环境保存在钥匙串中的 token */
   deleteEnvironment(projectId: string, env: string): Promise<unknown>;
