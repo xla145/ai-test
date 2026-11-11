@@ -43,7 +43,7 @@ export type EngineCall = <T = unknown>(args: string[], env?: Record<string, stri
 
 export interface AgentEngine {
   startThread(params: ThreadStartParams): Promise<string>;
-  runTurn(threadId: string, text: string, opts?: { tokenLimit?: number }): Promise<TurnResult>;
+  runTurn(threadId: string, text: string, opts?: { tokenLimit?: number; signal?: AbortSignal }): Promise<TurnResult>;
 }
 
 export interface DatabaseInfo {
@@ -162,12 +162,29 @@ export interface AppDeps {
 
 export class Orchestrator extends EventEmitter {
   private uiTaskActive = false;
+  private uiAbort?: { projectId: string; env: string; controller: AbortController };
   private uiDebug?: UiDebugSession;
-  private async withUiTask<T>(fn: () => Promise<T>): Promise<T> {
+  private async withUiTask<T>(projectId: string, env: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再操作");
     if (this.uiDebug) throw new Error("单步调试进行中，请先结束调试");
     this.uiTaskActive = true;
-    try { return await fn(); } finally { this.uiTaskActive = false; }
+    const controller = new AbortController();
+    this.uiAbort = { projectId, env, controller };
+    try {
+      const result = await fn(controller.signal);
+      controller.signal.throwIfAborted();
+      return result;
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("UI_TASK_STOPPED");
+      throw error;
+    } finally { this.uiTaskActive = false; this.uiAbort = undefined; }
+  }
+
+  stopUiTask(projectId: string, env: string): void {
+    const task = this.uiAbort;
+    if (!task) return;
+    if (task.projectId !== projectId || task.env !== env) throw new Error("当前执行的 UI 任务不属于此项目或环境");
+    task.controller.abort();
   }
   constructor(private readonly deps: OrchestratorDeps) {
     super();
@@ -305,10 +322,10 @@ export class Orchestrator extends EventEmitter {
 
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
   async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
-    return this.withUiTask(async () => {
+    return this.withUiTask(projectId, env, async (signal) => {
       await this.uiCase(projectId, env, caseId, opts.confirmProduction);
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles));
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles), signal);
       // 明确告诉用户有没有生成脚本，以及没生成的原因
       const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
       if (scriptGenerated) return { ...result, scriptGenerated };
@@ -380,7 +397,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 执行前检查用例依赖的测试数据；缺失则造数，仍缺失的用例降级为手工（本次不执行） */
-  async prepareData(projectId: string, env: string, cases: CaseRow[]) {
+  async prepareData(projectId: string, env: string, cases: CaseRow[], signal?: AbortSignal) {
     const ui = this.requireUi();
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
@@ -390,6 +407,7 @@ export class Orchestrator extends EventEmitter {
     const auth = this.deps.secretEnv(projectId, env).AITEST_AUTH_TOKEN;
     const status = await ui.checkData(envCfg, keys, records, project.workspace_path, { authToken: auth });
     const absent = status.filter((s) => s.exists === false).map((s) => s.key);
+    signal?.throwIfAborted();
     const seeded = absent.length ? await ui.seedData(envCfg, absent, records, project.workspace_path, { authToken: auth }) : [];
     const missing = seeded.filter((s) => !s.seeded).map((s) => s.key);
     const degraded = cases.filter((c) => (c.data_refs ?? []).some((k) => missing.includes(k))).map((c) => c.id);
@@ -399,11 +417,11 @@ export class Orchestrator extends EventEmitter {
   /** UI 回归直接执行脚本；只有显式 autoHeal=true 时才调用模型。 */
   async runUiRegression(projectId: string, env: string,
     opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean } = {}) {
-    return this.withUiTask(() => this.executeUiRegression(projectId, env, opts));
+    return this.withUiTask(projectId, env, (signal) => this.executeUiRegression(projectId, env, opts, signal));
   }
 
   private async executeUiRegression(projectId: string, env: string,
-    opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean }) {
+    opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean }, signal: AbortSignal) {
     const ui = this.requireUi();
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
@@ -426,7 +444,9 @@ export class Orchestrator extends EventEmitter {
       && (opts.mode !== "regression" || (states[c.id]?.status === "confirmed" && c.status === "reviewed")));
     if (requested && runnable.length !== requested.size) throw new Error("选中的用例已废弃、尚未审核或不支持 UI 执行");
     if (!runnable.length) throw new Error("没有已确认的 UI 脚本，请先在内嵌浏览器中校验并确认");
-    const { missing, degraded } = await this.prepareData(projectId, env, runnable);
+    signal.throwIfAborted();
+    const { missing, degraded } = await this.prepareData(projectId, env, runnable, signal);
+    signal.throwIfAborted();
     const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
     if (!caseIds.length) throw new Error(`用例依赖的测试数据缺失：${missing.join("、")}`);
 
@@ -440,7 +460,9 @@ export class Orchestrator extends EventEmitter {
       ? await this.deps.engine<Record<string, string>>(["db-runtime-env", "--project", projectId, "--env", env], secretEnv)
       : {};
     this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
+    signal.throwIfAborted();
     const out = await ui.runUiSuite({
+      signal,
       workspace: project.workspace_path,
       baseUrl: envCfg.base_url,
       caseIds,
@@ -449,6 +471,7 @@ export class Orchestrator extends EventEmitter {
       onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     });
+    signal.throwIfAborted();
     if (!out.results.length && (out.errors?.length || out.stderr)) throw new Error(`UI 执行失败：${(out.errors ?? []).join("；") || out.stderr}`);
     const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
     writeFileSync(file, JSON.stringify(out.results));
@@ -456,10 +479,11 @@ export class Orchestrator extends EventEmitter {
       "save-run", "--project", projectId, "--env", env, "--results-file", file, "--framework", "playwright",
       "--html-report", out.htmlReport,
     ]);
+    signal.throwIfAborted();
     if (opts.mode === "validate") workflow.record(env, run.run_id, versions, out.results.filter((r) => r.status === "passed").map((r) => r.case_id));
     let heal: TriageItem[] | undefined;
     if (opts.autoHeal === true && run.needs_agent.length) {
-      heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts);
+      heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts, signal);
     }
     // 失败明细：以引擎保存后的归因为准（含规则判定），agent 结论覆盖类型并补充依据
     const saved = await this.deps.engine<UiFailure[]>(["list-run-results", "--run", run.run_id]);
@@ -560,7 +584,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   async reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts: { confirmProduction?: boolean } = {}) {
-    return this.withUiTask(async () => {
+    return this.withUiTask(projectId, env, async (signal) => {
       await this.uiCase(projectId, env, caseId, opts.confirmProduction);
       if (!feedback.trim() || feedback.length > 8000) throw new Error("请填写修正说明（最多 8000 字）");
       const states = await this.uiScriptStates(projectId, env);
@@ -571,7 +595,7 @@ export class Orchestrator extends EventEmitter {
         "先在内嵌浏览器中复现当前脚本或失败步骤，结合截图、页面结构和当前脚本定位问题。",
         `用户反馈：${feedback}`,
         "不要直接覆盖现有脚本。只使用 report.propose_script_fix 提交该用例完整的新脚本，等待用户审核差异并应用。不要降低断言来掩盖产品缺陷。",
-      ].join("\n"));
+      ].join("\n"), signal);
     });
   }
 
@@ -584,7 +608,7 @@ export class Orchestrator extends EventEmitter {
     return c;
   }
 
-  async healUi(projectId: string, env: string, runId: string, results?: UiCaseResult[], scripts?: Map<string, string>) {
+  async healUi(projectId: string, env: string, runId: string, results?: UiCaseResult[], scripts?: Map<string, string>, signal?: AbortSignal) {
     const rows = results ?? (await this.deps.engine<UiCaseResult[]>(["list-run-results", "--run", runId]));
     const pending = rows.filter((r) => (r.status === "failed" || r.status === "error") && (!r.failure_type || r.failure_type === "unknown"));
     if (!pending.length) return [];
@@ -594,7 +618,7 @@ export class Orchestrator extends EventEmitter {
     const briefs: UiFailureBrief[] = pending.map((r) => ({
       case_id: r.case_id, message: r.message, script: scriptMap.get(r.case_id), evidence_paths: r.evidence_paths ?? [],
     }));
-    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs));
+    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs), signal);
     const judged = parseTriage(turn.message);
     await this.recordAttributions(runId, judged, "agent");
     return judged;
@@ -812,7 +836,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
-  private async agentTask(projectId: string, purpose: string, prompt: string): Promise<TurnResult> {
+  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal): Promise<TurnResult> {
     const project = await this.project(projectId);
     const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
       ["check-budget", "--project", projectId],
@@ -822,6 +846,7 @@ export class Orchestrator extends EventEmitter {
     }
     const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
     const tokenLimit = limits.length ? Math.min(...limits) : undefined;
+    signal?.throwIfAborted();
     const agent = await this.deps.agent();
     const threadId = await agent.startThread({
       cwd: project.workspace_path,
@@ -832,7 +857,8 @@ export class Orchestrator extends EventEmitter {
       "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
     ]);
     this.emit("progress", { projectId, stage: purpose, threadId });
-    const result = await agent.runTurn(threadId, prompt, { tokenLimit });
+    signal?.throwIfAborted();
+    const result = await agent.runTurn(threadId, prompt, { tokenLimit, ...(signal ? { signal } : {}) });
     await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
     return result;
   }
