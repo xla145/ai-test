@@ -1,0 +1,4 @@
+interface:
+  display_name: "Markdown 转 Word"
+  short_description: "按专题方案标准转换 Word，支持样式配置、参考 DOCX 和内容检查"
+  default_prompt: "使用 $md-to-word 将指定 Markdown 按专题方案标准转为 Word，并检查内容和排版。"
