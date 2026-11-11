@@ -53,7 +53,7 @@ export function isNewer(a: string, b: string): boolean {
   return x.pre > y.pre;
 }
 
-/** macOS：选当前架构的 zip（artifactName 为 aitest-desktop-<版本>-mac-<arch>.zip），找不到再取任一 zip */
+/** macOS：选当前架构的 zip（artifactName 为 AIProbe-<版本>-mac-<arch>.zip），找不到再取任一 zip */
 export function pickMacZip(info: UpdateInfo, arch: string): UpdateFile | undefined {
   const zips = info.files.filter((f) => f.url.endsWith(".zip"));
   const archName = arch === "x64" ? "x64" : arch;

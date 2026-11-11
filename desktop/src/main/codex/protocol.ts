@@ -4,7 +4,7 @@
  * 协议仍属实验性（架构文档第 15 节）：方法名与载荷形状集中在这里，
  * 升级 codex 二进制时只改本文件，并经回归验证后再发版；必要时可整体退回 Codex SDK。
  */
-export const CLIENT_INFO = { name: "aitest_desktop", title: "AI 测试客户端", version: "0.1.0" };
+export const CLIENT_INFO = { name: "aitest_desktop", title: "AIProbe", version: "0.1.0" };
 
 export const Methods = {
   initialize: "initialize",

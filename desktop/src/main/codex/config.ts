@@ -31,7 +31,7 @@ const q = (s: string) => JSON.stringify(s); // TOML basic string 与 JSON 字符
 const key = (s: string) => (/^[A-Za-z0-9_-]+$/.test(s) ? s : q(s));
 
 export function buildCodexConfig(input: CodexConfigInput): string {
-  const lines: string[] = ["# 由 AI 测试客户端生成，请勿手工修改", ""];
+  const lines: string[] = ["# 由 AIProbe 生成，请勿手工修改", ""];
   const model = input.provider?.model ?? input.model;
   if (model) lines.push(`model = ${q(model)}`);
   if (input.provider) lines.push(`model_provider = ${q(input.provider.id)}`);

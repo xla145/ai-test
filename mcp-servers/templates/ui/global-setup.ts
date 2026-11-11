@@ -1,4 +1,4 @@
-// 由 AI 测试客户端生成：执行前为各角色登录并保存 storageState（.auth/<角色>.json）。
+// 由 AIProbe 生成：执行前为各角色登录并保存 storageState（.auth/<角色>.json）。
 // 账号由客户端从系统钥匙串读取后通过环境变量注入，不写进脚本：
 //   AITEST_ROLES  JSON：[{ "role": "admin", "username": "...", "password": "..." }]
 //   AITEST_LOGIN  JSON：{ "url": "/login", "username": "<选择器>", "password": "<选择器>", "submit": "<选择器>", "success": "<登录后 URL 片段>" }

@@ -149,7 +149,7 @@ export function generateSpec(input: SpecInput): string {
     `// 标题：${input.title}`,
     ...(input.caseSteps?.length ? ["// 步骤：", ...input.caseSteps.map((x, i) => `//   ${i + 1}. ${x}`)] : []),
     ...(input.expected?.length ? ["// 预期：", ...input.expected.map((x, i) => `//   ${i + 1}. ${x}`)] : []),
-    "// 由 AI 测试客户端在探索模式生成；回归直接执行本脚本，不调用模型。",
+    "// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。",
     "// 选择器优先级：data-testid → role / label → 文本 → CSS。",
   ];
   if (singleNamedRole) helpers.add("storageStateFor");

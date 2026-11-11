@@ -231,7 +231,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
-    title: "AI 测试客户端",
+    title: "AIProbe",
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, sandbox: true },
   });
   const dev = process.env.AITEST_DEV_SERVER;

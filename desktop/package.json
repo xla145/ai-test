@@ -2,7 +2,7 @@
   "name": "@ai-test/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "AI 测试客户端桌面壳：Electron + React，内嵌浏览器，驱动 Codex App Server",
+  "description": "AIProbe 桌面壳：Electron + React，内嵌浏览器，驱动 Codex App Server",
   "main": "dist/main/index.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",
@@ -41,12 +41,12 @@
     "electron-updater": "^6.8.11",
     "js-yaml": "^4.1.0"
   },
-  "productName": "AI 测试客户端",
-  "author": "ai-test",
+  "productName": "AIProbe",
+  "author": "AIProbe",
   "build": {
     "appId": "dev.aitest.desktop",
-    "productName": "AI 测试客户端",
-    "artifactName": "aitest-desktop-${version}-${os}-${arch}.${ext}",
+    "productName": "AIProbe",
+    "artifactName": "AIProbe-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release",
       "buildResources": "build-resources"
@@ -84,7 +84,7 @@
         "AppImage"
       ],
       "category": "Development",
-      "executableName": "aitest-desktop"
+      "executableName": "aiprobe"
     },
     "win": {
       "target": [
@@ -109,6 +109,6 @@
       "provider": "generic",
       "url": "https://download.classktv.com/aitest-desktop"
     },
-    "executableName": "aitest-desktop"
+    "executableName": "aiprobe"
   }
 }

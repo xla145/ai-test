@@ -1,4 +1,4 @@
-// 由 AI 测试客户端生成，请勿手工修改（客户端会按最新模板覆盖）。
+// 由 AIProbe 生成，请勿手工修改（客户端会按最新模板覆盖）。
 // 环境由客户端执行时通过环境变量注入：AITEST_BASE_URL、AITEST_REPORT_JSON 等。
 import { defineConfig } from "@playwright/test";
 

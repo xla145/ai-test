@@ -177,7 +177,7 @@ const globalView = (): GlobalSettingsView => ({
     dbPath: "/Users/demo/Library/Application Support/aitest-desktop/aitest.db",
     python: { path: globalSettings.general.pythonPath || "python3", source: globalSettings.general.pythonPath ? "settings" : "default" },
     codex: globalSettings.general.codexPath ? { path: globalSettings.general.codexPath, source: "settings" }
-      : { path: "/Applications/aitest-desktop.app/Contents/Resources/codex/bin/codex", source: "bundled" },
+      : { path: "/Applications/AIProbe.app/Contents/Resources/codex/bin/codex", source: "bundled" },
     taskTokenLimit: { value: globalSettings.general.taskTokenLimit ?? 200000, source: globalSettings.general.taskTokenLimit ? "settings" : "default" },
     maestro: { path: globalSettings.general.maestroPath || "maestro", source: globalSettings.general.maestroPath ? "settings" : "default" },
     pinky: { path: globalSettings.general.pinkyPath || "pinkyctl", enabled: Boolean(globalSettings.general.pinkyEnabled) },

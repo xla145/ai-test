@@ -218,7 +218,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
     return {
       path: ".gitlab-ci.yml",
       content: [
-        "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
+        "# 由 AIProbe 生成：每次推送执行回归（不调用模型）。",
         "# 在 CI/CD 变量中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
         "aitest-regression:",
         "  image: mcr.microsoft.com/playwright:v1.63.0-noble",
@@ -239,7 +239,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
   return {
     path: ".github/workflows/aitest.yml",
     content: [
-      "# 由 AI 测试客户端生成：每次推送执行回归（不调用模型）。",
+      "# 由 AIProbe 生成：每次推送执行回归（不调用模型）。",
       "# 在仓库 Secrets 中配置：AITEST_AUTH_TOKEN、AITEST_ROLES（JSON，多角色账号）、AITEST_ROLE_TOKENS（JSON，可选）、AITEST_DB_PASSWORDS（JSON，数据库密码）。",
       "name: AI 测试回归",
       "on:",
@@ -254,7 +254,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
       "        with: { python-version: \"3.12\" }",
       "      - uses: actions/setup-node@v4",
       "        with: { node-version: 22 }",
-      "      - name: 安装 AI 测试客户端执行器",
+      "      - name: 安装 AIProbe 执行器",
       "        run: |",
       ...setup.map((s) => `          ${s}`),
       "      - name: 执行回归",
@@ -275,7 +275,7 @@ export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string
 }
 
 export function initCi(workspace: string, provider: "github" | "gitlab", toolRepo: string, env: string): string {
-  if (!toolRepo) throw new Error("请用 --tool-repo 指定 AI 测试客户端仓库的 git 地址（CI 中从这里安装执行器）");
+  if (!toolRepo) throw new Error("请用 --tool-repo 指定 AIProbe 仓库的 git 地址（CI 中从这里安装执行器）");
   const { path, content } = workflowTemplate(provider, toolRepo, env);
   const target = join(resolve(workspace), path);
   mkdirSync(dirname(target), { recursive: true });

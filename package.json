@@ -2,7 +2,23 @@
   "name": "ai-test",
   "private": true,
   "version": "0.3.0",
-  "description": "AI 测试客户端：需求文档 → 结构化用例 → 接口 / UI 自动化测试",
+  "description": "AIProbe：AI 生成测试用例与脚本（接口 / Web UI / App），回归直接执行脚本 · AI-generated test cases and scripts, model-free regression",
+  "homepage": "https://github.com/xla145/ai-test#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xla145/ai-test.git"
+  },
+  "keywords": [
+    "ai-testing",
+    "test-automation",
+    "codex",
+    "mcp",
+    "playwright",
+    "pytest",
+    "maestro",
+    "api-testing",
+    "electron"
+  ],
   "workspaces": [
     "mcp-servers",
     "desktop"
