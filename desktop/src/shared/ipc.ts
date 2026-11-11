@@ -213,6 +213,8 @@ export interface AitestApi {
   setProjectType(projectId: string, projectType: ProjectType): Promise<unknown>;
   /** 从客户端移除项目（数据库记录与凭据）；workspace 目录保留 */
   deleteProject(projectId: string): Promise<{ id: string; workspace_path: string }>;
+  /** 清空用例库（含规范问题、脚本登记、UI 建议与复核）；执行记录保留 */
+  clearCases(projectId: string): Promise<{ id: string; deleted: Record<string, number> }>;
   getCase(caseId: string): Promise<unknown>;
   /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
   scriptMap(framework: string): Promise<Record<string, string>>;

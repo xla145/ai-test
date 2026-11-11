@@ -164,6 +164,25 @@ class Store:
             self.conn.execute("DELETE FROM project WHERE id=?", (project_id,))
         return counts
 
+    def clear_cases(self, project_id: str) -> dict[str, int]:
+        """清空项目的用例库：用例及其规范问题、需求关联、脚本登记、脚本修改建议与人工复核。
+
+        执行记录（报告）保留；workspace 中已生成的脚本文件不动。"""
+        cases = "SELECT id FROM testcase WHERE project_id=?"
+        statements = [
+            ("lint_issue", f"DELETE FROM lint_issue WHERE case_id IN ({cases})"),
+            ("case_requirement", f"DELETE FROM case_requirement WHERE case_id IN ({cases})"),
+            ("script", f"DELETE FROM script WHERE case_id IN ({cases})"),
+            ("heal_proposal", f"DELETE FROM heal_proposal WHERE case_id IN ({cases})"),
+            ("review_item", f"DELETE FROM review_item WHERE case_id IN ({cases})"),
+            ("testcase", "DELETE FROM testcase WHERE project_id=?"),
+        ]
+        counts: dict[str, int] = {}
+        with self.conn:
+            for table, sql in statements:
+                counts[table] = self.conn.execute(sql, (project_id,)).rowcount
+        return counts
+
     def get_project(self, project_id: str) -> Project | None:
         r = self.conn.execute("SELECT * FROM project WHERE id=?", (project_id,)).fetchone()
         if not r:

@@ -80,3 +80,30 @@ def test_list_cases_by_ids(cli, tmp_path):
     pid, ids = _setup(cli, tmp_path, "a")
     got = cli("list-cases", "--project", pid, "--ids", f"{ids[2]},{ids[0]},tc_missing")
     assert sorted(c["id"] for c in got) == sorted([ids[0], ids[2]])
+
+
+def test_clear_cases_keeps_runs_and_other_projects(cli, db, tmp_path):
+    a, ca = _setup(cli, tmp_path, "a")
+    b, cb = _setup(cli, tmp_path, "b")
+    store = ops.ensure_schema(Store(db))
+    run = Run(project_id=a, env="test", mode="regression", started_at="2026-01-01T00:00:00Z")
+    store.save_run(run, [RunResult(run_id=run.id, case_id=c, status="passed") for c in ca])
+    for pid, cases in ((a, ca), (b, cb)):
+        store.save_proposal(HealProposal(case_id=cases[0], script_path="s", original="a", proposed="b", diff="d"))
+        store.save_review(ReviewItem(case_id=cases[0], kind="visual", description="d"))
+    store.close()
+    cli("lint", "--project", a)
+
+    out = cli("clear-cases", "--project", a)
+    assert out["deleted"]["testcase"] == 3 and out["deleted"]["heal_proposal"] == 1
+    assert cli("list-cases", "--project", a) == []
+    assert len(cli("list-runs", "--project", a)) == 1  # 执行记录保留
+    assert (tmp_path / "a").is_dir()
+    # 其它项目不受影响
+    assert len(cli("list-cases", "--project", b)) == 3
+    assert len(cli("list-proposals", "--project", b)) == 1 and len(cli("list-reviews")) == 1
+
+
+def test_clear_cases_rejects_group(cli):
+    g = cli("init-project", "--name", "g", "--kind", "group", "--environments", "{}")["id"]
+    assert "大项目" in cli("clear-cases", "--project", g, ok=False)

@@ -320,6 +320,12 @@ const mockApi: AitestApi = {
     if (p) p.project_type = projectType;
     return delay({});
   },
+  clearCases: async (id) => {
+    const n = cases.length;
+    cases.splice(0, n);
+    fresh.add(id);
+    return delay({ id, deleted: { testcase: n } }, 500);
+  },
   deleteProject: async (id) => {
     const i = projects.findIndex((x) => x.id === id);
     const [p] = projects.splice(i, 1);
