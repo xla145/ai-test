@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import httpx
 import yaml
 
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
@@ -52,12 +53,42 @@ class ApiDoc:
 
 
 def load(path_or_text: str | Path) -> dict[str, Any]:
-    p = Path(str(path_or_text))
-    text = p.read_text(encoding="utf-8") if len(str(path_or_text)) < 4096 and p.exists() else str(path_or_text)
+    source = str(path_or_text).strip()
+    if source.lower().startswith(("http://", "https://")):
+        try:
+            response = httpx.get(source, timeout=30, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ValueError(f"OpenAPI 地址请求失败（HTTP {exc.response.status_code}）") from exc
+        except httpx.RequestError as exc:
+            raise ValueError("无法读取 OpenAPI 地址，请检查地址、网络连接和服务状态") from exc
+        text = response.text
+    elif isinstance(path_or_text, Path):
+        text = path_or_text.read_text(encoding="utf-8")
+    else:
+        text = str(path_or_text)
+        if "\n" not in source and len(source) < 4096:
+            try:
+                p = Path(source)
+                if p.is_file():
+                    text = p.read_text(encoding="utf-8")
+            except OSError:
+                pass  # 内联文档可能超过文件名长度限制
+    text = text.lstrip("\ufeff")
     try:
-        return json.loads(text)
+        spec = json.loads(text)
     except json.JSONDecodeError:
-        return yaml.safe_load(text)
+        try:
+            spec = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ValueError("OpenAPI 内容无法解析，请提供 JSON 或 YAML 格式的规范文档") from exc
+    if not isinstance(spec, dict) or not (
+        str(spec.get("openapi", "")).startswith("3.") or str(spec.get("swagger", "")).startswith("2.")
+    ):
+        raise ValueError("请提供 OpenAPI 3.x 或 Swagger 2.0 的 JSON/YAML 文档；地址应指向规范文档，而非 Swagger UI 页面")
+    if not isinstance(spec.get("paths", {}), dict):
+        raise ValueError("OpenAPI 文档中的 paths 必须是对象")
+    return spec
 
 
 class _Resolver:

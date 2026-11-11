@@ -26,7 +26,7 @@ investigate failures whose cause cannot be determined. A person reviews the key 
 
 | Capability | Description |
 | --- | --- |
-| Case generation and linting | Import from documents (Word / PDF / Markdown), OpenAPI / Swagger or Excel; 10 structural lint rules; export back to Excel |
+| Case generation and linting | Import from documents (Word / PDF / Markdown), OpenAPI / Swagger (JSON/YAML files or HTTP/HTTPS URLs) or Excel; 10 structural lint rules; export back to Excel |
 | API testing | Data-driven pytest scripts; variable extraction and passing; **multi-account flows** (order → pay → approve → refund, with a different role per step) |
 | Web UI testing | The agent explores the app in the embedded browser and records Playwright scripts; regressions use no model; self-healing with a reviewable diff when the page changes |
 | App testing | Android / iOS: explore with [Pinky](https://github.com/DIYgod/pinky), regress with generated [Maestro](https://maestro.dev) flows |
@@ -77,6 +77,8 @@ npm run dev
 # UI only: preview in a browser with demo data (no Electron or backend needed)
 npm run preview:web -w desktop   # open http://localhost:5173
 ```
+
+`npm run dev` and `npm start -w desktop` automatically prepare and load engine dependencies from `.release/engine-deps`; the first run requires network access. To prepare them manually, run `npm run prepare:engine -w desktop` from the repository root. CLI usage and engine tests still require the Python installation shown above.
 
 ## Repository layout
 

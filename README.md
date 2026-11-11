@@ -23,7 +23,7 @@ agent 引擎是 **Codex App Server**，被测页面在内嵌的 Chromium 中打�
 
 | 能力 | 说明 |
 | --- | --- |
-| 用例生成与规范检查 | 需求文档（Word / PDF / Markdown）、OpenAPI / Swagger、Excel 导入；10 条结构类规则检查，可导出回 Excel |
+| 用例生成与规范检查 | 需求文档（Word / PDF / Markdown）、OpenAPI / Swagger（JSON/YAML 文件或 HTTP/HTTPS 地址）、Excel 导入；10 条结构类规则检查，可导出回 Excel |
 | 接口测试 | 数据驱动的 pytest 脚本；变量提取与传递；**多账号流程**（下单 → 支付 → 审核 → 退款，每步可换角色） |
 | Web UI 测试 | agent 在内嵌浏览器中探索并录制 Playwright 脚本；回归不调用模型；页面改版时自愈并给出 diff |
 | App 测试 | Android / iOS：通过 [Pinky](https://github.com/DIYgod/pinky) 探索，生成 [Maestro](https://maestro.dev) 脚本回归 |
@@ -74,6 +74,8 @@ npm run dev
 # 只看界面：在浏览器中用演示数据预览（不需要 Electron 和后端）
 npm run preview:web -w desktop   # 打开 http://localhost:5173
 ```
+
+`npm run dev` 和 `npm start -w desktop` 会自动准备 `.release/engine-deps` 并加载引擎依赖，首次需要联网。也可在仓库根目录运行 `npm run prepare:engine -w desktop` 手动准备；命令行和引擎测试仍需按上文安装 Python 依赖。
 
 ## 仓库结构
 

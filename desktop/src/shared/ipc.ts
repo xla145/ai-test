@@ -177,7 +177,8 @@ export interface AitestApi {
   pageIssues(projectId: string, q: PageQuery & { level?: string }): Promise<Page<unknown>>;
   updateCase(caseId: string, patch: Record<string, unknown>, actor?: "human" | "agent"): Promise<unknown>;
   applyFix(caseId: string, field: string, value: unknown): Promise<unknown>;
-  generateApiSuite(projectId: string, openapiFile: string, enrich: boolean): Promise<unknown>;
+  /** OpenAPI 来源：本地 JSON/YAML 文件路径或 HTTP/HTTPS 文档地址。 */
+  generateApiSuite(projectId: string, openapiSource: string, enrich: boolean): Promise<unknown>;
   generateCases(projectId: string, requirementFile: string): Promise<unknown>;
   /** 生产环境需要 confirmProduction，否则主进程拒绝执行 */
   runRegression(projectId: string, env: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
