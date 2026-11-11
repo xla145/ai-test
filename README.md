@@ -191,7 +191,7 @@ aitest metrics      --project <项目ID>
 装过一次带更新功能的版本后，之后的新版本会自动更新，不需要重新下载安装：
 启动 15 秒后与每 4 小时检查一次，有新版本就在后台下载，下载完成后弹出提示，点「重启并更新」即可（也可在「全局设置 → 更新与关于」手动检查）。
 
-- 更新地址：`https://download.classktv.com/aitest-desktop/`（Cloudflare R2 桶 `aiprobe`，前缀 `aitest-desktop`）。
+- 更新地址：`https://download.classktv.com/aitest-desktop/`（Cloudflare R2 桶 `oss`，前缀 `aitest-desktop`）。
 - Windows（NSIS）与 Linux（AppImage）使用 electron-updater，Windows 只下载变化的部分。
 - macOS 没有开发者证书时无法使用系统的更新框架，由客户端自己下载 zip、校验 sha512、解压，退出时替换 `.app` 后重新打开；
   应用需要放在「应用程序」等可写目录中，在磁盘映像里直接运行时无法更新。
