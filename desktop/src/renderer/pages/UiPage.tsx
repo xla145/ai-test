@@ -7,7 +7,6 @@ import {
   Card,
   Empty,
   Form,
-  Image,
   Input,
   List,
   Row,
@@ -25,6 +24,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { GlobalSettingsView, UiDebugCommand, UiDebugState, UiScriptState } from "../../shared/ipc";
 import { api, envOwner, type Project, type TestCase } from "../api";
+import { EvidenceImage } from "../components/EvidenceImage";
 import { BrowserDock } from "../components/BrowserDock";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { ScriptSteps, type StepRunState } from "../components/ScriptSteps";
@@ -153,9 +153,6 @@ function Proposals({ project, paged }: { project: Project; paged: Paged<Proposal
 
 function Reviews({ project, paged }: { project: Project; paged: Paged<Review> }) {
   const { items: data, loading, reload, pagination } = paged;
-  const workspace = project.workspace_path;
-  // 证据路径可能是 workspace 内的相对路径
-  const fileUrl = (p: string) => `file://${/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${workspace}/${p}`}`;
   const { busy, activeKey, run } = useKeyedAction();
   return (
     <CaseTitles projectId={project.id} ids={data.map((r) => r.case_id)}>
@@ -172,9 +169,9 @@ function Reviews({ project, paged }: { project: Project; paged: Paged<Review> })
         { title: "判定内容", dataIndex: "description" },
         { title: "AI 结论", dataIndex: "ai_verdict", width: 100, render: (v: string) =>
           v ? <Tag color={v === "pass" ? "green" : "red"} bordered={false}>{v === "pass" ? "通过" : "不通过"}</Tag> : <Tag bordered={false}>未判定</Tag> },
-        { title: "截图", dataIndex: "evidence_paths", width: 90, render: (paths: string[]) => paths[0] && (
-          <Image width={64} src={fileUrl(paths[0])} fallback="data:image/gif;base64,R0lGODlhAQABAAAAACw=" />
-        ) },
+        { title: "截图", dataIndex: "evidence_paths", width: 120, render: (paths: string[]) => paths?.length
+          ? <Space wrap>{paths.map(path => <EvidenceImage key={path} projectId={project.id} path={path} />)}</Space>
+          : <Typography.Text type="secondary">无截图</Typography.Text> },
         { title: "", width: 170, render: (_: unknown, r: Review) => (
           <Space>
             <Button size="small" type="primary" ghost loading={activeKey === `pass:${r.id}`} disabled={busy} onClick={() => run(`pass:${r.id}`, async () => { await api().resolveReview(r.id, true); await reload(); })}>通过</Button>

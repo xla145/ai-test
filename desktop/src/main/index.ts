@@ -23,6 +23,7 @@ import {
   validateGlobal,
   type GlobalSettings,
 } from "./settings.js";
+import { readEvidenceImage } from "./evidence.js";
 import { Orchestrator } from "./orchestrator.js";
 import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
@@ -612,6 +613,7 @@ function registerIpc(orch: Orchestrator): void {
       const parent = projectParents.get(p);
       return name in { ...(parent ? secretStore.dbPasswords(parent, env) : {}), ...secretStore.dbPasswords(p, env) };
     },
+    readEvidenceImage: async (projectId: string, path: string) => readEvidenceImage((await orch.project(projectId)).workspace_path, path),
     // ---- 测试报告 ----
     listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
     runDetail: (runId: string) => orch.runDetail(runId),

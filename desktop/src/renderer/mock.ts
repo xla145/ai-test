@@ -532,6 +532,7 @@ const mockApi: AitestApi = {
   runDetail: (id) => delay(mockDetail(id)),
   exportReport: (ids, format) => delay({ path: `/Users/demo/Documents/测试报告-${ids[0]}.${format}` }, 500),
   exportCasesExcel: (_p, name) => delay({ path: `/Users/demo/Documents/${name}-用例.xlsx`, cases: 349 }, 500),
+  readEvidenceImage: () => delay("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/6kAAAAASUVORK5CYII="),
   openPath: () => delay(undefined),
   showInFolder: () => delay(undefined),
   onApprovalRequest: (cb) => {
