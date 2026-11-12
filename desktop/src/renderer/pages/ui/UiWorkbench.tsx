@@ -747,7 +747,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
 
       {/* 内嵌浏览器 */}
       <div className="uix-browser">
-        <BrowserDock url={baseUrl} />
+        <BrowserDock url={baseUrl} session={{ projectId: project.id, env }} />
         {((busy && (activeKey === "validate" || activeKey === "pipeline")) || debugRunning) && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>执行中请勿操作浏览器，等待结束后再手动核对页面。</Typography.Text>
         )}

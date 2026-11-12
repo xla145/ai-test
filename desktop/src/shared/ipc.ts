@@ -380,7 +380,7 @@ export interface AitestApi {
   showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
-  openTestPage(url: string): Promise<void>;
+  openTestPage(url: string, session?: { projectId: string; env: string }): Promise<void>;
   onApprovalRequest(cb: (req: ApprovalRequest) => void): () => void;
   respondApproval(id: string, accept: boolean): void;
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;

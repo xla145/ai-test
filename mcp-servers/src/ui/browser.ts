@@ -30,6 +30,8 @@ export interface BrowserSessionOptions {
   cdpEndpoint?: string;
   /** CDP 模式下请桌面端为角色准备视图，返回该视图初始 URL 中的标记 */
   openView?: (role: string) => Promise<string>;
+  /** 调试时优先保留同站点现有会话，避免再次登录覆盖 token。 */
+  reuseExistingSession?: boolean;
   headless?: boolean;
   executablePath?: string;
   baseUrl?: string;
@@ -124,8 +126,11 @@ export class BrowserSession {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       for (const ctx of browser.contexts()) {
-        const page = ctx.pages().find((p) => p.url().includes(marker));
-        if (page) return page;
+        for (const page of ctx.pages()) {
+          if (page.url().includes(marker) || await page.evaluate(
+            "window.__aitestViewMarker",
+          ).catch(() => undefined) === marker) return page;
+        }
       }
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -160,6 +165,15 @@ export class BrowserSession {
     }
     this.currentRole = role;
     let loggedIn = false;
+    // 新 BrowserSession 也可连接已手动登录的角色页；只有同站点且不在登录页时才沿用。
+    if (this.opts.cdpEndpoint && this.opts.reuseExistingSession && this.opts.baseUrl) {
+      try {
+        const current = new URL(page.url());
+        const base = new URL(this.opts.baseUrl);
+        const login = opts.login && new URL(opts.login.url, this.opts.baseUrl);
+        reusedState = current.origin === base.origin && (!login || current.pathname !== login.pathname);
+      } catch { /* 空白页没有可复用的站点会话 */ }
+    }
     if (opts.login && opts.credentials && !reusedState) {
       await performLogin(page, opts.login, opts.credentials, this.opts.baseUrl);
       loggedIn = true;

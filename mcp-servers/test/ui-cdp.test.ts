@@ -61,7 +61,8 @@ describe("CDP mode (embedded browser)", () => {
     const ctx = await host.newContext();
     const page = await ctx.newPage();
     const marker = `aitest-view=replay-${Date.now()}`;
-    await page.goto(`data:text/html,#${marker}`);
+    await page.goto(`${app.url}/login`);
+    await page.evaluate((marker) => { (window as any).__aitestViewMarker = marker; }, marker);
     const source = 'import { test, expect } from "@playwright/test";\ntest("tc_replay embedded", async ({ page }) => { await page.goto("/login"); await expect(page.locator("#username")).toBeVisible(); });';
     mkdirSync(join(dir, "scripts/ui"), { recursive: true });
     const path = join(dir, "scripts/ui/tc_replay.spec.ts");
@@ -109,6 +110,64 @@ describe("CDP mode (embedded browser)", () => {
     // 断开连接不关闭宿主浏览器
     expect(host.isConnected()).toBe(true);
   }, 60_000);
+
+  it("attaches for debugging without navigating or replacing an existing role's login state", async () => {
+    const context = await host.newContext();
+    const page = await context.newPage();
+    const marker = `aitest-view=preserve-${Date.now()}`;
+    await page.goto(`${app.url}/login`);
+    await page.locator("#username").fill("alice");
+    await page.locator("#password").fill("pw-admin");
+    await page.locator("#login").click();
+    await page.waitForURL("**/dashboard");
+    await page.evaluate((marker) => {
+      (window as any).__aitestViewMarker = marker;
+      localStorage.setItem("debug-token", "local-token");
+      sessionStorage.setItem("debug-token", "session-token");
+      (window as any).__debugInMemoryToken = "memory-token";
+    }, marker);
+    const cookies = await context.cookies();
+    const session = new BrowserSession({
+      cdpEndpoint: `http://127.0.0.1:${PORT}`, baseUrl: app.url,
+      reuseExistingSession: true, openView: async () => marker,
+    });
+    try {
+      // 无效凭据确保复用登录态的路径不会偷偷执行一次登录。
+      const result = await session.newRoleContext("admin", {
+        login: { url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" },
+        credentials: { username: "invalid", password: "invalid" },
+      });
+      expect(result).toMatchObject({ reusedState: true, loggedIn: false });
+      expect(page.url()).toBe(`${app.url}/dashboard`);
+      expect(await page.evaluate(() => [localStorage.getItem("debug-token"), sessionStorage.getItem("debug-token"), (window as any).__debugInMemoryToken]))
+        .toEqual(["local-token", "session-token", "memory-token"]);
+      expect(await context.cookies()).toEqual(cookies);
+      await session.runStep({ action: "goto", url: "/tags", role: "admin" });
+      expect(await page.evaluate(() => [localStorage.getItem("debug-token"), sessionStorage.getItem("debug-token")]))
+        .toEqual(["local-token", "session-token"]);
+      await session.runStep({ action: "expectVisible", role: "admin", target: { kind: "testid", value: "disable-TAG-1001" } });
+    } finally {
+      await session.close();
+      await context.close();
+    }
+  }, 30_000);
+
+  it("still logs in when debugging starts on the login page", async () => {
+    const context = await host.newContext();
+    const page = await context.newPage();
+    const marker = `aitest-view=login-${Date.now()}`;
+    await page.goto(`${app.url}/login`);
+    await page.evaluate((marker) => { (window as any).__aitestViewMarker = marker; }, marker);
+    const session = new BrowserSession({ cdpEndpoint: `http://127.0.0.1:${PORT}`, baseUrl: app.url,
+      reuseExistingSession: true, openView: async () => marker });
+    try {
+      expect(await session.newRoleContext("admin", {
+        login: { url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" },
+        credentials: { username: "alice", password: "pw-admin" },
+      })).toMatchObject({ reusedState: false, loggedIn: true });
+      expect(page.url()).toBe(`${app.url}/dashboard`);
+    } finally { await session.close(); await context.close(); }
+  }, 30_000);
 
   it("replays recorded steps in role views for step-by-step debugging without recording them", async () => {
     const openView = async (role: string) => {

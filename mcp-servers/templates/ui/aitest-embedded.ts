@@ -9,13 +9,21 @@ export async function embeddedPage(browser: Browser, role: string): Promise<Page
   if (cached && !cached.isClosed()) { announce(); await cached.bringToFront(); return cached; }
   const markers: Record<string, string> = JSON.parse(process.env.AITEST_VIEW_MARKERS || "{}");
   if (!markers[role]) throw new Error(`没有为角色 ${role} 准备内嵌浏览器`);
-  const page = browser.contexts().flatMap(c => c.pages()).find(p => p.url().includes(markers[role]));
+  let page: Page | undefined;
+  for (const candidate of browser.contexts().flatMap(c => c.pages())) {
+    if (candidate.url().includes(markers[role]) || await candidate.evaluate("window.__aitestViewMarker").catch(() => undefined) === markers[role]) {
+      page = candidate;
+      break;
+    }
+  }
   if (!page) throw new Error(`无法找到角色 ${role} 的内嵌浏览器视图`);
   announce();
   await page.bringToFront();
   const goto = page.goto.bind(page);
   page.goto = (url, options) => goto(new URL(url, process.env.AITEST_BASE_URL).href, options);
   page.setDefaultTimeout(Number(process.env.AITEST_ACTION_TIMEOUT || 5000));
+  // setDefaultTimeout 同时约束 goto / waitForURL：页面跳转单独给足时间，免得首屏稍慢就误报失败
+  page.setDefaultNavigationTimeout(Number(process.env.AITEST_NAVIGATION_TIMEOUT || 30_000));
   const recipe = JSON.parse(process.env.AITEST_LOGIN || "null");
   const creds = JSON.parse(process.env.AITEST_ROLES || "[]").find((c: { role: string }) => c.role === role);
   if (recipe && creds) {

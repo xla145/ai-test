@@ -324,7 +324,7 @@ function dockTestView(dock: ViewDock | null): void {
   if (wasDocked !== Boolean(dock)) notifyView();
 }
 
-/** 为角色准备视图（多角色：Electron session partition 隔离登录态），返回初始 URL 中的标记 */
+/** 为角色准备视图；用页面标记连接现有页面，不跳转，以保留登录态和调试现场。 */
 async function openRoleView(projectId: string, role: string, env?: string): Promise<string> {
   if (!mainWindow) throw new Error("主窗口未就绪");
   const key = env ? `${projectId}:${env}:${role}` : `${projectId}:${role}`;
@@ -335,9 +335,11 @@ async function openRoleView(projectId: string, role: string, env?: string): Prom
     view = new WebContentsView({ webPreferences: { partition, sandbox: true } });
     keepZoom(view);
     testViews.set(key, view);
+    // 首次创建时加载空白文档；已有视图绝不重置，保留 sessionStorage 与内存状态。
+    await view.webContents.loadURL(`data:text/html,<title>${encodeURIComponent(role)}</title>`);
   }
   showView(view);
-  await view.webContents.loadURL(`data:text/html,<title>${encodeURIComponent(role)}</title>#${marker}`);
+  await view.webContents.executeJavaScript(`window.__aitestViewMarker = ${JSON.stringify(marker)}`);
   return marker;
 }
 
@@ -398,7 +400,12 @@ async function roleSessions(orch: Orchestrator, projectId: string): Promise<Reco
     .map((f) => [f.slice(0, -5), statSync(join(dir, f)).mtime.toISOString()]));
 }
 
-async function openTestPage(url: string): Promise<void> {
+async function openTestPage(url: string, scope?: { projectId: string; env: string }): Promise<void> {
+  if (scope) {
+    await openRoleView(scope.projectId, "default", scope.env);
+    await testViews.get(`${scope.projectId}:${scope.env}:default`)!.webContents.loadURL(url);
+    return;
+  }
   const key = "manual:default";
   let view = testViews.get(key);
   if (!view) {
@@ -594,7 +601,7 @@ function registerIpc(orch: Orchestrator): void {
       const r = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory", "createDirectory"] });
       return r.canceled ? null : r.filePaths[0];
     },
-    openTestPage: (url: string) => openTestPage(url),
+    openTestPage: (url: string, scope?: { projectId: string; env: string }) => openTestPage(url, scope),
     dockTestView: (dock: ViewDock | null) => dockTestView(dock),
     openRoleLogin: (p: string, env: string, role: string) => openRoleLogin(orch, p, env, role),
     saveRoleLogin: (p: string, env: string, role: string) => saveRoleLogin(orch, p, env, role),
@@ -743,7 +750,7 @@ app.whenReady().then(async () => {
       showView(testViews.get(`${projectId}:${env}:default`)!);
       return { cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, viewMarkers };
     }, createDebugBrowser: (projectId, env, opts) => new BrowserSession({
-      cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, openView: (role) => openRoleView(projectId, role, env), ...opts,
+      cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, openView: (role) => openRoleView(projectId, role, env), reuseExistingSession: true, ...opts,
     }) },
     app: { runAppSuite, maestroBin: () => maestroBin().path, pinkyEnabled: () => pinky().enabled },
     // 每次 agent 任务时读取，全局配置修改后立即生效

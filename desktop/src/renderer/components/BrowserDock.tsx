@@ -38,7 +38,7 @@ function visibleRect(el: HTMLElement): DOMRect {
  * 内嵌浏览器停靠区：把主进程的被测页面视图嵌进页面布局，而不是浮在右半屏。
  * 视图未打开时显示占位提示。
  */
-export function BrowserDock({ url, title = "内嵌浏览器" }: { url?: string; title?: string }) {
+export function BrowserDock({ url, title = "内嵌浏览器", session }: { url?: string; title?: string; session?: { projectId: string; env: string } }) {
   const box = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [shown, setShown] = useState(false);
@@ -102,7 +102,7 @@ export function BrowserDock({ url, title = "内嵌浏览器" }: { url?: string; 
           {url && (
             <Tooltip title={visible ? "重新打开被测页面" : "打开被测页面"}>
               <Button size="small" type="text" icon={visible ? <ReloadOutlined /> : <ChromeOutlined />} aria-label="打开被测页面"
-                onClick={() => void api().openTestPage(url)} />
+                onClick={() => void api().openTestPage(url, session)} />
             </Tooltip>
           )}
           {visible && (
@@ -119,7 +119,7 @@ export function BrowserDock({ url, title = "内嵌浏览器" }: { url?: string; 
             <div>AI 生成和试跑时，被测页面会显示在这里</div>
             <Typography.Text type="secondary">也可以先手动打开，确认登录态与页面</Typography.Text>
           </>}>
-            {url && <Button icon={<ChromeOutlined />} onClick={() => void api().openTestPage(url)}>打开被测页面</Button>}
+            {url && <Button icon={<ChromeOutlined />} onClick={() => void api().openTestPage(url, session)}>打开被测页面</Button>}
           </Empty>
         )}
       </div>
