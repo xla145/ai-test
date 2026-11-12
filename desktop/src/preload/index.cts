@@ -27,7 +27,7 @@ const methods = [
   "deleteEnvironment", "renameProject", "deleteProject", "clearCases", "getCase", "caseTitles", "scriptMap", "roleSecretStatus",
   "pageCases", "pageIssues", "pageProposals", "pageReviews", "pageAttributions",
   "saveDatabase", "removeDatabase", "testDatabase", "queryDatabase", "hasDbPassword",
-  "listRuns", "runDetail", "exportReport", "exportCasesExcel", "openPath", "showInFolder",
+  "listRuns", "runDetail", "exportReport", "exportCasesExcel", "readEvidenceImage", "openPath", "showInFolder",
 ] as const;
 
 const api: Record<string, unknown> = Object.fromEntries(methods.map((m) => [m, (...a: unknown[]) => invoke(m, ...a)]));
