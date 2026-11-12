@@ -5,6 +5,7 @@ let mockUiStopped = false;
  */
 import type { UiStep } from "@ai-test/mcp-servers";
 import { UiDebugSession } from "../main/uiDebug";
+import { caseSignature, deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups";
 import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState, UiScriptState, UiStepView } from "../shared/ipc";
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
@@ -54,14 +55,18 @@ const mk = (id: string, title: string, mode: string, priority: string, lint: str
 
 const cases = [
   mk("tc_8f2a1c0e01", "标签管理-停用标签", "ui", "P0", "passed", "reviewed"),
-  mk("tc_8f2a1c0e02", "标签管理-批量导入标签", "ui", "P1", "warned", "draft"),
-  mk("tc_8f2a1c0e03", "综合总览-指标卡片展示", "ui", "P0", "passed", "reviewed"),
+  mk("tc_8f2a1c0e02", "标签管理-批量导入标签", "ui", "P1", "warned", "draft", {
+    steps: ["进入标签管理页", "点击批量导入并上传文件 tags.xlsx"], expected: ["页面展示标签列表", "提示导入成功"] }),
+  mk("tc_8f2a1c0e03", "综合总览-指标卡片展示", "ui", "P0", "passed", "reviewed", {
+    steps: ["进入综合总览页"], expected: ["展示 4 张指标卡片"] }),
   mk("tc_8f2a1c0e04", "推荐配置-接口越权", "api", "P0", "passed", "reviewed", {
     api: { method: "POST", path: "/recommendations", expected_status: [403] },
   }),
-  mk("tc_8f2a1c0e05", "用户特征-数值核对", "ui", "P1", "blocked", "draft", { expected: ["若数值相同须记录说明"] }),
+  mk("tc_8f2a1c0e05", "用户特征-数值核对", "ui", "P1", "blocked", "draft", {
+    steps: ["进入用户特征页", "核对用户 U1003 的特征数值"], expected: ["页面展示用户特征", "若数值相同须记录说明"] }),
   mk("tc_8f2a1c0e06", "埋点-停用按钮 click 上报", "capture", "P1", "passed", "reviewed"),
-  mk("tc_8f2a1c0e07", "数据清洗-规则启停", "ui", "P2", "passed", "draft"),
+  mk("tc_8f2a1c0e07", "数据清洗-规则启停", "ui", "P2", "passed", "draft", {
+    steps: ["进入数据清洗页", "停用规则 R-01"], expected: ["页面展示规则列表", "规则状态显示为已停用"] }),
   mk("tc_8f2a1c0e08", "服务接口-授权停用", "api", "P1", "passed", "reviewed", {
     api: { method: "POST", path: "/authorizations/disable", expected_status: [200] },
   }),
@@ -85,7 +90,10 @@ const cases = [
   // 批量导入的用例，用来演示分页
   ...Array.from({ length: 56 }, (_, i) => mk(`tc_imp${String(i + 1).padStart(4, "0")}`,
     `${["标签管理", "综合总览", "推荐配置", "数据清洗"][i % 4]}-导入场景 ${i + 1}`,
-    ["ui", "api", "ui", "manual"][i % 4], ["P1", "P2", "P2", "P3"][i % 4], i % 9 === 0 ? "warned" : "passed", "draft")),
+    ["ui", "api", "ui", "manual"][i % 4], ["P1", "P2", "P2", "P3"][i % 4], i % 9 === 0 ? "warned" : "passed", "draft",
+    // 同一流程、不同参数：标签管理一组（与「停用标签」同骨架），推荐配置一组
+    i % 4 === 0 ? { steps: ["进入标签管理页", `停用标签 TAG-${2001 + i}`] }
+      : i % 4 === 2 ? { steps: ["进入推荐配置页", `将策略 S-${i} 的权重调整为 ${10 + i}`], expected: ["页面展示策略列表", `权重显示为 ${10 + i}`] } : {})),
 ];
 
 const lint = {
@@ -225,13 +233,23 @@ const uiScripts: Record<string, UiScriptState> = {
   tc_8f2a1c0e01: { path: "scripts/ui/tc_8f2a1c0e01.spec.ts", hash: "demo-1", status: "pending" },
 };
 /** 演示脚本步骤：按用例步骤分组，最后一步故意失败以展示定位效果 */
-const demoSteps = (caseId: string): UiStepView[] => [
-  { id: "S1", caseStep: 1, action: "goto", description: "打开 /tags", role: "管理员", source: "ai" },
-  { id: "S2", caseStep: 1, action: "expectVisible", description: "断言可见 table「标签列表」", role: "管理员", source: "ai" },
-  { id: "S3", caseStep: 2, action: "fill", description: "在 占位「搜索标签」 输入「TAG-1001」", role: "管理员", source: "ai" },
-  { id: "S4", caseStep: 2, action: "click", description: `点击 testid「disable-TAG-1001」`, role: "管理员", source: "ai" },
-  { id: "S5", caseStep: 3, action: "expectText", description: `断言 testid「status-TAG-1001」 包含「已停用」`, role: "管理员", source: caseId.endsWith("1") ? "ai" : "user" },
-];
+const demoSteps = (caseId: string): UiStepView[] => {
+  // 步骤里的参数取自用例本身，演示「同一脚本、不同参数」
+  const c = cases.find((x) => x.id === caseId);
+  const tag = c ? caseSignature({ ...c, steps: c.steps.slice(1) }).values[0] ?? "TAG-1001" : "TAG-1001";
+  return [
+    { id: "S1", caseStep: 1, action: "goto", description: "打开 /tags", role: "管理员", source: "ai" },
+    { id: "S2", caseStep: 1, action: "expectVisible", description: "断言可见 table「标签列表」", role: "管理员", source: "ai" },
+    { id: "S3", caseStep: 2, action: "fill", description: `在 占位「搜索」 输入「${tag}」`, role: "管理员", source: "ai" },
+    { id: "S4", caseStep: 2, action: "click", description: `点击 testid「disable-${tag}」`, role: "管理员", source: "ai" },
+    { id: "S5", caseStep: 2, action: "expectText", description: `断言 testid「status-${tag}」 包含「已停用」`, role: "管理员", source: "ai" },
+  ];
+};
+const uiCasesOf = () => cases.filter((c) => ["ui", "capture"].includes(c.execution_mode) && c.status !== "deprecated");
+/** 派生脚本 → 模板用例 */
+const derivedFrom: Record<string, string> = {};
+/** 演示：这条派生脚本试跑会失败，用来展示失败后的处理 */
+const DEMO_FAILING = "tc_imp0013";
 let debugSession: UiDebugSession | undefined;
 const roleSessionTimes: Record<string, string> = {};
 const debugFailed = new Set<string>();
@@ -358,7 +376,27 @@ const mockApi: AitestApi = {
     ? { tc_app_001: "scripts/app/tc_app_001.yaml", tc_app_003: "scripts/app/tc_app_003.yaml" }
     : framework === "pytest" ? { tc_8f2a1c0e04: "scripts/api/test_api.py", tc_8f2a1c0e08: "scripts/api/test_api.py", tc_8f2a1c0e11: "scripts/api/test_api.py" } : {}),
   caseTitles: (_p, ids) => delay(Object.fromEntries(cases.filter((c) => ids.includes(c.id)).map((c) => [c.id, c.title]))),
-  uiScriptStates: (_id, _env) => delay(uiScripts),
+  uiScriptStates: (_id, _env) => delay({ ...uiScripts }),
+  uiCaseGroups: () => delay(groupCases(uiCasesOf()).map((g) => ({
+    id: g.id, label: g.label,
+    cases: g.cases.map((c) => ({ id: c.id, title: c.title, priority: c.priority, status: c.status, lint_status: c.lint_status,
+      execution_mode: c.execution_mode, variant: variantLabel(g, c.id) })),
+  }))),
+  deriveUiScripts: async (_id, _env, sourceCaseId, opts) => {
+    const group = groupCases(uiCasesOf()).find((g) => g.cases.some((c) => c.id === sourceCaseId));
+    if (!group || !uiScripts[sourceCaseId]) throw new Error("模板用例还没有脚本");
+    const out = { derived: [] as string[], skipped: [] as { caseId: string; reason: string }[] };
+    for (const c of group.cases) {
+      if (c.id === sourceCaseId || uiScripts[c.id] || (opts?.targetIds && !opts.targetIds.includes(c.id))) continue;
+      if (c.lint_status === "blocked") { out.skipped.push({ caseId: c.id, reason: "用例被规范检查阻断" }); continue; }
+      const d = deriveSteps(demoSteps(sourceCaseId), scriptParams(group, sourceCaseId), scriptParams(group, c.id));
+      if (!d.ok) { out.skipped.push({ caseId: c.id, reason: d.reason }); continue; }
+      uiScripts[c.id] = { path: `scripts/ui/${c.id}.spec.ts`, hash: `demo-${c.id}-${Date.now()}`, status: "pending" };
+      derivedFrom[c.id] = sourceCaseId;
+      out.derived.push(c.id);
+    }
+    return delay(out, 200);
+  },
   // 单步调试：复用主进程的调试状态机，浏览器换成假的（S4 第一次执行失败，用于演示失败停住）
   uiDebugStart: async (id, env, caseId, opts) => {
     const blocked = requireConfirm(id, env, opts); if (blocked) return blocked as never;
@@ -397,7 +435,7 @@ const mockApi: AitestApi = {
   saveRoleLogin: async (_p, _e, role) => { roleSessionTimes[role] = new Date().toISOString(); return delay({ cookies: 3, localStorage: 1, url: "https://feature-test.example.com/index", savedAt: roleSessionTimes[role] }, 300); },
   roleSessions: async () => delay({ ...roleSessionTimes }),
   uiScriptDetail: (_id, _env, caseId) => delay(uiScripts[caseId] ? {
-    path: uiScripts[caseId].path, synced: true, steps: demoSteps(caseId),
+    path: uiScripts[caseId].path, synced: true, steps: demoSteps(caseId), ...(derivedFrom[caseId] ? { derivedFrom: derivedFrom[caseId] } : {}),
     code: `// 用例 ID：${caseId}\nimport { expect, test } from "@playwright/test";\n\ntest("${caseId}", async ({ page }) => {\n${demoSteps(caseId).map((st) => `  await test.step("[${st.id}] ${st.description}", async () => { /* … */ });`).join("\n")}\n});\n`,
   } : null),
   confirmUiScript: async (_id, _env, caseId, hash) => {
@@ -418,23 +456,37 @@ const mockApi: AitestApi = {
     await delay(null, 600);
     if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
     uiScripts[caseId] = { path: `scripts/ui/${caseId}.spec.ts`, hash: `demo-${Date.now()}`, status: "pending" };
+    delete derivedFrom[caseId];
     return { message: "脚本已生成，请在内嵌浏览器中试跑校验。" };
   },
   runUiRegression: async (id, env, _headed, opts) => {
     mockUiStopped = false;
     const blocked = requireConfirm(id, env, opts); if (blocked) return blocked;
     const ids = opts?.caseIds ?? [];
-    for (const caseId of ids) {
-      for (const st of demoSteps(caseId)) {
-        const title = `[${st.id}] ${st.description}`;
-        listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "running", stepId: st.id, kind: "step" } });
-        await delay(null, 260);
-        if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
-        listeners.event?.({ method: "aitest/progress", params: { projectId: id, env, stage: "ui-step", caseId, title, status: "passed", stepId: st.id, kind: "step" } });
+    const failed: string[] = [];
+    const queue = [...ids];
+    // 无头执行按 workers 并行；内嵌浏览器逐条执行
+    const worker = async () => {
+      for (let caseId = queue.shift(); caseId; caseId = queue.shift()) {
+        for (const st of demoSteps(caseId)) {
+          const title = `[${st.id}] ${st.description}`;
+          const emit = (status: string, error?: string) => listeners.event?.({ method: "aitest/progress",
+            params: { projectId: id, env, stage: "ui-step", caseId, title, status, stepId: st.id, kind: "step", ...(error ? { error } : {}) } });
+          emit("running");
+          await delay(null, 260);
+          if (mockUiStopped) throw new Error("UI_TASK_STOPPED");
+          if (caseId === DEMO_FAILING && derivedFrom[caseId] && st.id === "S4") { emit("failed", "locator.click: 未找到元素"); failed.push(caseId); break; }
+          emit("passed");
+        }
+        if (opts?.mode === "validate" && uiScripts[caseId] && !failed.includes(caseId)) uiScripts[caseId].validatedRunId = "run_demo";
       }
-      if (opts?.mode === "validate" && uiScripts[caseId]) uiScripts[caseId].validatedRunId = "run_demo";
-    }
-    return { run: { run_id: "run_demo", total: ids.length, passed: ids.length, failed: 0, error: 0, reviews: 0 }, failures: [], degraded: [], missingData: [], htmlReport: "reports/ui/html" };
+    };
+    await Promise.all(Array.from({ length: opts?.embedded ? 1 : Math.max(1, Math.min(8, opts?.workers ?? 1)) }, worker));
+    return {
+      run: { run_id: "run_demo", total: ids.length, passed: ids.length - failed.length, failed: failed.length, error: 0, reviews: 0 },
+      failures: failed.map((case_id) => ({ case_id, status: "failed", failure_type: "script_error", message: "locator.click: 未找到元素 testid「disable-…」", reason: "按钮定位不到，可能该标签的操作入口不同" })),
+      degraded: [], missingData: [], htmlReport: "reports/ui/html",
+    };
   },
   listProposals: (status) => delay(proposals.filter((p) => !status || p.status === status)),
   pageProposals: (_p, q) => page(proposals.filter((p) => matches(p.status, q.status)), q),

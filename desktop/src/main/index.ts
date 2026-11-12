@@ -532,6 +532,8 @@ function registerIpc(orch: Orchestrator): void {
       return orch.runUiRegression(p, env, { ...opts, headed });
     },
     uiScriptStates: (p: string, env: string) => orch.uiScriptStates(p, env),
+    uiCaseGroups: (p: string) => orch.uiCaseGroups(p),
+    deriveUiScripts: (p: string, env: string, id: string, opts?: { targetIds?: string[] }) => orch.deriveUiScripts(p, env, id, opts),
     confirmUiScript: (p: string, env: string, id: string, hash: string) => orch.confirmUiScript(p, env, id, hash),
     uiScriptDetail: (p: string, env: string, id: string) => orch.uiScriptDetail(p, env, id),
     uiDebugStart: (p: string, env: string, id: string, opts?: { confirmProduction?: boolean }) => orch.uiDebugStart(p, env, id, opts),

@@ -181,6 +181,34 @@ export interface UiRunOptions {
   caseIds?: string[];
   mode?: "validate" | "regression";
   embedded?: boolean;
+  /** 无头执行时并行的用例数（1–8，默认 1）；内嵌浏览器只有一个视图，始终逐条执行 */
+  workers?: number;
+}
+
+/** 归组后的一条 UI 用例（列表用，详情另行读取） */
+export interface UiGroupCase {
+  id: string;
+  title: string;
+  priority: string;
+  status: string;
+  lint_status: string;
+  execution_mode: string;
+  /** 在组内与其它成员不同的参数取值，如「TAG-1002 · 已启用」 */
+  variant: string;
+}
+
+/** 步骤骨架相同、只有参数不同的一组用例：共用一份脚本模板 */
+export interface UiCaseGroup {
+  id: string;
+  label: string;
+  cases: UiGroupCase[];
+}
+
+export interface UiDeriveResult {
+  /** 已按参数替换生成脚本的用例 */
+  derived: string[];
+  /** 无法安全替换、仍需 AI 探索的用例 */
+  skipped: { caseId: string; reason: string }[];
 }
 
 /** 界面展示用的脚本步骤（来自 scripts/ui/<case>.steps.json） */
@@ -202,6 +230,8 @@ export interface UiScriptDetail {
   steps?: UiStepView[];
   /** spec 与 steps.json 一致；为 false 表示脚本被手工或 AI 修改过，步骤仅供参考 */
   synced: boolean;
+  /** 由同组另一条用例的脚本按参数替换生成时，为模板用例 ID */
+  derivedFrom?: string;
 }
 
 export interface UiDebugStepState {
@@ -286,6 +316,10 @@ export interface AitestApi {
   exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean, opts?: UiRunOptions): Promise<unknown>;
   uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>>;
+  /** UI 用例按「同脚本、不同参数」归组 */
+  uiCaseGroups(projectId: string): Promise<UiCaseGroup[]>;
+  /** 用模板用例的脚本，为同组还没有脚本的用例按参数替换生成脚本（不调用模型、不打开浏览器） */
+  deriveUiScripts(projectId: string, env: string, sourceCaseId: string, opts?: { targetIds?: string[] }): Promise<UiDeriveResult>;
   confirmUiScript(projectId: string, env: string, caseId: string, hash: string): Promise<void>;
   uiScriptDetail(projectId: string, env: string, caseId: string): Promise<UiScriptDetail | null>;
   /** 开始单步调试（停在第一步之前）；进度通过 aitest/progress（stage=ui-debug）推送 */

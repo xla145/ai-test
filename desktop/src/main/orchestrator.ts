@@ -26,6 +26,9 @@ import type { ThreadStartParams } from "./codex/protocol.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 import type { UiRunOptions, UiScriptState } from "../shared/ipc.js";
 import { UiWorkflow } from "./uiWorkflow.js";
+import { writeUiScript } from "@ai-test/mcp-servers";
+import { deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups.js";
+import type { UiCaseGroup, UiDeriveResult } from "../shared/ipc.js";
 import { UiDebugSession, type DebugBrowser } from "./uiDebug.js";
 import type { UiDebugCommand, UiDebugState } from "../shared/ipc.js";
 
@@ -101,6 +104,13 @@ interface CaseRow {
   status: string;
   data_refs: string[];
   lint_status?: string;
+}
+
+interface UiCaseFull extends CaseRow {
+  priority?: string;
+  steps?: string[];
+  expected?: string[];
+  preconditions?: string[];
 }
 
 export interface RunSummary {
@@ -435,7 +445,9 @@ export class Orchestrator extends EventEmitter {
     const states = opts.mode ? workflow.states(env, Object.fromEntries([...uiScripts].filter(([id]) => projectIds.has(id)))) : {};
     const requested = opts.caseIds ? new Set(opts.caseIds) : undefined;
     if (requested && (!requested.size || [...requested].some((id) => !projectIds.has(id) || !uiScripts.has(id)))) throw new Error("请选择当前项目中已生成脚本的用例");
-    if (opts.mode === "validate" && (!requested || requested.size !== 1 || !opts.embedded)) throw new Error("可视化校验需要选择一条用例并使用内嵌浏览器");
+    if (opts.mode === "validate" && !requested) throw new Error("试跑校验需要指定用例");
+    // 内嵌浏览器只有一个可见视图：一次一条；批量试跑走无头并行
+    if (opts.mode === "validate" && opts.embedded && requested!.size !== 1) throw new Error("内嵌浏览器一次只能试跑一条用例，批量试跑请使用无头并行");
     if (opts.mode === "validate" && [...requested!].some((id) => !states[id])) throw new Error("脚本文件不存在，请重新生成");
     if (opts.mode === "regression" && requested && [...requested].some((id) => states[id]?.status !== "confirmed")) throw new Error("选中的脚本尚未确认，请先完成可视化校验");
     const runnable = cases.filter((c) => uiScripts.has(c.id) && c.status !== "deprecated"
@@ -467,6 +479,7 @@ export class Orchestrator extends EventEmitter {
       baseUrl: envCfg.base_url,
       caseIds,
       headed: opts.headed,
+      ...(!opts.embedded && opts.workers && opts.workers > 1 ? { workers: Math.min(8, Math.floor(opts.workers)) } : {}),
       ...embedded,
       onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
@@ -506,6 +519,54 @@ export class Orchestrator extends EventEmitter {
     const ids = new Set(((await this.listCases(projectId)) as CaseRow[]).map((c) => c.id));
     const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
     return new UiWorkflow(p.workspace_path).states(env, Object.fromEntries(scripts.filter((s) => s.framework === "playwright" && ids.has(s.case_id)).map((s) => [s.case_id, s.path])));
+  }
+
+  private async uiCases(projectId: string) {
+    return ((await this.listCases(projectId)) as UiCaseFull[])
+      .filter((c) => ["ui", "capture"].includes(c.execution_mode) && c.status !== "deprecated");
+  }
+
+  /** UI 用例按「步骤骨架相同、只有参数不同」归组；同组共用一份脚本模板 */
+  async uiCaseGroups(projectId: string): Promise<UiCaseGroup[]> {
+    return groupCases(await this.uiCases(projectId)).map((g) => ({
+      id: g.id, label: g.label,
+      cases: g.cases.map((c) => ({
+        id: c.id, title: c.title, priority: c.priority ?? "", status: c.status, lint_status: c.lint_status ?? "",
+        execution_mode: c.execution_mode, variant: variantLabel(g, c.id),
+      })),
+    }));
+  }
+
+  /**
+   * 参数化复用：把模板用例的脚本步骤按参数替换，生成同组其它用例的脚本。
+   * 不调用模型、不打开浏览器；生成的脚本与 AI 生成的一样处于待校验，需试跑通过并确认后才进入回归。
+   */
+  async deriveUiScripts(projectId: string, env: string, sourceCaseId: string, opts: { targetIds?: string[] } = {}): Promise<UiDeriveResult> {
+    if (this.uiTaskActive || this.uiDebug) throw new Error("请等待当前 UI 任务结束后再生成");
+    const p = await this.project(projectId);
+    const states = await this.uiScriptStates(projectId, env);
+    const source = states[sourceCaseId];
+    if (!source) throw new Error("模板用例还没有脚本");
+    // 只有结构化步骤与代码一致的脚本才能作为模板
+    const file = new UiWorkflow(p.workspace_path).stepsFile(source.path);
+    const group = groupCases(await this.uiCases(projectId)).find((g) => g.cases.some((c) => c.id === sourceCaseId));
+    if (!group) throw new Error("用例不属于当前项目或不支持 UI 执行");
+    const wanted = opts.targetIds ? new Set(opts.targetIds) : undefined;
+    const out: UiDeriveResult = { derived: [], skipped: [] };
+    for (const c of group.cases) {
+      if (c.id === sourceCaseId || states[c.id] || (wanted && !wanted.has(c.id))) continue;
+      if (c.lint_status === "blocked") { out.skipped.push({ caseId: c.id, reason: "用例被规范检查阻断" }); continue; }
+      const derived = deriveSteps(file.steps, scriptParams(group, sourceCaseId), scriptParams(group, c.id));
+      if (!derived.ok) { out.skipped.push({ caseId: c.id, reason: derived.reason }); continue; }
+      const { path } = writeUiScript(p.workspace_path, {
+        caseId: c.id, title: c.title, steps: derived.steps, baseUrl: file.baseUrl,
+        caseSteps: c.steps, expected: c.expected, derivedFrom: sourceCaseId,
+      });
+      await this.deps.engine(["register-script", "--project", projectId, "--case", c.id, "--path", path]);
+      out.derived.push(c.id);
+    }
+    this.emit("progress", { projectId, env, stage: "ui-derive", source: sourceCaseId, derived: out.derived.length });
+    return out;
   }
 
   async confirmUiScript(projectId: string, env: string, caseId: string, hash: string): Promise<void> {
