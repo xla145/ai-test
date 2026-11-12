@@ -1,10 +1,11 @@
 import {
   ArrowUpOutlined, BugOutlined, CaretRightOutlined, CheckCircleFilled, CheckOutlined, CloseOutlined, ExclamationCircleFilled, LoadingOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, RightOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, SearchOutlined, StepForwardOutlined, WarningFilled,
+  MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, SearchOutlined, StepForwardOutlined, WarningFilled,
 } from "@ant-design/icons";
 import { App, Button, Checkbox, Empty, Input, Progress, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { UiCaseGroup, UiDebugCommand, UiDebugState, UiGroupCase, UiScriptState } from "../../../shared/ipc";
+import { UiCaseTree } from "./UiCaseTree";
 import { api, type Project, type TestCase } from "../../api";
 import { BrowserDock } from "../../components/BrowserDock";
 import { CaseLink, CaseTitles } from "../../components/CaseLink";
@@ -39,8 +40,6 @@ const FLOW_INDEX: Record<Stage, number> = { none: 0, pending: 1, validated: 2, c
 
 const AUTO_VALIDATE_KEY = "aitest:ui:auto-validate";
 const WORKERS_KEY = "aitest:ui:workers";
-/** 列表一次渲染的条目数（组或单条用例），更多的按需展开 */
-const LIST_CHUNK = 60;
 const pref = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const savePref = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 仅偏好，存不了就用默认值 */ } };
 const isStopped = (error: unknown) => (error as Error)?.message?.includes("UI_TASK_STOPPED");
@@ -103,12 +102,9 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const visible = useMemo(() => groups.map((g) => ({
     group: g,
     cases: g.cases.filter((c) => (filter === "all" || stageOf(scripts.data?.[c.id]) === filter)
-      && (!query || `${c.title} ${c.id} ${c.variant} ${g.label}`.toLowerCase().includes(query))),
+      && (!query || `${c.title} ${c.id} ${c.variant} ${g.label} ${(c.module_path ?? []).join(" / ")}`.toLowerCase().includes(query))),
   })).filter((v) => v.cases.length), [groups, scripts.data, filter, query]);
   const visibleCount = visible.reduce((n, v) => n + v.cases.length, 0);
-  const [limit, setLimit] = useState(LIST_CHUNK);
-  useEffect(() => setLimit(LIST_CHUNK), [filter, query]);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   /** 一组里可以当模板的脚本：优先已确认，其次试跑通过 */
   const templateOf = (g: UiCaseGroup, except?: string) => {
     const rank: Record<Stage, number> = { confirmed: 3, validated: 2, pending: 1, none: 0 };
@@ -590,63 +586,17 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           <div className="uix-list-body">
             <Spin spinning={(groupsLoad.loading && !groupsLoad.data) || (scripts.loading && !scripts.data)}>
               {!visible.length && groupsLoad.data && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={query ? "没有匹配的用例" : "这个阶段没有用例"} style={{ marginTop: 40 }} />}
-              {visible.slice(0, limit).map(({ group, cases: members }) => {
-                const grouped = group.cases.length > 1;
-                // 搜索、或当前用例在组内时自动展开
-                const open = grouped && (expanded[group.id] ?? (Boolean(query) || members.some((c) => c.id === current?.id)));
-                const ready = group.cases.filter((c) => stageById(c.id) !== "none").length;
-                const row = (c: UiGroupCase, nested: boolean) => {
+              <UiCaseTree key={`${filter}:${query}`} cases={shown} selected={selected} currentId={current?.id} query={query} locked={locked}
+                onPick={pick} onChoose={choose} renderMeta={(c) => {
                   const st = stageById(c.id);
-                  const active = current?.id === c.id;
-                  return (
-                    <div key={c.id} role="button" tabIndex={0} className={`uix-case ${nested ? "nested" : ""} ${active ? "active" : ""} ${locked ? "locked" : ""}`}
-                      onClick={() => choose(c)} onKeyDown={(e) => { if (e.key === "Enter") choose(c); }}>
-                      <span onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={Boolean(selected[c.id])} disabled={locked} aria-label={`选择 ${c.title}`} onChange={(e) => pick([c], e.target.checked)} />
-                      </span>
-                      <div className="uix-case-main">
-                        <div className="uix-case-title">{nested ? c.variant || c.title : c.title}</div>
-                        <div className="uix-case-meta">
-                          {active && activeKey === "pipeline" ? <LoadingOutlined className="uix-case-spin" /> : <i className={`uix-dot ${st}`} />}
-                          <span>{STAGE_LABEL[st]}</span>
-                          <span className="uix-sep">·</span><span>{c.priority}</span>
-                          {c.execution_mode === "capture" && <><span className="uix-sep">·</span><span>埋点</span></>}
-                          {blocked(c) && <Tag bordered={false} color="red">规范阻断</Tag>}
-                          {c.status !== "reviewed" && <Tag bordered={false}>待审核</Tag>}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                };
-                if (!grouped) return row(members[0], false);
-                return (
-                  <div key={group.id} className={`uix-group ${open ? "open" : ""}`}>
-                    <div role="button" tabIndex={0} aria-expanded={open} className="uix-group-head"
-                      onClick={() => setExpanded((old) => ({ ...old, [group.id]: !open }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") setExpanded((old) => ({ ...old, [group.id]: !open })); }}>
-                      <span onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={members.every((c) => selected[c.id])} indeterminate={!members.every((c) => selected[c.id]) && members.some((c) => selected[c.id])}
-                          disabled={locked} aria-label={`选择 ${group.label} 整组`} onChange={(e) => pick(members, e.target.checked)} />
-                      </span>
-                      <div className="uix-case-main">
-                        <div className="uix-case-title">{group.label}</div>
-                        <div className="uix-case-meta">
-                          <BranchesOutlined />
-                          <span>{group.cases.length} 条共用脚本</span>
-                          <span className="uix-sep">·</span>
-                          <span className={ready === group.cases.length ? "uix-ok" : ""}>已生成 {ready}/{group.cases.length}</span>
-                          {members.length !== group.cases.length && <><span className="uix-sep">·</span><span>匹配 {members.length}</span></>}
-                        </div>
-                      </div>
-                      <RightOutlined className="uix-group-caret" />
-                    </div>
-                    {open && <div className="uix-group-body">{members.map((c) => row(c, true))}</div>}
-                  </div>
-                );
-              })}
-              {visible.length > limit && (
-                <Button type="link" block onClick={() => setLimit(limit + LIST_CHUNK)}>显示更多（还有 {visible.length - limit} 项）</Button>
-              )}
+                  return <>
+                    {current?.id === c.id && activeKey === "pipeline" ? <LoadingOutlined className="uix-case-spin" /> : <i className={`uix-dot ${st}`} />}
+                    <span>{STAGE_LABEL[st]}</span><span className="uix-sep">·</span><span>{c.priority}</span>
+                    {c.execution_mode === "capture" && <span>埋点</span>}
+                    {blocked(c) && <Tag bordered={false} color="red">规范阻断</Tag>}
+                    {c.status !== "reviewed" && <Tag bordered={false}>待审核</Tag>}
+                  </>;
+                }} />
             </Spin>
           </div>
           {picked.length > 0 ? (

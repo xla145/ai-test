@@ -107,6 +107,7 @@ interface CaseRow {
 }
 
 interface UiCaseFull extends CaseRow {
+  module_path?: string[];
   priority?: string;
   steps?: string[];
   expected?: string[];
@@ -532,7 +533,7 @@ export class Orchestrator extends EventEmitter {
       id: g.id, label: g.label,
       cases: g.cases.map((c) => ({
         id: c.id, title: c.title, priority: c.priority ?? "", status: c.status, lint_status: c.lint_status ?? "",
-        execution_mode: c.execution_mode, variant: variantLabel(g, c.id),
+        module_path: c.module_path ?? [], execution_mode: c.execution_mode, variant: variantLabel(g, c.id),
       })),
     }));
   }

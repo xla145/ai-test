@@ -187,6 +187,7 @@ export interface UiRunOptions {
 
 /** 归组后的一条 UI 用例（列表用，详情另行读取） */
 export interface UiGroupCase {
+  module_path?: string[];
   id: string;
   title: string;
   priority: string;

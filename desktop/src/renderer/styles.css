@@ -241,3 +241,22 @@ body {
   .uix-hero { grid-template-columns: 1fr; gap: 12px; }
   .uix-bench { height: calc(100vh - 250px); }
 }
+
+/* UI 用例：业务模块与用例层级 */
+.uix-tree-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 2px 4px 8px; color: var(--uix-text3); font-size: 12px; }
+.uix-tree-toolbar .ant-btn { font-size: 12px; padding-inline: 4px; }
+.uix-module-head { display: flex; align-items: center; gap: 7px; padding: 7px 6px; border-radius: 8px; }
+.uix-module-head:hover { background: var(--uix-fill); }
+.uix-module-toggle, .uix-module-name, .uix-tree-case-button { border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; text-align: left; padding: 0; }
+.uix-module-toggle { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding-block: 3px; }
+.uix-module-caret { font-size: 9px; color: var(--uix-text3); transition: transform .15s; }
+.uix-module-caret.open { transform: rotate(90deg); }
+.uix-folder { font-size: 16px; color: var(--uix-primary); }
+.uix-module-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.uix-module-children { margin-left: 13px; padding-left: 9px; border-left: 1px solid var(--uix-border); }
+.uix-tree-case { gap: 8px; padding: 8px 6px; border-radius: 7px; }
+.uix-tree-case-button { flex: 1; min-width: 0; }
+.uix-tree-case-button:disabled { cursor: default; }
+.uix-tree-case:focus-within { background: var(--uix-fill); }
+.uix-tree-case.active:focus-within { background: var(--uix-primary-bg); }
+.uix-file { margin-right: 5px; color: var(--uix-text3); font-size: 12px; }
