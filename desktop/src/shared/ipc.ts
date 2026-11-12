@@ -374,6 +374,7 @@ export interface AitestApi {
   /** 弹出保存对话框；用户取消返回 null */
   exportReport(runIds: string[], format: "html" | "xlsx"): Promise<{ path: string } | null>;
   exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
+  readEvidenceImage(projectId: string, path: string): Promise<string>;
   openPath(path: string): Promise<void>;
   showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;

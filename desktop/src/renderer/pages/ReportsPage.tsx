@@ -1,3 +1,4 @@
+import { EvidenceImage } from "../components/EvidenceImage";
 import {
   ApiOutlined,
   ChromeOutlined,
@@ -15,7 +16,6 @@ import {
   Drawer,
   Dropdown,
   Empty,
-  Image,
   Progress,
   Row,
   Segmented,
@@ -209,7 +209,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
                   {x.message && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0, maxHeight: 240, overflow: "auto" }}>{x.message}</pre>}
                   {x.evidence_paths.length > 0 && (
                     <Space wrap>
-                      {x.evidence_paths.filter(isImage).map((p) => <Image key={p} width={180} src={`file://${resolvePath(p)}`} />)}
+                      {x.evidence_paths.filter(isImage).map((p) => <EvidenceImage key={p} projectId={project.id} path={p} width={180} />)}
                       {x.evidence_paths.filter((p) => !isImage(p)).map((p) => (
                         <Button key={p} size="small" icon={<FolderOpenOutlined />} onClick={() => run(() => api().showInFolder(resolvePath(p)))}>
                           {p.split(/[\\/]/).pop()}
