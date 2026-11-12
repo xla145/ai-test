@@ -40,15 +40,42 @@ export function triagePrompt(projectId: string, runId: string, failures: Failure
   ].join("\n");
 }
 
-export function explorePrompt(projectId: string, env: string, caseId: string, roles: string[] = []): string {
+/** 探索任务直接带上的用例内容：省去 agent 读技能文件、查用例的几轮往返 */
+export interface ExploreCaseBrief {
+  title?: string;
+  preconditions?: string[];
+  steps?: string[];
+  expected?: string[];
+  data_refs?: string[];
+}
+
+export function explorePrompt(projectId: string, env: string, caseId: string, roles: string[] = [], brief?: ExploreCaseBrief): string {
+  const list = (items: string[] | undefined) => (items?.length ? items.map((t, i) => `   ${i + 1}. ${t}`).join("\n") : "   （无）");
+  const caseBlock = brief?.steps?.length
+    ? [
+      `用例内容（已给出，不必再调用 case-store.list_cases，也不必再读 .agents/skills/ui-explore.md，规则以本提示为准）：`,
+      `  标题：${brief.title ?? caseId}`,
+      `  前置条件：\n${list(brief.preconditions)}`,
+      `  步骤：\n${list(brief.steps)}`,
+      `  预期（与步骤一一对应）：\n${list(brief.expected)}`,
+    ]
+    : [`先用 case-store.list_cases 读取该用例（规则见 .agents/skills/ui-explore.md）。`];
+  const dataLine = brief && !brief.data_refs?.length
+    ? "该用例没有声明依赖数据，不必调用 env-support.check_data。"
+    : "env-support.check_data 检查依赖数据，缺失则 seed_data。";
   return [
     `任务：探索模式。为项目 ${projectId} 的 UI 用例 ${caseId} 在内嵌浏览器中生成确定性 Playwright 脚本。执行环境：${env}。`,
-    "按 .agents/skills/ui-explore.md：",
-    `1. case-store.list_cases 读取该用例；env-support.check_data 检查依赖数据，缺失则 seed_data。`,
+    ...caseBlock,
+    `1. ${dataLine}`,
     `2. browser.open_project（project_id=${projectId}, env=${env}）；需要登录时 browser.new_role_context 只传角色名。`,
     `   已配置的角色：${roles.length ? roles.join("、") : "（无）"}。用例里描述的身份（如「运营管理员」）选最接近的已配置角色传给 new_role_context，不要自造角色名；不需要登录的页面不用建角色会话。`,
     "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
     "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始），再逐步操作并把该步的预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
+    "   少走往返：navigate / click / select / press 的返回值已带操作后的页面快照，不要每次操作后再调 snapshot；连续按键用 press 一次传数组；互不依赖的断言在同一轮里一起发出。",
+    "   定位元素：可交互元素用快照里的 ref；表格单元格、状态徽标、统计文字等非交互文字用 browser.find_text 取 ref（确定性、毫秒级）。",
+    "   断言落在显示结果的那个元素上：某行的状态、数量文字用 find_text 取该单元格（按 context 挑对的行）再 expect_text，不要对整个列表区断言「包含」；不要对按某段文字找到的元素再断言包含同一段文字（等于断言可见），同一断言不要重复做。",
+    "   ai_locate（若提供）每次要数秒且可能定位偏，只在快照与 find_text 都找不到时使用（如纯图标）；目标上有文字时传 text 让它校验结果；报「视觉定位不准」时按提示改用 find_text，不要换说法反复重试；不要用 ai_act。",
+    "   不要用 shell 翻看工作区里的其它脚本或配置，所需信息都在本提示与工具返回值里。",
     `4. browser.save_ui_script（case_id=${caseId}），再 browser.run_playwright_script 试跑，失败则修正后重新保存。`,
     "   脚本只能由 save_ui_script 生成，不要手工编辑 scripts/ui 下的 spec 或 steps 文件；缺断言就继续录制（输入框、下拉框取值用 expect_value，不应出现的内容用 expect_no_text），再以 append=true 保存。",
     "   试跑因环境缺失失败（如浏览器未安装）时不要安装任何软件，在结论中说明，用户会在内嵌浏览器中试跑校验。",

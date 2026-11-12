@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
+import { describeTarget, generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
 import { checkData, seedData, setServerClock } from "../src/ui/envSupport.js";
-import { candidates, toCode } from "../src/ui/locator.js";
+import { candidates, isPositional, specTexts, toCode } from "../src/ui/locator.js";
 import { chooseBrowser } from "../src/ui/chromium.js";
 import { resolveRole, UI_SERVERS } from "../src/ui/tools.js";
 import { caseIdFromTitle, classifyUiFailure, parseReport, reportErrors } from "../src/ui/runner.js";
@@ -15,6 +15,24 @@ describe("locator priority", () => {
     expect(c.map((x) => x.kind)).toEqual(["testid", "role", "text", "css"]);
     expect(candidates({ tag: "div", css: "/html/body/div" })).toEqual([]);
     expect(toCode({ kind: "role", role: "button", name: '说"明"' })).toBe('page.getByRole("button", { name: "说\\"明\\"", exact: true })');
+  });
+
+  it("puts row-scoped and text-filtered locators before positional CSS", () => {
+    const c = candidates({ tag: "button", role: "button", name: "停用", css: "tbody > tr:nth-of-type(2) > td > button",
+      cssLoose: "button.el-button", labelText: "停用", row: { css: "tr", key: "TAG-2002", inner: "button" } });
+    expect(c.map((x) => toCode(x))).toEqual([
+      'page.getByRole("button", { name: "停用", exact: true })',
+      'page.locator("tr", { hasText: "TAG-2002" }).getByRole("button", { name: "停用", exact: true })',
+      'page.locator("tr", { hasText: "TAG-2002" }).locator("button")',
+      'page.locator("button.el-button", { hasText: "停用" })',
+      'page.locator("tbody > tr:nth-of-type(2) > td > button")',
+    ]);
+    expect(c.map(isPositional)).toEqual([false, false, false, false, true]);
+    // 断言文字出现在这些定位器的识别文字里时，断言等于定位器本身
+    expect(specTexts(c[1])).toEqual(["停用", "TAG-2002"]);
+    expect(specTexts(c[3])).toEqual(["停用"]);
+    expect(describeTarget(c[1])).toBe("「TAG-2002」所在行的 button「停用」");
+    expect(describeTarget(c[3])).toBe("button.el-button「停用」");
   });
 });
 
@@ -184,5 +202,16 @@ describe("env-support", () => {
     const fetch = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof globalThis.fetch;
     expect(await setServerClock(env, { offset_seconds: 86340 }, { fetch })).toEqual({ ok: true, detail: undefined });
     await expect(setServerClock({ base_url: "x" }, { offset_seconds: 1 })).rejects.toThrow("降级为手工");
+  });
+});
+
+describe("quotedTarget", () => {
+  it("uses the single quoted text in a prompt as the expected element text", async () => {
+    const { quotedTarget } = await import("../src/ui/tools.js");
+    expect(quotedTarget("表格上方的统计文字「共 1 个标签」")).toBe("共 1 个标签");
+    expect(quotedTarget("按钮“保存”")).toBe("保存");
+    expect(quotedTarget("在「测试1」这一行，状态「草稿」")).toBeUndefined();
+    expect(quotedTarget("右上角的设置图标")).toBeUndefined();
+    expect(quotedTarget("「草稿」状态徽标，文字为「草稿」")).toBe("草稿");
   });
 });

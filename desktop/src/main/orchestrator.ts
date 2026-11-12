@@ -16,6 +16,7 @@ import {
   appExplorePrompt,
   caseGenerationPrompt,
   explorePrompt,
+  type ExploreCaseBrief,
   healPrompt,
   triagePrompt,
   type FailureBrief,
@@ -334,9 +335,9 @@ export class Orchestrator extends EventEmitter {
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
   async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
     return this.withUiTask(projectId, env, async (signal) => {
-      await this.uiCase(projectId, env, caseId, opts.confirmProduction);
+      const brief = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as ExploreCaseBrief;
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles), signal);
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief), signal);
       // 明确告诉用户有没有生成脚本，以及没生成的原因
       const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
       if (scriptGenerated) return { ...result, scriptGenerated };

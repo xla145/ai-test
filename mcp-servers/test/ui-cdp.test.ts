@@ -81,6 +81,31 @@ describe("CDP mode (embedded browser)", () => {
     } finally { await ctx.close(); rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 
+  it("gives page navigation its own timeout, so a slow first load is not reported as a failure", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-embedded-slow-"));
+    const ctx = await host.newContext();
+    const page = await ctx.newPage();
+    const marker = `aitest-view=slow-${Date.now()}`;
+    await page.goto(`${app.url}/login`);
+    await page.evaluate((marker) => { (window as any).__aitestViewMarker = marker; }, marker);
+    mkdirSync(join(dir, "scripts/ui"), { recursive: true });
+    // 操作超时压到 300ms，页面要 800ms 才返回：跳转仍应成功，找不到元素的操作仍按操作超时失败
+    // 同一文件内顺序执行：失败的用例放最后（失败后 Playwright 会换新 worker）
+    writeFileSync(join(dir, "scripts/ui/tc_slow.spec.ts"), [
+      'import { test, expect } from "@playwright/test";',
+      'test("tc_slow embedded", async ({ page }) => { await page.goto("/slow?ms=800"); await expect(page.getByRole("heading", { name: "慢页面" })).toBeVisible(); });',
+      'test("tc_missing embedded", async ({ page }) => { await page.goto("/slow?ms=0"); await page.getByRole("button", { name: "不存在" }).click(); });',
+    ].join("\n"));
+    try {
+      const out = await runUiSuite({ workspace: dir, baseUrl: app.url, caseIds: ["tc_slow"], env: { AITEST_ACTION_TIMEOUT: "300" },
+        cdpEndpoint: `http://127.0.0.1:${PORT}`, viewMarkers: { default: marker } });
+      const byId = Object.fromEntries(out.results.map((r) => [r.case_id, r]));
+      expect(byId.tc_slow?.status, JSON.stringify(out.results)).toBe("passed");
+      expect(byId.tc_missing?.status, out.stderr).toBe("failed");
+      expect(byId.tc_missing?.message).toMatch(/Timeout 300ms/);
+    } finally { await ctx.close(); rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
   it("finds the role view by its URL marker and drives it", async () => {
     const opened: string[] = [];
     const openView = async (role: string) => {

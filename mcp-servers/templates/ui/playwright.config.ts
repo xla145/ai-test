@@ -24,6 +24,7 @@ export default defineConfig({
     testIdAttribute: process.env.AITEST_TESTID_ATTRIBUTE || "data-testid",
     headless: !process.env.AITEST_HEADED,
     actionTimeout: Number(process.env.AITEST_ACTION_TIMEOUT || 5_000),
+    navigationTimeout: Number(process.env.AITEST_NAVIGATION_TIMEOUT || 30_000),
     launchOptions: process.env.AITEST_CHROMIUM_PATH ? { executablePath: process.env.AITEST_CHROMIUM_PATH } : {},
   },
 });

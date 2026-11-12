@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest";
+import { explorePrompt } from "../src/main/prompts.js";
+
+describe("explorePrompt", () => {
+  it("inlines the case so the agent skips reading the skill and listing cases", () => {
+    const text = explorePrompt("p1", "test", "tc_a", ["管理员"], {
+      title: "标签管理-停用", preconditions: ["已有标签 TAG-1"], steps: ["打开标签管理", "停用 TAG-1"], expected: ["列表显示 TAG-1", "状态为已停用"], data_refs: [],
+    });
+    expect(text).toContain("标题：标签管理-停用");
+    expect(text).toContain("   2. 停用 TAG-1");
+    expect(text).toContain("   2. 状态为已停用");
+    expect(text).toContain("不必再调用 case-store.list_cases");
+    expect(text).toContain("不必调用 env-support.check_data");
+    expect(text).toContain("browser.find_text");
+    expect(text).toContain("press 一次传数组");
+    expect(text).toContain("传 text 让它校验结果");
+  });
+
+  it("falls back to reading the case when no brief is given, and keeps the data check when data is declared", () => {
+    expect(explorePrompt("p1", "test", "tc_a")).toContain("先用 case-store.list_cases 读取该用例");
+    expect(explorePrompt("p1", "test", "tc_a", [], { steps: ["s"], data_refs: ["tag"] })).toContain("env-support.check_data 检查依赖数据");
+  });
+});

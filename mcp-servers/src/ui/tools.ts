@@ -79,6 +79,12 @@ function rolesFromEnv(env: Record<string, string>): { role: string; username: st
 
 const ref = z.string().describe("snapshot 返回的元素 ref，如 e12");
 
+/** 操作结果附带操作后的页面快照，agent 不必每次操作后再单独调用 snapshot */
+async function withSnapshot<T extends object>(s: BrowserSession, out: T | void): Promise<T & { snapshot?: unknown }> {
+  const snapshot = await s.snapshotAfterAction().catch(() => undefined);
+  return { ...(out ?? ({} as T)), ...(snapshot ? { snapshot } : { note: "未取到操作后的快照，需要时调用 snapshot" }) };
+}
+
 function browserTools(ctx: UiToolContext): UiTool[] {
   const tools = allBrowserTools(ctx);
   // 未启用 Midscene 时不提供视觉工具，免得 agent 反复尝试
@@ -139,29 +145,46 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     },
     {
       name: "navigate",
-      description: "打开页面（相对路径基于环境地址）",
+      description: "打开页面（相对路径基于环境地址）。返回值带打开后的页面快照（snapshot），不必再单独调用 snapshot",
       input: { url: z.string() },
-      handler: ({ url }) => {
+      handler: async ({ url }) => {
         active(ctx);
-        return s.navigate(url);
+        return withSnapshot(s, await s.navigate(url));
       },
     },
     {
       name: "snapshot",
-      description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本",
+      description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本。navigate / click / select / press 的返回值已带操作后的快照，"
+        + "只有页面还在变化或需要更长文本时才单独调用。表格单元格、状态徽标等非交互文字不在元素列表里，用 find_text 取 ref",
       input: { max_text: z.number().int().optional() },
       handler: ({ max_text }) => s.snapshot({ maxText: max_text }),
     },
-    { name: "click", description: "点击元素", input: { ref }, handler: ({ ref }) => s.click(ref) },
+    {
+      name: "find_text",
+      description: "按文本确定性定位元素并返回 ref（不调用视觉模型，毫秒级）：找出文本包含 text 的最内层可见元素，"
+        + "用于给表格单元格、状态徽标、统计文字（如「共 2 个标签」）等非交互元素做断言。多处命中时按 context（所在行的文本）挑选；"
+        + "exact=true 要求元素文本与 text 完全相同。旧 ref 在之后的快照中仍然有效",
+      input: { text: z.string(), exact: z.boolean().optional(), limit: z.number().int().min(1).max(30).optional() },
+      handler: async ({ text, exact, limit }) => {
+        const matches = await s.findText(text, { exact, limit });
+        return matches.length ? { matches } : { matches, note: "页面上没有包含该文本的可见元素：确认文字是否准确、是否需要先滚动或展开" };
+      },
+    },
+    { name: "click", description: "点击元素。返回值带点击后的页面快照", input: { ref }, handler: async ({ ref }) => withSnapshot(s, await s.click(ref)) },
     {
       name: "type",
       description: "在输入框填写文本。敏感值不要直接传：用 secret_env 指定由客户端注入的环境变量名",
       input: { ref, text: z.string(), secret_env: z.string().optional() },
       handler: ({ ref, text, secret_env }) => s.type(ref, secret_env ? process.env[secret_env] ?? "" : text, { secretEnv: secret_env }),
     },
-    { name: "select", description: "下拉选择", input: { ref, value: z.string() }, handler: ({ ref, value }) => s.select(ref, value) },
+    { name: "select", description: "下拉选择。返回值带选择后的页面快照", input: { ref, value: z.string() }, handler: async ({ ref, value }) => withSnapshot(s, await s.select(ref, value)) },
     { name: "check", description: "勾选 / 取消勾选", input: { ref, checked: z.boolean() }, handler: ({ ref, checked }) => s.check(ref, checked) },
-    { name: "press", description: "按键，如 Enter", input: { key: z.string() }, handler: ({ key }) => s.press(key) },
+    {
+      name: "press",
+      description: "按键，如 Enter。连续按键一次传数组（如 [\"Tab\", \"Tab\", \"Enter\"]），依次按下。返回值带按键后的页面快照",
+      input: { key: z.union([z.string(), z.array(z.string()).min(1).max(20)]) },
+      handler: async ({ key }) => withSnapshot(s, await s.press(key)),
+    },
     {
       name: "screenshot",
       description: "截图保存到 workspace/evidence。默认只截当前可见区域（图小、读得快）；确实需要整页时传 full_page=true（内嵌浏览器中始终是可见区域，需要时先滚动）。找元素优先用 snapshot",
@@ -200,7 +223,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     },
     {
       name: "expect_request",
-      description: "断言抓到字段匹配的上报（fields 为点号路径 → 值），forbidden 为不得出现的敏感字段",
+      description: "断言抓到字段匹配的上报（fields 为点号路径 → 值，只匹配请求体 JSON / 表单里的字段，不匹配 URL 查询参数），forbidden 为不得出现的敏感字段",
       input: { name: z.string(), fields: z.record(z.string(), z.unknown()), forbidden: z.array(z.string()).optional() },
       handler: ({ name, fields, forbidden }) => s.expectRequest(name, fields, forbidden),
     },
@@ -295,14 +318,30 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     // ---- Midscene 视觉工具（与浏览器共享页面与 ref） ----
     {
       name: "ai_locate",
-      description: "（Midscene）用自然语言视觉定位元素，返回可录制的 ref。只在 snapshot 找不到元素时使用",
-      input: { prompt: z.string() },
-      handler: async ({ prompt }) => {
+      description: "（Midscene）用自然语言视觉定位元素，返回可录制的 ref。每次要数秒且可能定位偏，只在 snapshot 与 find_text 都找不到元素时使用（如纯图标）。"
+        + "目标元素上有文字时传 text（该元素应包含的文字）：会校验定位结果，落点偏了会改用附近包含该文字的元素，仍找不到则报错而不是返回错的元素",
+      input: {
+        prompt: z.string(),
+        text: z.string().optional().describe("目标元素应包含的文字，用于校验；不传时取 prompt 里唯一一处「」或引号中的文字"),
+      },
+      handler: async ({ prompt, text }) => {
         const agent = await vision(ctx);
+        const expect = text ?? quotedTarget(prompt);
         const loc = await agent.aiLocate(prompt);
-        const el = await s.refAt(loc.center[0], loc.center[1]);
-        if (!el) throw new Error("视觉定位到的位置没有元素");
-        return el;
+        const out = await s.locateAt(loc.center[0], loc.center[1], { rect: asRect(loc.rect), expect });
+        if (out.matched === false) {
+          const where = out.pointText ? `落点处是「${out.pointText}」` : "落点处没有元素";
+          const hint = out.elsewhere
+            ? `页面上有 ${out.elsewhere} 处包含「${expect}」，最近的离落点 ${out.nearestDistance}px：改用 find_text「${expect}」按 context 挑选`
+            : `页面可见区域没有包含「${expect}」的元素：确认文字是否准确、是否需要先滚动或展开`;
+          throw new Error(`视觉定位不准：${where}，不包含「${expect}」。${hint}`);
+        }
+        if (!out.element) throw new Error("视觉定位到的位置没有元素");
+        return {
+          ...out.element,
+          ...(expect ? { verified: true, expected: expect } : { verified: false, note: "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素" }),
+          ...(out.adjusted !== undefined ? { note: `落点处是「${out.pointText ?? ""}」，已改用 ${out.adjusted}px 外包含「${expect}」的元素` } : {}),
+        };
       },
     },
     {
@@ -337,6 +376,18 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       },
     },
   ];
+}
+
+/** prompt 中唯一一处被「」“”或引号括起的文字，作为目标元素应包含的文字；有多处时无法判断哪一处是目标，不校验 */
+export function quotedTarget(prompt: string): string | undefined {
+  const found = [...prompt.matchAll(/「([^」]{1,60})」|“([^”]{1,60})”|"([^"]{1,60})"/g)].map((m) => (m[1] ?? m[2] ?? m[3]).trim()).filter(Boolean);
+  const unique = [...new Set(found)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
+function asRect(rect: unknown): { left: number; top: number; width: number; height: number } | undefined {
+  const r = rect as Record<string, unknown> | undefined;
+  return r && ["left", "top", "width", "height"].every((k) => Number.isFinite(r[k])) ? (r as { left: number; top: number; width: number; height: number }) : undefined;
 }
 
 async function vision(ctx: UiToolContext) {

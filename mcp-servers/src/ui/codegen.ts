@@ -185,7 +185,7 @@ export function generateSpec(input: SpecInput): string {
     input.derivedFrom
       ? `// 由 AIProbe 按参数替换自用例 ${input.derivedFrom} 的脚本生成；回归直接执行本脚本，不调用模型。`
       : "// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。",
-    "// 选择器优先级：data-testid → role / label → 文本 → CSS。",
+    "// 选择器优先级：data-testid → role / label → 文本 → 限定到行内 → CSS（不用生成的 id / class 和行号）。",
   ];
   if (singleNamedRole) helpers.add("storageStateFor");
   const imports = [`import { expect, test } from "@playwright/test";`];
@@ -231,14 +231,17 @@ export function stepIdFromTitle(title: string): string | undefined {
 }
 
 export function describeTarget(t: LocatorSpec): string {
-  switch (t.kind) {
-    case "testid": return `testid「${t.value}」`;
-    case "role": return `${t.role}「${t.name}」`;
-    case "label": return `标签「${t.value}」`;
-    case "placeholder": return `占位「${t.value}」`;
-    case "text": return `文本「${t.value}」`;
-    case "css": return t.value;
-  }
+  const own = (() => {
+    switch (t.kind) {
+      case "testid": return `testid「${t.value}」`;
+      case "role": return `${t.role}「${t.name}」`;
+      case "label": return `标签「${t.value}」`;
+      case "placeholder": return `占位「${t.value}」`;
+      case "text": return `文本「${t.value}」`;
+      case "css": return t.hasText ? `${t.value}「${t.hasText}」` : t.value;
+    }
+  })();
+  return t.within ? `「${t.within.hasText}」所在行的 ${own}` : own;
 }
 
 export function describeStep(st: Step): string {

@@ -3,7 +3,8 @@ import { createServer, type Server } from "node:http";
 /** 模拟被测系统：登录、角色菜单、标签停用、埋点上报。version=2 模拟页面改版（按钮 testid 变了） */
 export interface DemoApp {
   url: string;
-  state: { version: 1 | 2; beacons: unknown[]; disabled: Set<string>; onDisable?: (tag: string) => void };
+  /** listOrder：/list 表格的行顺序（回归时打乱，验证脚本不依赖行位置） */
+  state: { version: 1 | 2; beacons: unknown[]; disabled: Set<string>; onDisable?: (tag: string) => void; listOrder: string[] };
   close(): Promise<void>;
 }
 
@@ -16,7 +17,7 @@ const page = (title: string, body: string) => `<!doctype html><html><head><meta 
 <style>.missing{color:#999}</style></head><body>${body}</body></html>`;
 
 export async function startDemoApp(): Promise<DemoApp> {
-  const state: DemoApp["state"] = { version: 1, beacons: [], disabled: new Set() };
+  const state: DemoApp["state"] = { version: 1, beacons: [], disabled: new Set(), listOrder: ["TAG-2001", "TAG-2002", "TAG-2003"] };
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const role = /session=(\w+)/.exec(req.headers.cookie ?? "")?.[1];
@@ -27,6 +28,11 @@ export async function startDemoApp(): Promise<DemoApp> {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
+      if (url.pathname === "/slow") {
+        // 首屏较慢的页面：用于验证页面跳转不受操作超时约束
+        setTimeout(() => send(200, page("慢页面", "<h1>慢页面</h1>")), Number(url.searchParams.get("ms") ?? 800));
+        return;
+      }
       if (url.pathname === "/login" && req.method === "GET") {
         return send(200, page("登录", `<form method="post" action="/login">
           <label for="username">用户名</label><input id="username" name="username">
@@ -58,6 +64,19 @@ export async function startDemoApp(): Promise<DemoApp> {
           <a href="/profile">个人中心</a></nav><p>当前角色：<span data-testid="current-role">${role}</span></p>
           <p>今天是 <span id="today"></span></p>
           <script>document.getElementById("today").textContent = new Date().toISOString().slice(0, 10);</script>`));
+      }
+      if (url.pathname === "/list") {
+        // 仿 Element Plus 表格：生成的 id / class、每行一个同名「停用」按钮、整块区域里的分页文字
+        const rows = state.listOrder.map((id, i) => `<tr class="el-table__row">
+          <td class="el-table_1_column_1 el-table__cell"><div class="cell">${id}</div></td>
+          <td class="el-table_1_column_2 el-table__cell"><div class="cell"><span class="status">${id === "TAG-2003" ? "已停用" : "启用中"}</span></div></td>
+          <td class="el-table_1_column_3 el-table__cell"><div class="cell"><button class="el-button" id="el-id-${1024 + i}-3"
+            onclick="this.closest('tr').querySelector('.status').textContent='已停用'">停用</button></div></td></tr>`).join("");
+        return send(200, page("标签列表", `<h1>标签列表</h1><div class="app-main"><div class="fc-page">
+          <div class="fc-split-main is-active" id="el-id-1024-7" role="region">
+          <p>共 3 个标签，其中 1 个已停用。列表按最近更新时间排列，可按名称搜索、按状态筛选，停用后的标签不再参与人群圈选，历史数据保留。</p>
+          <table class="el-table"><tbody>${rows}</tbody></table>
+          <div class="fc-pager"><span class="el-pagination__total">共 3 条</span></div></div></div></div>`));
       }
       if (url.pathname === "/tags") {
         if (role !== "admin") return send(403, page("无权限", "<p>无权限</p>"));
