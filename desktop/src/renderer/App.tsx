@@ -129,6 +129,7 @@ export function App() {
   const [viewVisible, setViewVisible] = useState(false);
   // 全局设置不属于任何项目，单独一个视图
   const [showSettings, setShowSettings] = useState(false);
+  /** 项目设置抽屉；addEnv 表示打开时直接弹出「添加环境」 */
   const [projectSettingsOpen, setProjectSettingsOpen] = useState<false | { addEnv?: boolean }>(false);
   const { data: user } = useLoad(() => api().getUserInfo(), []);
   const update = useUpdateState();
@@ -477,7 +478,9 @@ function NewProjectModal({ open, preset, groups, onClose, onCreated }: {
   const group = kind === "group";
   return (
     <Modal open={open} title={group ? "新建大项目" : parent ? "新建子项目" : "新建项目"} onCancel={onClose} onOk={submit}
-      okText="创建" confirmLoading={busy} destroyOnHidden afterOpenChange={(v) => v && nameRef.current?.focus()}>
+      okText="创建" confirmLoading={busy} destroyOnHidden
+      // 打开动画结束后再聚焦（Modal 打开时会把焦点放在对话框本身）
+      afterOpenChange={(v) => v && nameRef.current?.focus()}>
       <Form form={form} layout="vertical" initialValues={{ env: "test", kind: "project", projectType: "web" }} preserve={false}>
         <Form.Item name="kind" label="类型" extra={group
           ? "大项目不含用例，只存放执行环境、凭据、角色账号与预算，其下的子项目自动继承"

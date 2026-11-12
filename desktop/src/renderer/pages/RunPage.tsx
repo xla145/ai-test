@@ -43,8 +43,7 @@ function ApiRunPage({ project }: { project: Project }) {
           <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</Button>
           <RunButton project={project} env={env} loading={busy} disabled={preparing || !available.length}
             onRun={(confirmProduction) => run(async () => {
-              setResult((await api().runRegression(project.id, env,
-                { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult);
+              setResult((await api().runRegression(project.id, env, { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult);
               notifyProjectChanged(project.id);
             })}>
             全量回归（{available.length} 条已审核用例）

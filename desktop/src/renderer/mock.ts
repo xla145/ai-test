@@ -212,7 +212,9 @@ const roleSecrets: Record<string, { account: boolean; token: boolean; inherited:
   运营: { account: true, token: true, inherited: true },
 };
 
+/** 本次预览中新建、还没导入用例的项目：用例、执行记录都为空，用来演示新建后的引导 */
 const fresh = new Set<string>();
+/** 新建后还没执行过回归的项目 */
 const neverRun = new Set<string>();
 
 const listeners: {
@@ -287,7 +289,10 @@ const mockApi: AitestApi = {
     const own = { per_task_token_limit: 200000 };
     return delay({ effective: { ...group, ...own }, own, inherited: group, parent_id: p.parent_id, parent_name: "特征中心" });
   },
-  importExcel: (p) => (fresh.delete(p), delay({ imported: 349 }, 600)),
+  importExcel: (p) => {
+    fresh.delete(p);
+    return delay({ imported: 349 }, 600);
+  },
   lint: (p) => delay(fresh.has(p) ? { total: 0, rule_hits: {}, blocked_case_ids: [], stats: {} } : (({ issues: _, ...summary }) => summary)(lint), 400),
   listCases: () => delay(cases),
   pageCases: (p, q) => {
