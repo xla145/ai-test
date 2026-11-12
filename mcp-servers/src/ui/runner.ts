@@ -21,6 +21,8 @@ export interface UiRunOptions {
   /** 凭据相关环境变量：AITEST_ROLES / AITEST_LOGIN 等，只传给子进程 */
   env?: Record<string, string>;
   headed?: boolean;
+  /** 并行执行的 worker 数（内嵌模式固定为 1：只有一个可见的浏览器视图） */
+  workers?: number;
   timeoutMs?: number;
   cdpEndpoint?: string;
   viewMarkers?: Record<string, string>;
@@ -100,6 +102,7 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
     // 在 Electron 主进程中调用时，process.execPath 是 Electron 本身，需以 Node 模式运行
     ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
     ...(opts.headed ? { AITEST_HEADED: "1" } : {}),
+    ...(!opts.cdpEndpoint && opts.workers && opts.workers > 1 ? { AITEST_WORKERS: String(Math.min(8, Math.floor(opts.workers))) } : {}),
   };
   const secrets = new Set<string>();
   for (const [key, value] of Object.entries(opts.env ?? {})) {

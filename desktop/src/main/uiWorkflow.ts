@@ -54,7 +54,8 @@ export class UiWorkflow {
         id: st.id ?? `S${i + 1}`, action: st.action, description: describeStep(st),
         ...(st.caseStep ? { caseStep: st.caseStep } : {}), ...(st.role ? { role: st.role } : {}), ...(st.source ? { source: st.source } : {}),
       }));
-      return { path, code, steps, synced: meta.specHash === createHash("sha256").update(code).digest("hex") };
+      return { path, code, steps, synced: meta.specHash === createHash("sha256").update(code).digest("hex"),
+        ...(meta.derivedFrom ? { derivedFrom: meta.derivedFrom } : {}) };
     } catch {
       return { path, code, synced: false };
     }

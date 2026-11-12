@@ -56,6 +56,8 @@ export interface StepsFile {
   title: string;
   baseUrl?: string;
   specHash: string;
+  /** 由同组另一条用例的脚本按参数替换生成时，记录模板用例 ID */
+  derivedFrom?: string;
   steps: UiStep[];
 }
 
@@ -67,6 +69,8 @@ export interface SpecInput {
   /** 用例步骤与预期，写进注释便于反向追溯 */
   caseSteps?: string[];
   expected?: string[];
+  /** 模板用例 ID：本脚本由它的步骤按参数替换生成 */
+  derivedFrom?: string;
 }
 
 const s = (v: unknown) => JSON.stringify(v);
@@ -178,7 +182,9 @@ export function generateSpec(input: SpecInput): string {
     `// 标题：${input.title}`,
     ...(input.caseSteps?.length ? ["// 步骤：", ...input.caseSteps.map((x, i) => `//   ${i + 1}. ${x}`)] : []),
     ...(input.expected?.length ? ["// 预期：", ...input.expected.map((x, i) => `//   ${i + 1}. ${x}`)] : []),
-    "// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。",
+    input.derivedFrom
+      ? `// 由 AIProbe 按参数替换自用例 ${input.derivedFrom} 的脚本生成；回归直接执行本脚本，不调用模型。`
+      : "// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。",
     "// 选择器优先级：data-testid → role / label → 文本 → CSS。",
   ];
   if (singleNamedRole) helpers.add("storageStateFor");
@@ -295,7 +301,8 @@ export function writeUiScript(workspace: string, input: SpecInput): { path: stri
   const spec = specPath(workspace, input.caseId);
   const meta = stepsPath(workspace, input.caseId);
   writeFileSync(spec.abs, code);
-  const file: StepsFile = { version: 1, caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code), steps };
+  const file: StepsFile = { version: 1, caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code),
+    ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}), steps };
   writeFileSync(meta.abs, JSON.stringify(file, null, 2) + "\n");
   return { path: spec.rel, stepsPath: meta.rel };
 }
