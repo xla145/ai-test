@@ -4,7 +4,6 @@ import {
   ClusterOutlined,
   DashboardOutlined,
   BarChartOutlined,
-  BugOutlined,
   ChromeOutlined,
   CloseOutlined,
   DatabaseOutlined,
@@ -254,12 +253,12 @@ export function App() {
     <ProjectsContext.Provider value={projectsCtx}>
     <NavContext.Provider value={navCtx}>
     <Layout className={`app-shell ${viewVisible ? "with-view" : ""}`}>
-      <Sider width={224} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
+      <Sider width={240} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
         style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}>
         <Flex vertical style={{ height: "100%" }}>
           <div className={`brand ${compact ? "compact" : ""}`}>
-            <div className="brand-logo"><BugOutlined /></div>
-            {!compact && "AIProbe"}
+            <img className="brand-logo" src="./icon.svg" alt="" />
+            {!compact && <span className="brand-wordmark">AIProbe<span className="brand-caption">测试工作台</span></span>}
           </div>
           <div className="sider-section">
             <ProjectSwitcher projects={projects} current={current} compact={compact}
@@ -319,7 +318,7 @@ export function App() {
 
       <Layout>
         {current && !showSettings && (
-          <Header style={{ padding: "0 24px", height: 52, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+          <Header className="workspace-header" style={{ padding: "0 32px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
               <Flex align="center" gap={8} style={{ minWidth: 0 }}>
                 {parent && (

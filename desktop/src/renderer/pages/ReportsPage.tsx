@@ -180,11 +180,11 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             { key: "e", label: "环境", children: d.run.base_url ? <Tooltip title={d.run.base_url}>{d.run.env}</Tooltip> : d.run.env },
             { key: "d", label: "耗时", children: `${d.summary.duration.toFixed(1)} 秒` },
           ]} />
-          <Row gutter={12} style={{ margin: "12px 0 16px" }}>
-            <Col span={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "#3f8600" }} /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "#cf1322" : undefined }} /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
+          <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
           </Row>
           {Object.keys(d.summary.failure_types).length > 0 && (
             <div style={{ marginBottom: 12 }}><Space wrap>

@@ -1,5 +1,5 @@
 import {
-  ArrowUpOutlined, BugOutlined, CaretRightOutlined, CheckCircleFilled, CheckOutlined, CloseOutlined, ExclamationCircleFilled, LoadingOutlined,
+  ArrowUpOutlined, BugOutlined, CodeOutlined, CaretRightOutlined, CheckCircleFilled, CheckOutlined, CloseOutlined, ExclamationCircleFilled, LoadingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, SearchOutlined, StepForwardOutlined, WarningFilled,
 } from "@ant-design/icons";
 import { App, Button, Checkbox, Empty, Input, Progress, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from "antd";
@@ -60,15 +60,6 @@ interface PipelineSummary {
   autoValidate: boolean;
 }
 const PHASE_TEXT: Record<Phase, string> = { explore: "AI 正在探索并生成", validate: "正在试跑", derive: "按参数生成同组脚本", batch: "并行试跑" };
-
-function Sparkle({ size = 16 }: { size?: number }) {
-  return (
-    <svg className="uix-sparkle" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <path d="M10 2.5l1.9 5.1a3 3 0 0 0 1.8 1.8l5.1 1.9-5.1 1.9a3 3 0 0 0-1.8 1.8L10 20.1 8.1 15a3 3 0 0 0-1.8-1.8L1.2 11.3l5.1-1.9a3 3 0 0 0 1.8-1.8L10 2.5z" />
-      <path d="M19 1.5l.8 2.1c.1.3.3.5.6.6l2.1.8-2.1.8c-.3.1-.5.3-.6.6L19 8.5l-.8-2.1a1 1 0 0 0-.6-.6L15.5 5l2.1-.8c.3-.1.5-.3.6-.6L19 1.5z" opacity=".7" />
-    </svg>
-  );
-}
 
 export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdated, onInbox }: {
   project: Project; env: string; pendingProposals: number;
@@ -183,7 +174,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     if (!production) return void action(false);
     modal.confirm({
       title: `在生产环境「${env}」上${what}？`,
-      icon: <WarningFilled style={{ color: "#ff4d4f" }} />,
+      icon: <WarningFilled style={{ color: "var(--console-error)" }} />,
       content: <>
         <Typography.Paragraph>会向 <Typography.Text code>{baseUrl}</Typography.Text> 发起真实操作，可能创建、修改或删除线上数据。</Typography.Paragraph>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>确认用例只做只读操作，或已获得授权后再继续。</Typography.Paragraph>
@@ -423,7 +414,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     if (stage === "none") {
       const brief = currentBrief ?? { id: c.id, title: c.title, priority: c.priority, status: c.status, lint_status: c.lint_status, execution_mode: c.execution_mode, variant: "" };
       return <Tooltip title={reusable ? `同组「${reusable.variant || reusable.title}」已有脚本，按参数替换直接生成，不调用模型` : ""}>
-        <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<Sparkle />} loading={activeKey === "pipeline"} disabled={locked}
+        <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined />} loading={activeKey === "pipeline"} disabled={locked}
           onClick={() => guard((ok) => pipeline([brief], ok), "生成脚本")}>{reusable ? "按参数生成" : autoValidate ? "AI 生成并试跑" : "AI 生成脚本"}</Button>
       </Tooltip>;
     }
@@ -464,13 +455,13 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
             </div>
             <Typography.Text type="secondary" ellipsis style={{ display: "block" }}>{progress.title}</Typography.Text>
             <Progress percent={Math.round(((progress.done + (progress.phase === "explore" ? 0.15 : 0.6)) / progress.total) * 100)} showInfo={false} size="small"
-              strokeColor={{ from: "#3b6ef5", to: "#7a5af8" }} style={{ margin: "6px 0 0" }} />
+              strokeColor="var(--console-accent)" style={{ margin: "8px 0 0" }} />
           </div>
           <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button>
         </div>
       ) : (
         <div className="uix-hero-main">
-          <div className="uix-hero-icon"><Sparkle size={22} /></div>
+          <div className="uix-hero-icon"><CodeOutlined style={{ fontSize: 22 }} /></div>
           <div className="uix-hero-text">
             <div className="uix-hero-title">{noneCount ? `${noneCount} 条用例还没有脚本` : counts ? "所有用例都已生成脚本" : "AI 生成 UI 脚本"}</div>
             <Typography.Text type="secondary">
@@ -494,7 +485,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           </div>
           {stoppable
             ? <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button>
-            : <Button type="primary" size="large" className={production ? "" : "uix-ai-btn"} danger={production} icon={<Sparkle size={18} />}
+            : <Button type="primary" size="large" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 18 }} />}
                 disabled={locked || !pendingGeneration.length} onClick={() => guard((ok) => pipeline(pendingGeneration, ok), "批量生成脚本")}>一键生成全部</Button>}
         </div>
       )}
@@ -606,7 +597,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 <Button size="small" type="link" disabled={locked} onClick={() => setSelected({})} style={{ padding: 0 }}>清除</Button>
               </div>
               <Space size={6} wrap>
-                {canGenerate.length > 0 && <Button size="small" type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<Sparkle size={13} />} disabled={locked}
+                {canGenerate.length > 0 && <Button size="small" type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 13 }} />} disabled={locked}
                   onClick={() => guard((ok) => { const list = canGenerate; setSelected({}); return pipeline(list, ok); }, "批量生成脚本")}>生成 {canGenerate.length}</Button>}
                 {canConfirm.length > 0 && <Button size="small" icon={<CheckOutlined />} disabled={locked} loading={activeKey === "confirm"}
                   onClick={() => { const ids = canConfirm.map((c) => c.id); setSelected({}); void confirmScripts(ids); }}>确认 {canConfirm.length}</Button>}
@@ -625,7 +616,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       <section className="uix-panel uix-detail">
         {!current ? (
           <div className="uix-detail-empty">
-            <div className="uix-empty-mark"><Sparkle size={30} /></div>
+            <div className="uix-empty-mark"><CodeOutlined style={{ fontSize: 30 }} /></div>
             <div className="uix-empty-title">从一条用例开始</div>
             <Typography.Text type="secondary">在左侧选一条用例查看步骤并生成脚本，<br />或直接「一键生成全部」，AI 会逐条完成。</Typography.Text>
             <ol className="uix-flow-hint">{FLOW.map((f, i) => <li key={f}><span>{i + 1}</span>{f}</li>)}</ol>
@@ -647,7 +638,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 <Tooltip title="重新在内嵌浏览器中试跑一次"><Button type="text" icon={<RedoOutlined />} aria-label="重新试跑" disabled={locked} onClick={() => guard(validate, "试跑")} /></Tooltip>
               )}
               {script && stage !== "confirmed" && currentBrief && !blocked(current) && (
-                <Tooltip title="让 AI 重新探索页面并生成脚本（覆盖当前脚本，会调用模型）"><Button type="text" icon={<Sparkle />} aria-label="AI 重新生成" disabled={locked}
+                <Tooltip title="让 AI 重新探索页面并生成脚本（覆盖当前脚本，会调用模型）"><Button type="text" icon={<CodeOutlined />} aria-label="AI 重新生成" disabled={locked}
                   onClick={() => modal.confirm({
                     title: "让 AI 重新生成这条脚本？", content: "AI 会重新探索页面并覆盖当前脚本，需要调用模型。", okText: "重新生成", cancelText: "取消",
                     onOk: () => { guard((ok) => pipeline([currentBrief], ok, { forceAi: true }), "生成脚本"); },
@@ -687,7 +678,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
             )}
             {conclusion && (
               <div className={`uix-note ${conclusionFailed ? "warn" : ""}`}>
-                <div className="uix-note-mark">{conclusionFailed ? <ExclamationCircleFilled /> : <Sparkle size={14} />}</div>
+                <div className="uix-note-mark">{conclusionFailed ? <ExclamationCircleFilled /> : <CodeOutlined style={{ fontSize: 14 }} />}</div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }} ellipsis={{ rows: 5, expandable: true, symbol: "展开" }}>{conclusion}</Typography.Paragraph>
                   {pendingProposals > 0 && !conclusionFailed && (

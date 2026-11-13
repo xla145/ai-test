@@ -34,6 +34,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const unpacked = (p: string) => p.replace(/app\.asar([\\/])/, "app.asar.unpacked$1");
 const repoRoot = resolve(here, "../../..");
+const appIcon = app.isPackaged
+  ? join(process.resourcesPath, "icon.png")
+  : join(repoRoot, "desktop/build-resources/icon.png");
 const CDP_PORT = Number(process.env.AITEST_CDP_PORT || 9333);
 
 // 固定数据目录：包名 @ai-test/desktop 不能直接作为目录名，打包后会落到 ~/.config 根目录
@@ -244,6 +247,7 @@ function createWindow(): void {
     width: 1440,
     height: 900,
     title: "AIProbe",
+    icon: appIcon,
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, sandbox: true },
   });
   const dev = process.env.AITEST_DEV_SERVER;
@@ -738,6 +742,7 @@ async function setApprovalContext(orch: Orchestrator, projectId: string): Promis
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === "darwin") app.dock?.setIcon(appIcon);
   secretStore = new SecretStore(join(paths.data(), "secrets.json"), safeStorage);
   broker = await startSecretBroker(secretStore, { openView: openRoleView, parentOf: (id) => projectParents.get(id) });
   const orch = new Orchestrator({

@@ -1,0 +1,60 @@
+import { theme, type ThemeConfig } from "antd";
+
+/** 测试控制台：中性工作区，颜色只表达操作与测试状态。 */
+export function consoleTheme(dark: boolean): ThemeConfig {
+  return {
+    algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+    token: {
+      colorPrimary: dark ? "#769bff" : "#2856c5",
+      colorInfo: dark ? "#769bff" : "#2856c5",
+      colorSuccess: dark ? "#61c79a" : "#23805b",
+      colorWarning: dark ? "#dcad58" : "#a56817",
+      colorError: dark ? "#ef8585" : "#c33d48",
+      colorBgLayout: dark ? "#141517" : "#f5f6f8",
+      colorBgContainer: dark ? "#1c1d20" : "#ffffff",
+      colorBgElevated: dark ? "#242529" : "#ffffff",
+      colorText: dark ? "#eceef2" : "#20242c",
+      colorTextSecondary: dark ? "#a9adb7" : "#5b626e",
+      colorTextTertiary: dark ? "#9196a1" : "#6d7582",
+      colorBorder: dark ? "#3b3e45" : "#d9dde4",
+      colorBorderSecondary: dark ? "#303238" : "#e6e8ed",
+      borderRadius: 8,
+      borderRadiusLG: 12,
+      controlHeight: 36,
+      controlHeightSM: 28,
+      fontSize: 14,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+      fontWeightStrong: 600,
+      boxShadow: dark ? "0 8px 24px rgb(0 0 0 / 24%)" : "0 8px 24px rgb(22 28 40 / 8%)",
+      boxShadowSecondary: dark ? "0 4px 16px rgb(0 0 0 / 20%)" : "0 4px 16px rgb(22 28 40 / 6%)",
+    },
+    components: {
+      Layout: { siderBg: dark ? "#18191c" : "#fcfcfd", headerBg: dark ? "#18191c" : "#fcfcfd" },
+      Menu: {
+        itemBg: "transparent", subMenuItemBg: "transparent",
+        itemColor: dark ? "#a9adb7" : "#5b626e",
+        itemSelectedBg: dark ? "#252e41" : "#eaf0fc",
+        itemSelectedColor: dark ? "#a9c1ff" : "#244eae",
+        itemHoverBg: dark ? "#25262a" : "#eef0f3",
+        itemHeight: 36, itemMarginBlock: 4, itemMarginInline: 12, itemBorderRadius: 6,
+        groupTitleColor: dark ? "#9196a1" : "#6d7582",
+        iconSize: 16,
+      },
+      Card: { headerFontSize: 14, headerFontSizeSM: 14, headerHeight: 52, headerHeightSM: 48, bodyPadding: 24, bodyPaddingSM: 20 },
+      Button: { fontWeight: 500, primaryShadow: "none", defaultShadow: "none", dangerShadow: "none" },
+      Table: {
+        headerBg: dark ? "#222327" : "#f7f8fa",
+        headerColor: dark ? "#a9adb7" : "#5b626e",
+        rowHoverBg: dark ? "#25272d" : "#f7f9fc",
+        rowSelectedBg: dark ? "#263249" : "#edf2fd",
+        rowSelectedHoverBg: dark ? "#2c3b57" : "#e5edfc",
+        cellPaddingBlockSM: 12, cellPaddingInlineSM: 16,
+      },
+      Tabs: { horizontalItemGutter: 28, titleFontSize: 14 },
+      Form: { itemMarginBottom: 20, labelColor: dark ? "#a9adb7" : "#5b626e" },
+      Statistic: { contentFontSize: 30, titleFontSize: 13 },
+      Tag: { defaultBg: dark ? "#2a2c31" : "#f0f2f5", defaultColor: dark ? "#a9adb7" : "#5b626e" },
+      Segmented: { trackBg: dark ? "#25262a" : "#eceef2", itemSelectedBg: dark ? "#3b3e45" : "#ffffff" },
+    },
+  };
+}

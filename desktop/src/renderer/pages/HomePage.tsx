@@ -81,8 +81,9 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
 
   return (
     <>
-      <Flex justify="space-between" align="flex-start" gap="8px 16px" wrap style={{ marginBottom: 20 }}>
+      <Flex className="home-header" justify="space-between" align="flex-start" gap="16px 24px" wrap>
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+          <div className="console-section-label">项目概览</div>
           <Typography.Title level={4} className="page-title" style={{ marginTop: 0 }}>{project.name}</Typography.Title>
           <Space size={6} wrap>
             {project.workspace_path && (
@@ -102,7 +103,7 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
       </Flex>
 
       {/* 工作流：准备 → 审核 → 执行 → 分析，每一步给出现状与下一步入口 */}
-      <div className="flow-grid" style={{ marginBottom: 16 }}>
+      <div className="flow-grid" style={{ marginBottom: 24 }}>
         <FlowStep index={1} title="准备用例" loading={!todos}
           value={todos ? <>{todos.cases}<small> 条用例</small></> : null}
           hint="导入团队已有的 Excel 用例，或从 OpenAPI / 需求文档生成"
@@ -127,8 +128,8 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
           actions={<Button size="small" icon={<FileSearchOutlined />} onClick={() => go("reports")}>测试报告</Button>} />
       </div>
 
-      <div className="split">
-        <Card size="small" title="待处理" style={{ flex: "1 1 320px" }}>
+      <div className="split home-panels">
+        <Card size="small" title="待处理" style={{ flex: "1.4 1 360px" }}>
           {!todos ? <Skeleton active paragraph={{ rows: 3 }} title={false} /> : pending.length ? (
             <div className="todo-list">
               {pending.map((t) => (
@@ -149,7 +150,7 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
         <Card size="small" title="执行环境" style={{ flex: "1 1 260px" }}
           extra={<Typography.Link onClick={() => go("settings")}>管理</Typography.Link>}>
           {envs.length ? envs.map(([name, env]) => (
-            <Flex key={name} gap={8} align="center" style={{ padding: "4px 0", minWidth: 0 }}>
+            <Flex key={name} className="environment-row" gap={8} align="center">
               <Tag color={env.production ? "red" : "blue"} bordered={false} style={{ marginInlineEnd: 0 }}>{name}</Tag>
               {env.production && <Typography.Text type="danger" style={{ fontSize: 12, whiteSpace: "nowrap" }}>生产</Typography.Text>}
               <Typography.Text type="secondary" className="mono" ellipsis style={{ minWidth: 0 }}>{env.base_url}</Typography.Text>
@@ -163,7 +164,7 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
         </Card>
       </div>
 
-      <Card size="small" title="最近执行" style={{ marginTop: 16 }}
+      <Card size="small" title="最近执行" style={{ marginTop: 24 }}
         extra={recent.length > 0 && <Typography.Link onClick={() => go("reports")}>全部报告</Typography.Link>}>
         <Table<RunRow> size="small" rowKey="id" loading={runs.loading} dataSource={recent.slice(0, 5)} pagination={false}
           scroll={{ x: 520 }}
@@ -173,13 +174,14 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
             { title: "类型", dataIndex: "framework", width: 70, render: (f: string) => <Tag bordered={false}>{FRAMEWORK[f] ?? f}</Tag> },
             { title: "环境", dataIndex: "env", width: 80 },
             { title: "结果", render: (_: unknown, r) => (
-              <Flex align="center" gap={8} style={{ maxWidth: 260 }}>
+              <Flex align="center" gap={12} style={{ maxWidth: 320 }}>
                 <Progress percent={Math.round(r.pass_rate * 100)} size="small" showInfo={false}
                   status={r.failed ? "exception" : "success"} style={{ flex: 1, margin: 0 }} />
+                <span className="run-rate">{Math.round(r.pass_rate * 100)}%</span>
                 <span style={{ whiteSpace: "nowrap" }}>{r.passed}/{r.total}</span>
               </Flex>
             ) },
-            { title: "时间", dataIndex: "started_at", width: 170, render: (t: string) => new Date(t).toLocaleString() },
+            { title: "时间", dataIndex: "started_at", width: 200, render: (t: string) => <span style={{ whiteSpace: "nowrap" }}>{new Date(t).toLocaleString()}</span> },
           ]} />
       </Card>
     </>
@@ -201,7 +203,7 @@ function FlowStep({ index, title, value, hint, actions, done, loading }: {
       <Flex align="center" gap={8} style={{ marginBottom: 8 }}>
         <span className="flow-index" style={done
           ? { background: token.colorSuccessBg, color: token.colorSuccess }
-          : { background: token.colorPrimaryBg, color: token.colorPrimary }}>
+          : { background: token.colorFillQuaternary, color: token.colorTextSecondary }}>
           {done ? <CheckCircleFilled /> : index}
         </span>
         <Typography.Text strong>{title}</Typography.Text>

@@ -57,7 +57,7 @@ export function SettingsPage() {
 
   const props = { view: view.data, presets: presets.data, save, busy };
   return (
-    <div ref={ref}>
+    <div ref={ref} className="settings-page">
       <PageHeader title="全局设置" description="对所有项目生效，不随项目保存。API key 存入系统钥匙串，只注入对应进程。" />
       <Tabs
         tabPosition={narrow ? "top" : "left"}
@@ -154,7 +154,7 @@ function Models({ view, presets, save, busy }: SectionProps) {
               return (
                 <Tooltip title={c.detail}>
                   <Space size={4} style={{ cursor: "pointer" }} onClick={() => test(m.id)}>
-                    {c.ok ? <CheckCircleFilled style={{ color: "#52c41a" }} /> : <CloseCircleFilled style={{ color: "#ff4d4f" }} />}
+                    {c.ok ? <CheckCircleFilled style={{ color: "var(--console-success)" }} /> : <CloseCircleFilled style={{ color: "var(--console-error)" }} />}
                     <Typography.Text ellipsis style={{ maxWidth: 150 }}>{c.ok ? `可用 · ${c.latencyMs} ms` : c.detail}</Typography.Text>
                   </Space>
                 </Tooltip>

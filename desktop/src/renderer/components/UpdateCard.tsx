@@ -32,8 +32,8 @@ export function UpdateCard({ settings, onSave }: { settings: GlobalSettings; onS
   const { busy, run } = useAction();
   if (!state) return <Card size="small" title="软件更新" loading />;
   const icon = state.status === "downloaded" || state.status === "not-available"
-    ? <CheckCircleFilled style={{ color: "#52c41a" }} />
-    : state.status === "error" ? <WarningFilled style={{ color: "#faad14" }} />
+    ? <CheckCircleFilled style={{ color: "var(--console-success)" }} />
+    : state.status === "error" ? <WarningFilled style={{ color: "var(--console-warning)" }} />
       : state.status === "checking" || state.status === "downloading" ? <SyncOutlined spin /> : null;
 
   return (

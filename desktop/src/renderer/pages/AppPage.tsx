@@ -77,8 +77,8 @@ export function AppPage({ project }: { project: Project }) {
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
             <Card size="small"><Statistic title={`${PLATFORM_LABEL[result.platform]} 用例`} value={result.run.total} /></Card>
-            <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "#3f8600" }} /></Card>
-            <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "#cf1322" : undefined }} /></Card>
+            <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
+            <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "var(--console-error)" : undefined }} /></Card>
             <Card size="small"><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>
           {failed === 0 && <Alert style={{ marginBottom: 16 }} type="success" showIcon message="全部通过" />}

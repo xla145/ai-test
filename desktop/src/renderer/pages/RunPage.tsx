@@ -83,7 +83,7 @@ function ApiRunPage({ project }: { project: Project }) {
                 <Statistic title="通过率" value={`${result.run.passed}/${result.run.total}`} />
               </Space>
             </Card>
-            <Card><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "#cf1322" : undefined }} /></Card>
+            <Card><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "var(--console-error)" : undefined }} /></Card>
             <Card><Statistic title="跳过" value={result.run.skipped} /></Card>
             <Card><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>

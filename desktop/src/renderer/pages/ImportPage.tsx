@@ -140,7 +140,7 @@ export function ImportPage({ project }: { project: Project }) {
         <>
           <div className="stat-grid">
             <Card><Statistic title="用例总数" value={report.total} /></Card>
-            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "#cf1322" : undefined }} /></Card>
+            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
             <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
             <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
           </div>

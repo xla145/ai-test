@@ -69,6 +69,10 @@
     ],
     "extraResources": [
       {
+        "from": "build-resources/icon.png",
+        "to": "icon.png"
+      },
+      {
         "from": "../engine/aitest",
         "to": "engine/aitest",
         "filter": [
@@ -86,6 +90,7 @@
       }
     ],
     "linux": {
+      "icon": "build-resources/icon.png",
       "target": [
         "AppImage"
       ],
@@ -93,6 +98,7 @@
       "executableName": "aiprobe"
     },
     "win": {
+      "icon": "build-resources/icon.ico",
       "target": [
         "nsis"
       ]
@@ -102,6 +108,7 @@
       "allowToChangeInstallationDirectory": true
     },
     "mac": {
+      "icon": "build-resources/icon.icns",
       "target": [
         "dmg",
         "zip"
