@@ -24,4 +24,33 @@ API key 保存在系统钥匙串，通过环境变量传给浏览器 MCP 服务�
 
 关闭视觉模型用途后，新探索会话不再暴露视觉工具，普通浏览器操作和脚本回归继续可用。
 
+## Qwen3-VL 与结构化定位
+
+使用 Qwen3-VL 时，模型名填写服务商实际提供的名称（例如 `qwen3-vl-plus` 或 `qwen3-vl-flash`），视觉模型族选择 `qwen3-vl`，并在用途分配中选为视觉模型。标准 Qwen3-VL 名称支持自动识别；自定义部署别名建议显式指定。保存后新建探索任务使用新配置。
+
+`ai_locate` 支持结构化 `target`，服务端自动生成单目标描述：
+
+```json
+{
+  "target": {
+    "page": "模型管理",
+    "scope": [
+      { "kind": "region", "name": "平台模型" },
+      { "kind": "row", "name": "模型记录", "key": "实际模型编号" }
+    ],
+    "control": "button",
+    "text": "编辑"
+  },
+  "intent": "click"
+}
+```
+
+`page` 为定位描述提供页面上下文；`scope` 按页面实际 DOM/可访问语义验证，支持 region、dialog、row、form_item、listbox。范围、业务 key、控件类型和名称/标签必须唯一匹配；缺失或歧义时返回错误。关联标签放 `label`，输入框占位文字放 `placeholder`，不要把旁边文字写成目标自身 `text`。打开下拉框与选择选项分两步执行。
+
+结构化目标的范围会保留到录制与回放；旧 `prompt` 调用仍兼容，但不具备显式范围验证。新的字段取值断言不允许依靠预期值选择另一个字段。用例角色必须精确匹配配置，数据引用为空时也要核对文字前置条件。
+
+已有脚本不会自动重写。此前存在定位歧义或断言串位的用例需要重新探索、生成脚本，再独立回放校验。
+
+技术背景与样本验证见 [执行格式方案](ui-case-execution-contract-plan.md)、[实验报告](ui-case-execution-contract-validation.md)。
+
 上游：[Midscene](https://github.com/web-infra-dev/midscene)、[模型配置](https://midscenejs.com/model-api-setup.html)。
