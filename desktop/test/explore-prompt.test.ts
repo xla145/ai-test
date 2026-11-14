@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explorePrompt } from "../src/main/prompts.js";
+import { explorePrompt, uiContractPrompt } from "../src/main/prompts.js";
 
 describe("explorePrompt", () => {
   it("uses the selected locating strategy while preserving recordable actions and fallback", () => {
@@ -42,4 +42,13 @@ it("passes cached actions and data bindings without repeating the original prose
   expect(prompt).toContain("已转换并缓存的执行用例");
   expect(prompt).toContain('已绑定数据：["MODEL-1"]');
   expect(prompt).not.toContain("用例内容（已给出");
+});
+
+it("separates unknown UI details from business blockers during conversion", () => {
+  const prompt = uiContractPrompt({ steps: ["点击左侧菜单渠道管理"], expected: ["展示渠道列表"] }, ["超级管理员"]);
+  expect(prompt).toContain("targetHint");
+  expect(prompt).toContain("不应仅因这些信息未知就标记待澄清");
+  expect(prompt).toContain("原始预期明确允许 A 或 B 时保留这个验收规则");
+  expect(prompt).toContain("要求角色未配置");
+  expect(prompt).not.toContain("交互动作必须有 target；");
 });

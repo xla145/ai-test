@@ -73,7 +73,7 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
     "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
     "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始），再逐步操作并把该步的预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
     contract
-      ? "   用例已完成转换，按计划的 index/actions/expected 执行，不重新编排动作。运行时发现前置条件不成立或目标与页面不符时停止并报告具体步骤，不修改计划或削减预期。"
+      ? "   用例已完成转换，按 index/actions/expected 执行。targetHint 是待页面确认的业务定位描述：先观察页面，再解析实际控件、区域和唯一性，生成 target 或使用快照 ref。这属于定位，不是重新转换用例；不要因未提前提供页面标题、DOM 控件类型或抽屉结构而停止。无法确定业务对象或页面确实不匹配时停止并报告。"
       : "   执行前检查每个步骤是否能触发对应预期。按页面、区域、业务对象、控件、单个动作、输入/目标状态、结果证据整理；步骤与预期错位或运行时结果缺少触发和观察方式时停止，列出待澄清项，不自行重排或减少覆盖。下拉选择拆成打开下拉框、选择关联选项两次操作；开关使用 check 设置明确状态。",
     "   少走往返：navigate / click / select / press 的返回值已带操作后的页面快照，不要每次操作后再调 snapshot；连续按键用 press 一次传数组；互不依赖的断言在同一轮里一起发出。",
     locateStrategy === "midscene-first"
@@ -144,10 +144,12 @@ export function uiContractPrompt(brief: ExploreCaseBrief, roles: string[]): stri
     "任务：仅把 UI 用例转换成可复用的结构化执行计划。不要执行测试、打开浏览器、读写文件、调用任何工具或查询项目。只返回 JSON，不加解释。",
     "原始用例：" + JSON.stringify(brief),
     "已配置角色：" + JSON.stringify(roles),
-    '格式：{"version":1,"status":"ready|needs_clarification","issues":[],"preconditions":["原始前置条件"],"steps":[{"index":1,"source":"原始步骤","actions":[{"action":"navigate|click|fill|check|select|press|observe|capture|clock|database","instruction":"单个动作的具体说明","role":"实际配置角色或default","value":"输入值，check时必须为布尔值","target":{"page":"页面名","scope":[{"kind":"region|dialog|row|form_item|listbox","name":"实际范围名","key":"row必填的业务标识"}],"control":"textbox|checkbox|combobox|button|option","name":"控件名，可改用label/placeholder/text"}}],"expected":["对应的原始预期"]}]}',
+    '格式：{"version":1,"status":"ready|needs_clarification","issues":[],"preconditions":["原始前置条件"],"steps":[{"index":1,"source":"原始步骤","actions":[{"action":"navigate|click|fill|check|select|press|observe|capture|clock|database","instruction":"单个动作的具体说明","role":"实际配置角色或default","value":"输入值，check时必须为布尔值","targetHint":"页面尚未观察时的自然语言定位描述，与target二选一","target":{"page":"页面名","scope":[{"kind":"region|dialog|row|form_item|listbox","name":"实际范围名","key":"row必填的业务标识"}],"control":"textbox|checkbox|combobox|button|option","name":"控件名，可改用label/placeholder/text"}}],"expected":["对应的原始预期"]}]}',
     "preconditions、source 和 expected 必须原样保留；index 按原步骤从1连续编号，所有 expected 按原顺序覆盖且不重复。不能减少断言、改步骤顺序或换数据来使其可执行。",
-    "交互动作必须有 target；每次只描述一个动作，下拉展开与选项点击分开。非交互动作不需要 target。没有依据的字段省略，不用示例值填充。",
-    "未知页面区域、角色、输入值、业务对象或运行时结果的触发/观察方法不能编造，标记 needs_clarification 并列出具体 issues；仍原样保留全部原始步骤和预期，无法转换的 actions 可为空。",
+    "你没有浏览器观察结果。页面标题、DOM 类型、区域名称、弹窗/抽屉形式、菜单层级以及保存后是否关闭是 UI 实现细节，不应仅因这些信息未知就标记待澄清。交互动作优先使用 targetHint 描述原文明确的目标及上下文；只有确切已知完整定位结构才提供 target，不能虚构完整 target。每次一个动作，下拉展开与选项点击分开。",
+    "needs_clarification 只用于缺失必要业务条件，例如要求角色未配置、修改对象无法由给定条件唯一确定、必要输入值缺失或业务预期互相矛盾。不能把 data_refs 为空直接等同业务对象不存在；创建页面中的唯一表单项也不需要事先指定列表 row key。待澄清时不输出残缺 target，可保留 targetHint 或将 actions 留空，必须保留全部 source 和 expected。",
+    "原始预期明确允许 A 或 B 时保留这个验收规则，不强迫用户事先选一种 UI 实现。例：最后一条 Key 的删除按钮禁用，或点击后提示至少保留一条，两种实现均能验证不可删除；计划可 observe 当前状态，按实际状态验证对应分支，最终都断言 Key 输入框保留，不强点禁用按钮。",
+    "示例：点击左侧菜单【渠道管理】可直接生成 {action:click,instruction:点击渠道管理菜单,targetHint:后台左侧导航中名称为渠道管理的菜单项}。点击【新增渠道】后检查唯一 Key 行的删除入口，同样只描述页面上的相对关系，不要求虚构业务 key。",
     "角色精确匹配配置。匿名使用 default；不明确是否需要登录时待澄清。前置条件在执行阶段仍须核对，不在转换阶段假设成立。",
   ].join("\n");
 }

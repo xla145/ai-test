@@ -5,7 +5,7 @@ import { sha256, validateExecutionContract, type ExecutionContract } from "@ai-t
 import type { ExploreCaseBrief } from "./prompts.js";
 
 // 升级转换规则时递增，让已缓存的语义计划重新转换。
-const REVISION = 1;
+const REVISION = 2;
 interface Entry {
   revision: number;
   fingerprint: string;

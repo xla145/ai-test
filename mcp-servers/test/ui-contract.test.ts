@@ -29,3 +29,27 @@ describe("execution contract coverage gate", () => {
     expect(validateExecutionContract(value, source, ["admin"]).status).toBe("needs_clarification");
   });
 });
+
+it("accepts UI details deferred to page observation without inventing a row key", () => {
+  const value: any = plan();
+  delete value.steps[0].actions[0].target;
+  value.steps[0].actions[0].targetHint = "当前新增页唯一 Key 输入框对应的启用开关";
+  expect(validateExecutionContract(value, source, ["admin"]).status).toBe("ready");
+  delete value.steps[0].actions[0].value;
+  expect(() => validateExecutionContract(value, source, ["admin"])).toThrow("布尔");
+});
+
+it("keeps real clarification reasons from a model response containing partial targets", () => {
+  const value: any = plan();
+  value.status = "needs_clarification";
+  value.issues = ["前置条件要求超级管理员，当前只配置运营管理员"];
+  value.steps[0].actions[0].target = { scope: [{ kind: "region", name: "左侧菜单" }], name: "渠道管理" };
+  value.steps[0].actions[0].role = "超级管理员";
+  const out = validateExecutionContract(value, source, ["运营管理员"]);
+  expect(out.status).toBe("needs_clarification");
+  expect(out.issues).toEqual(value.issues);
+  expect(out.steps[0].actions[0].target).toBeUndefined();
+  expect(out.steps[0].expected).toEqual(source.expected);
+  value.status = "ready"; value.issues = [];
+  expect(() => validateExecutionContract(value, source, ["超级管理员"])).toThrow();
+});
