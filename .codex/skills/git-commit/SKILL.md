@@ -134,4 +134,3 @@ Closes #TB1234"
 - [ ] 当前分支名是否包含 TB 号？如包含，则 commit message 应关联该 TB 号
 - [ ] 用户是否明确提供 TB 号？如提供，则 commit message 应关联该 TB 号
 - [ ] 是否使用了 wip 类型？（仅限个人分支，MR 前必须清理）
-

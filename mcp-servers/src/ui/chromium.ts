@@ -59,4 +59,3 @@ export function chooseBrowser(opts: ChooseOptions = {}): BrowserChoice {
   const system = systemBrowserCandidates(opts.platform ?? process.platform, env).find((p) => exists(p));
   return system ? { executablePath: system, source: "system" } : { source: "missing" };
 }
-
