@@ -34,3 +34,12 @@ describe("explorePrompt", () => {
     expect(explorePrompt("p1", "test", "tc_a", [], { steps: ["s"], data_refs: ["tag"] })).toContain("env-support.check_data 检查依赖数据");
   });
 });
+
+it("passes cached actions and data bindings without repeating the original prose block", () => {
+  const prompt = explorePrompt("p", "test", "tc", [], { title: "A", steps: ["打开列表"], expected: ["列表可见"], data_refs: ["MODEL-1"] }, "dom-first", {
+    version: 1, status: "ready", issues: [], preconditions: [], steps: [{ index: 1, source: "打开列表", expected: ["列表可见"], actions: [{ action: "navigate", instruction: "打开 /list" }] }],
+  });
+  expect(prompt).toContain("已转换并缓存的执行用例");
+  expect(prompt).toContain('已绑定数据：["MODEL-1"]');
+  expect(prompt).not.toContain("用例内容（已给出");
+});

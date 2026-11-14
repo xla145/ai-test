@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { SecretResolver } from "../secrets.js";
 import { BrowserSession } from "./browser.js";
-import { writeUiScript, type UiStep } from "./codegen.js";
+import { caseHash, writeUiScript, type UiStep } from "./codegen.js";
 import { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecord } from "./envSupport.js";
 import type { VisionAgentFactory } from "./midscene.js";
 import { runUiSuite } from "./runner.js";
@@ -282,7 +282,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           throw new Error("脚本没有任何断言：每个预期结果都要落成 expect_* 断言");
         }
         const c = await ctx.engine<{ id: string; title: string; steps: string[]; expected: string[] }>(["get-case", "--case", case_id]);
-        const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected });
+        const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected, caseHash: caseHash({ title: c.title, steps: c.steps, expected: c.expected }) });
         const script = await ctx.engine(["register-script", "--project", project.id, "--case", case_id, "--path", rel]);
         savedSteps.set(ctx, { caseId: case_id, steps });
         s.resetRecording();

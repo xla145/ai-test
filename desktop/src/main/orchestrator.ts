@@ -17,6 +17,7 @@ import {
   appExplorePrompt,
   caseGenerationPrompt,
   explorePrompt,
+  uiContractPrompt,
   type ExploreCaseBrief,
   healPrompt,
   triagePrompt,
@@ -28,7 +29,8 @@ import type { ThreadStartParams } from "./codex/protocol.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 import type { UiRunOptions, UiScriptState } from "../shared/ipc.js";
 import { UiWorkflow } from "./uiWorkflow.js";
-import { writeUiScript } from "@ai-test/mcp-servers";
+import { UiExecutionContracts } from "./uiExecutionContract.js";
+import { caseHash, sha256, writeUiScript } from "@ai-test/mcp-servers";
 import { deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups.js";
 import type { UiCaseGroup, UiDeriveResult } from "../shared/ipc.js";
 import { UiDebugSession, type DebugBrowser } from "./uiDebug.js";
@@ -384,16 +386,54 @@ export class Orchestrator extends EventEmitter {
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
   async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
     return this.withUiTask(projectId, env, async (signal) => {
-      const brief = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as ExploreCaseBrief;
+      const row = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
+      const brief: ExploreCaseBrief = { title: row.title, steps: row.steps, expected: row.expected, preconditions: row.preconditions, data_refs: row.data_refs };
+      const p = await this.project(projectId);
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy), signal);
-      // 明确告诉用户有没有生成脚本，以及没生成的原因
-      const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
-      if (scriptGenerated) return { ...result, scriptGenerated };
-      const reason = result.status === "interrupted_budget"
-        ? `超出单任务 token 上限，任务被中断。可在「全局设置」中调高上限后重试。`
-        : result.status !== "completed" ? `任务未正常结束（${result.status}）。` : "";
-      return { ...result, scriptGenerated, message: ["未生成脚本。", reason, result.message.trim()].filter(Boolean).join("\n") };
+      const empty = { threadId: "", turnId: "", status: "completed", tokens: 0 };
+      if (!brief.steps?.length || !brief.expected?.length) return { ...empty, scriptGenerated: false,
+        message: "用例缺少步骤或预期，请先补充；未调用 AI。", needsClarification: true };
+      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env]);
+      const workflow = new UiWorkflow(p.workspace_path);
+      const existing = (await this.uiScriptStates(projectId, env))[caseId];
+      const binding = (state: UiScriptState | undefined) => {
+        if (!state || !workflow.reusable(state.path, brief)) return undefined;
+        try { return { path: state.path, hash: state.hash, stepsHash: sha256(JSON.stringify(workflow.stepsFile(state.path))) }; }
+        catch { return undefined; }
+      };
+      const before = binding(existing);
+      const cached = contracts.read();
+      if (cached?.contract.status === "ready" && before && JSON.stringify(cached.script) === JSON.stringify(before)) {
+        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。`, scriptGenerated: true, reused: true };
+      }
+      let contract = cached?.contract;
+      let converted: TurnResult | undefined;
+      if (!contract) {
+        converted = await this.agentTask(projectId, "ui_contract", uiContractPrompt(brief, roles), signal);
+        signal.throwIfAborted();
+        if (converted.status !== "completed") return { ...converted, scriptGenerated: false };
+        try { contract = contracts.parse(converted.message); }
+        catch (e) { return { ...converted, status: "failed", scriptGenerated: false, message: `执行用例转换未通过校验，未启动浏览器：${(e as Error).message}` }; }
+        contracts.save(contract);
+      }
+      if (contract.status !== "ready") return { ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
+        contractReused: Boolean(cached), message: `待澄清，未启动 UI 探索：${contract.issues.join("；")}` };
+      const stillCurrent = async () => {
+        const latest = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
+        const latestProject = await this.project(projectId);
+        const latestRoles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map(r => r.role_name);
+        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId, latest, latestRoles, latestProject.environments[env]).fingerprint;
+      };
+      if (!await stillCurrent()) return { ...(converted ?? empty), scriptGenerated: false, message: "转换期间用例或环境已变化，请重新生成；未启动 UI 探索。" };
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy, contract), signal, converted?.tokens ?? 0);
+      signal.throwIfAborted();
+      // 保存发生在浏览器工具中，只有本次生成、内容仍匹配的脚本才能绑定缓存。
+      const after = binding((await this.uiScriptStates(projectId, env))[caseId]);
+      const unchanged = await stillCurrent();
+      const scriptGenerated = Boolean(unchanged && after && after.stepsHash !== before?.stepsHash);
+      if (scriptGenerated && result.status === "completed") contracts.save(contract, after);
+      return { ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated, contractReused: Boolean(cached),
+        message: scriptGenerated ? result.message : [unchanged ? "未生成当前版本的新脚本。" : "用例或环境配置已变化，未复用本次脚本。", result.message].join("\n") };
     });
   }
 
@@ -611,7 +651,7 @@ export class Orchestrator extends EventEmitter {
       if (!derived.ok) { out.skipped.push({ caseId: c.id, reason: derived.reason }); continue; }
       const { path } = writeUiScript(p.workspace_path, {
         caseId: c.id, title: c.title, steps: derived.steps, baseUrl: file.baseUrl,
-        caseSteps: c.steps, expected: c.expected, derivedFrom: sourceCaseId,
+        caseSteps: c.steps, expected: c.expected, caseHash: caseHash({ title: c.title, steps: c.steps, expected: c.expected }), derivedFrom: sourceCaseId,
       });
       await this.deps.engine(["register-script", "--project", projectId, "--case", c.id, "--path", path]);
       out.derived.push(c.id);
@@ -948,7 +988,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
-  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal): Promise<TurnResult> {
+  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0): Promise<TurnResult> {
     const project = await this.project(projectId);
     const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
       ["check-budget", "--project", projectId],
@@ -957,13 +997,14 @@ export class Orchestrator extends EventEmitter {
       throw new BudgetExceededError(`本月模型预算已用完（${budget.month_used}/${budget.monthly_budget} tokens），日常回归不受影响`);
     }
     const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
-    const tokenLimit = limits.length ? Math.min(...limits) : undefined;
+    const tokenLimit = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    if (tokenLimit !== undefined && tokenLimit <= 0) throw new BudgetExceededError("用例转换已达到单任务 token 上限；转换结果已缓存，下次可直接执行");
     signal?.throwIfAborted();
     const agent = await this.deps.agent();
     const threadId = await agent.startThread({
       cwd: project.workspace_path,
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
     });
     const session = await this.deps.engine<{ id: string }>([
       "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,

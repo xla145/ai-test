@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,9 @@ export interface StepsFile {
   title: string;
   baseUrl?: string;
   specHash: string;
+  /** 用例内容指纹；一致时可直接复用脚本而无需重新调用 AI。 */
+  caseHash?: string;
+  generationId?: string;
   /** 由同组另一条用例的脚本按参数替换生成时，记录模板用例 ID */
   derivedFrom?: string;
   steps: UiStep[];
@@ -69,6 +72,8 @@ export interface SpecInput {
   /** 用例步骤与预期，写进注释便于反向追溯 */
   caseSteps?: string[];
   expected?: string[];
+  /** 用例内容指纹，避免同一用例重复触发 AI 探索。 */
+  caseHash?: string;
   /** 模板用例 ID：本脚本由它的步骤按参数替换生成 */
   derivedFrom?: string;
 }
@@ -296,6 +301,11 @@ export function stepsPath(workspace: string, caseId: string): { abs: string; rel
 
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
+/** 只由会影响 UI 执行的用例内容计算指纹；标题、步骤或预期变化都会使旧脚本失效。 */
+export function caseHash(input: { title?: string; steps?: string[]; expected?: string[] }): string {
+  return sha256(JSON.stringify({ title: input.title ?? "", steps: input.steps ?? [], expected: input.expected ?? [] }));
+}
+
 /** 由步骤生成 spec，同时写出 steps.json（脚本的结构化来源），返回 spec 的相对路径 */
 export function writeUiScript(workspace: string, input: SpecInput): { path: string; stepsPath: string } {
   ensureUiScaffold(workspace);
@@ -304,7 +314,7 @@ export function writeUiScript(workspace: string, input: SpecInput): { path: stri
   const spec = specPath(workspace, input.caseId);
   const meta = stepsPath(workspace, input.caseId);
   writeFileSync(spec.abs, code);
-  const file: StepsFile = { version: 1, caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code),
+  const file: StepsFile = { version: 1, generationId: randomUUID(), caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code), ...(input.caseHash ? { caseHash: input.caseHash } : {}),
     ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}), steps };
   writeFileSync(meta.abs, JSON.stringify(file, null, 2) + "\n");
   return { path: spec.rel, stepsPath: meta.rel };

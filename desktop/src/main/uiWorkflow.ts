@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { describeStep, type StepsFile } from "@ai-test/mcp-servers";
+import { caseHash, describeStep, type StepsFile } from "@ai-test/mcp-servers";
 import type { UiScriptDetail } from "../shared/ipc.js";
 
 interface Validation { hash: string; runId: string; passed: boolean }
@@ -30,6 +30,13 @@ export class UiWorkflow {
   }
   hash(path: string): string {
     return createHash("sha256").update(readFileSync(this.inside(path))).digest("hex");
+  }
+  /** 判断脚本是否对应当前用例内容；旧脚本没有指纹时不自动复用。 */
+  reusable(path: string, input: { title?: string; steps?: string[]; expected?: string[] }): boolean {
+    try {
+      const meta = this.stepsFile(path);
+      return meta.caseHash === caseHash(input);
+    } catch { return false; }
   }
   /** 调试用：读取与 spec 一致的结构化步骤；脚本被改过或没有步骤时报错 */
   stepsFile(path: string): StepsFile {

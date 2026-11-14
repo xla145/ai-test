@@ -83,14 +83,13 @@ describe("UI regression orchestration", () => {
     expect(agent).not.toHaveBeenCalled();
   });
 
-  it("starts an explore task in its own thread", async () => {
+  it("blocks incomplete cases before spending tokens", async () => {
     const { engine, ui, secretEnv } = setup([]);
     const runTurn = vi.fn(async () => ({ threadId: "th", turnId: "u", status: "completed", tokens: 5, message: "ok" }));
     const startThread = vi.fn(async () => "th_explore");
     const orch = new Orchestrator({ engine, ui, secretEnv, agent: async () => ({ startThread, runTurn }) });
-    await orch.exploreUiCase("p1", "test", "tc_a");
-    expect((runTurn.mock.calls[0] as unknown[])[1]).toContain("browser.save_ui_script（case_id=tc_a）");
-    expect(startThread).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/ws" }));
+    expect(await orch.exploreUiCase("p1", "test", "tc_a")).toMatchObject({ scriptGenerated: false, needsClarification: true, tokens: 0 });
+    expect(startThread).not.toHaveBeenCalled();
   });
 });
 
@@ -305,7 +304,9 @@ describe("App testing", () => {
 });
 
 it("cancels a UI run, skips saving incomplete results and releases the task lock", async () => {
-  const { engine, ui, secretEnv, calls } = setup([]);
+  const { engine: baseEngine, ui, secretEnv, calls } = setup([]);
+  const engine = (async (args: string[]) => args[0] === "list-cases"
+    ? cases.map(c => ({ ...c, steps: ["打开列表"], expected: ["列表可见"] })) : baseEngine(args)) as EngineCall;
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
   ui.runUiSuite = vi.fn(async (opts) => {
@@ -328,7 +329,9 @@ it("cancels a UI run, skips saving incomplete results and releases the task lock
 });
 
 it("passes cancellation to the AI task and records consumed tokens before unlocking", async () => {
-  const { engine, ui, secretEnv, calls } = setup([]);
+  const { engine: baseEngine, ui, secretEnv, calls } = setup([]);
+  const engine = (async (args: string[]) => args[0] === "list-cases"
+    ? cases.map(c => ({ ...c, steps: ["打开列表"], expected: ["列表可见"] })) : baseEngine(args)) as EngineCall;
   let started!: () => void;
   const ready = new Promise<void>(resolve => { started = resolve; });
   const runTurn = vi.fn(async (_thread: string, _text: string, opts?: { signal?: AbortSignal }) => {

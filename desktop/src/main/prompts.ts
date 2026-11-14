@@ -1,3 +1,4 @@
+import type { ExecutionContract } from "@ai-test/mcp-servers";
 /**
  * 发给 Codex 的任务提示。用例格式、脚本规范等固化在 workspace 的 AGENTS.md 与技能文件里，
  * 这里只描述本次任务，并且只传必要上下文（上下文裁剪）。
@@ -49,7 +50,7 @@ export interface ExploreCaseBrief {
   data_refs?: string[];
 }
 
-export function explorePrompt(projectId: string, env: string, caseId: string, roles: string[] = [], brief?: ExploreCaseBrief, locateStrategy: "dom-first" | "midscene-first" = "dom-first"): string {
+export function explorePrompt(projectId: string, env: string, caseId: string, roles: string[] = [], brief?: ExploreCaseBrief, locateStrategy: "dom-first" | "midscene-first" = "dom-first", contract?: ExecutionContract): string {
   const list = (items: string[] | undefined) => (items?.length ? items.map((t, i) => `   ${i + 1}. ${t}`).join("\n") : "   （无）");
   const caseBlock = brief?.steps?.length
     ? [
@@ -65,13 +66,15 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
     : "env-support.check_data 检查依赖数据；缺失时只按已声明的准备配方 seed_data，无法准备则阻塞。";
   return [
     `任务：探索模式。为项目 ${projectId} 的 UI 用例 ${caseId} 在内嵌浏览器中生成确定性 Playwright 脚本。执行环境：${env}。`,
-    ...caseBlock,
+    ...(contract ? ["已转换并缓存的执行用例（直接复用，不重新整理原用例；运行时仍检查数据、会话和页面状态）：", JSON.stringify(contract), "已绑定数据：" + JSON.stringify(brief?.data_refs ?? [])] : caseBlock),
     `1. ${dataLine}`,
     `2. browser.open_project（project_id=${projectId}, env=${env}）；需要登录时 browser.new_role_context 只传角色名。`,
     `   已配置的角色：${roles.length ? roles.join("、") : "（无）"}。角色必须精确匹配；缺少用例要求的角色就报告阻塞，不按名称相近替代；不需要登录的页面不用建角色会话。`,
     "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
     "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始），再逐步操作并把该步的预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
-    "   执行前检查每个步骤是否能触发对应预期。按页面、区域、业务对象、控件、单个动作、输入/目标状态、结果证据整理；步骤与预期错位或运行时结果缺少触发和观察方式时停止，列出待澄清项，不自行重排或减少覆盖。下拉选择拆成打开下拉框、选择关联选项两次操作；开关使用 check 设置明确状态。",
+    contract
+      ? "   用例已完成转换，按计划的 index/actions/expected 执行，不重新编排动作。运行时发现前置条件不成立或目标与页面不符时停止并报告具体步骤，不修改计划或削减预期。"
+      : "   执行前检查每个步骤是否能触发对应预期。按页面、区域、业务对象、控件、单个动作、输入/目标状态、结果证据整理；步骤与预期错位或运行时结果缺少触发和观察方式时停止，列出待澄清项，不自行重排或减少覆盖。下拉选择拆成打开下拉框、选择关联选项两次操作；开关使用 check 设置明确状态。",
     "   少走往返：navigate / click / select / press 的返回值已带操作后的页面快照，不要每次操作后再调 snapshot；连续按键用 press 一次传数组；互不依赖的断言在同一轮里一起发出。",
     locateStrategy === "midscene-first"
       ? "   定位策略：优先 Midscene。需要定位新的操作目标时先调用 browser.ai_locate，描述目标及所在区域，再用返回的 ref 调用 click / type / press 等可录制操作；已有定位结果可复用。不要先尝试 DOM 定位。视觉工具未提供或定位失败时才回退 snapshot / browser.find_text。"
@@ -132,5 +135,19 @@ export function healPrompt(projectId: string, env: string, runId: string, failur
     "最后输出一个 JSON 数组：[{\"case_id\": \"...\", \"failure_type\": \"product_bug|script_error|environment\", \"reason\": \"...\", \"suggestion\": \"...\"}]",
     "",
     body,
+  ].join("\n");
+}
+
+/** 首次转换单独成任务；只输出结构化计划，不访问被测页面。 */
+export function uiContractPrompt(brief: ExploreCaseBrief, roles: string[]): string {
+  return [
+    "任务：仅把 UI 用例转换成可复用的结构化执行计划。不要执行测试、打开浏览器、读写文件、调用任何工具或查询项目。只返回 JSON，不加解释。",
+    "原始用例：" + JSON.stringify(brief),
+    "已配置角色：" + JSON.stringify(roles),
+    '格式：{"version":1,"status":"ready|needs_clarification","issues":[],"preconditions":["原始前置条件"],"steps":[{"index":1,"source":"原始步骤","actions":[{"action":"navigate|click|fill|check|select|press|observe|capture|clock|database","instruction":"单个动作的具体说明","role":"实际配置角色或default","value":"输入值，check时必须为布尔值","target":{"page":"页面名","scope":[{"kind":"region|dialog|row|form_item|listbox","name":"实际范围名","key":"row必填的业务标识"}],"control":"textbox|checkbox|combobox|button|option","name":"控件名，可改用label/placeholder/text"}}],"expected":["对应的原始预期"]}]}',
+    "preconditions、source 和 expected 必须原样保留；index 按原步骤从1连续编号，所有 expected 按原顺序覆盖且不重复。不能减少断言、改步骤顺序或换数据来使其可执行。",
+    "交互动作必须有 target；每次只描述一个动作，下拉展开与选项点击分开。非交互动作不需要 target。没有依据的字段省略，不用示例值填充。",
+    "未知页面区域、角色、输入值、业务对象或运行时结果的触发/观察方法不能编造，标记 needs_clarification 并列出具体 issues；仍原样保留全部原始步骤和预期，无法转换的 actions 可为空。",
+    "角色精确匹配配置。匿名使用 default；不明确是否需要登录时待澄清。前置条件在执行阶段仍须核对，不在转换阶段假设成立。",
   ].join("\n");
 }

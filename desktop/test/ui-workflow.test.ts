@@ -56,8 +56,8 @@ describe("UI script confirmation", () => {
 describe("UI workbench orchestration", () => {
   function orchestration() {
     const { dir, path, workflow } = setup();
-    const rows = [{ id: "tc_a", title: "A", execution_mode: "ui", status: "reviewed", data_refs: [] },
-      { id: "tc_b", title: "B", execution_mode: "ui", status: "reviewed", data_refs: [] }];
+    const rows = [{ id: "tc_a", title: "A", execution_mode: "ui", status: "reviewed", data_refs: [], steps: ["打开列表"], expected: ["列表可见"] },
+      { id: "tc_b", title: "B", execution_mode: "ui", status: "reviewed", data_refs: [], steps: ["打开列表"], expected: ["列表可见"] }];
     const engine = vi.fn(async (args: string[]) => {
       switch (args[0]) {
         case "list-projects": return [{ id: "p", workspace_path: dir, environments: { test: { base_url: "http://sut" }, prod: { base_url: "http://prod", production: true } } }];
@@ -93,11 +93,11 @@ describe("UI workbench orchestration", () => {
     const runTurn = vi.fn(async () => ({ status: "interrupted_budget", message: "我先打开登录页。", tokens: 9 }));
     agent.mockResolvedValue({ startThread: async () => "thread", runTurn });
     const missing = await orch.exploreUiCase("p", "test", "tc_b") as { scriptGenerated: boolean; message: string };
-    expect((runTurn.mock.calls[0] as unknown as [string, string])[1]).toContain("已配置的角色：（无）");
+    expect((runTurn.mock.calls[0] as unknown as [string, string])[1]).toContain("仅把 UI 用例转换");
     expect(missing.scriptGenerated).toBe(false);
-    expect(missing.message).toBe("未生成脚本。\n超出单任务 token 上限，任务被中断。可在「全局设置」中调高上限后重试。\n我先打开登录页。");
+    expect(missing).toMatchObject({ status: "interrupted_budget", message: "我先打开登录页。" });
     runTurn.mockResolvedValueOnce({ status: "completed", message: "已生成", tokens: 9 });
-    expect(await orch.exploreUiCase("p", "test", "tc_a")).toMatchObject({ scriptGenerated: true, message: "已生成" });
+    expect(await orch.exploreUiCase("p", "test", "tc_a")).toMatchObject({ scriptGenerated: false, status: "failed" });
   });
   it("rejects foreign or blocked cases and production exploration before calling the model", async () => {
     const { orch, agent } = orchestration();
