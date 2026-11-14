@@ -75,6 +75,10 @@ it("preserves the explicit Midscene model family and isolates its credentials", 
 
 
 it.each([
+  ["qwen3-vl", "qwen3-vl"],
+  ["qwen3-vl-plus", "qwen3-vl"],
+  ["qwen3-vl-flash", "qwen3-vl"],
+  ["Qwen/Qwen3-VL-235B-A22B-Instruct", "qwen3-vl"],
   ["Qwen3-VL-8B", "qwen3-vl"],
   ["Qwen2.5-VL-72B", "qwen2.5-vl"],
   ["Qwen3.5-35B", "qwen3"],

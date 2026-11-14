@@ -277,7 +277,7 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
           rules={[{ required: !!needsModel, message: "请填写模型名" }]}>
           <Input className="mono" placeholder={preset?.model || (preset?.id === "ark" ? "推理接入点 ID" : "模型名")} />
         </Form.Item>
-        {preset?.visionFamily && <Form.Item name="visionFamily" label="Midscene 视觉模型族" extra="留空按模型名推断；方舟接入点或自定义模型名请明确选择实际模型族。">
+        {preset?.visionFamily && <Form.Item name="visionFamily" label="Midscene 视觉模型族" extra="qwen3-vl 系列请选择 qwen3-vl；留空时按模型名推断。自定义别名需明确选择，模型族影响定位坐标解析。">
           <Select allowClear placeholder="按模型名推断" options={["qwen2.5-vl", "qwen3-vl", "qwen3", "doubao-vision", "doubao-seed", "gpt-5", "gpt-6", "gemini", "glm-v", "kimi"].map((value) => ({ value, label: value }))} />
         </Form.Item>}
         <Form.Item name="key" label="API key" extra={hasKey ? "已保存在钥匙串，留空则不修改" : "存入系统钥匙串，不写入配置文件"}>
