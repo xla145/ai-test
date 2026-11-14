@@ -1,3 +1,4 @@
+import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "./apiWorkspace.js";
 /** 渲染进程可调用的 API（preload 通过 contextBridge 暴露为 window.aitest） */
 export interface ApprovalRequest {
   id: string;
@@ -86,6 +87,7 @@ export interface GlobalSettings {
   agentModelId: string;
   /** 不设置则不启用视觉定位（Midscene） */
   visionModelId?: string;
+  uiLocateStrategy?: "dom-first" | "midscene-first";
   general: GeneralSettings;
 }
 
@@ -270,6 +272,16 @@ export interface UiScriptState {
 }
 
 export interface AitestApi {
+  listApiDefinitions(projectId: string): Promise<ApiDefinition[]>;
+  previewApiImport(projectId: string, source: string): Promise<ApiImportPreview>;
+  importApiDefinitions(projectId: string, preview: ApiImportPreview): Promise<{ definitions: ApiDefinition[] }>;
+  saveApiCase(projectId: string, draft: ApiCaseDraft): Promise<unknown>;
+  generateDefinitionCases(projectId: string, ids: string[]): Promise<{ generated: number; skipped: number }>;
+  previewApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions): Promise<ApiCaseGenerationPreview>;
+  saveApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions, keys: string[]): Promise<{ generated: number; skipped: number }>;
+  debugApiRequest(projectId: string, env: string, request: ApiCaseDraft, opts?: { confirmProduction?: boolean }): Promise<ApiDebugResult>;
+  stopApiDebug(projectId: string, env: string): Promise<void>;
+  listApiDebugHistory(projectId: string): Promise<ApiDebugResult[]>;
   listProjects(): Promise<unknown[]>;
   /** opts.kind="group" 创建大项目（不需要 workspace）；opts.parent 为所属大项目 */
   createProject(name: string, workspace: string, environments: Record<string, unknown>,
@@ -295,6 +307,9 @@ export interface AitestApi {
   saveApiTestSet(projectId: string, name: string, caseIds: string[]): Promise<ApiTestSet>;
   tokenUsage(projectId: string): Promise<{ tokens: number }>;
   setEnvSecret(projectId: string, env: string, authToken: string, authHeader?: string): Promise<void>;
+  openApiLogin(projectId: string, env: string, loginUrl: string, authHeader?: string): Promise<void>;
+  /** 仅返回保存时间，token 在主进程提取并加密保存为环境凭据。 */
+  saveApiLogin(projectId: string, env: string, options: { key?: string; prefix?: string; header?: string }): Promise<{ savedAt: string }>;
   /** 留空的字段保留原值；token 为接口测试用的固定鉴权头值 */
   setRoleSecret(projectId: string, role: string, username: string, password: string, token?: string): Promise<void>;
   /** 各角色已保存的凭据种类（不含明文），inherited 表示来自大项目 */

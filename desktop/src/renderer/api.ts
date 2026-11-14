@@ -2,6 +2,7 @@ import type { AitestApi, ProjectType } from "../shared/ipc";
 
 declare global {
   interface Window {
+    readonly desktopHost?: { readonly platform: string };
     aitest: AitestApi;
   }
 }
@@ -49,18 +50,14 @@ export interface TestCase {
   api?: ApiStep | null;
   /** 接口流程：多个请求按顺序执行，每步可用不同角色 */
   api_flow?: ApiStep[];
+  api_cleanup?: ApiStep[];
+  api_inputs?: Record<string, unknown>;
+  api_variable_scope?: "legacy" | "case";
+  api_needs_review?: boolean;
+  api_revision?: number;
 }
 
-export interface ApiStep {
-  name?: string;
-  role?: string;
-  method: string;
-  path: string;
-  expected_status: number[];
-  expected_fields?: Record<string, unknown>;
-  extract?: Record<string, string>;
-  auth?: boolean;
-}
+export type ApiStep = import("../shared/apiWorkspace").ApiRequest;
 
 export interface LintIssue {
   id: string;

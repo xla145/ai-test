@@ -10,8 +10,9 @@ function subscribe<T>(channel: string, cb: (v: T) => void): () => void {
 }
 
 const methods = [
+  "listApiDefinitions", "previewApiImport", "importApiDefinitions", "saveApiCase", "generateDefinitionCases", "previewApiParameterCases", "saveApiParameterCases", "debugApiRequest", "stopApiDebug", "listApiDebugHistory",
   "listProjects", "createProject", "importExcel", "lint", "listCases", "updateCase", "applyFix",
-  "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret",
+  "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret", "openApiLogin", "saveApiLogin",
   "writeReviewedApiSuite", "listApiTestSets", "saveApiTestSet",
   "setProjectType",
   "pickFile", "pickDirectory", "openTestPage",
@@ -38,3 +39,4 @@ api.onViewChange = (cb: (v: unknown) => void) => subscribe("aitest:view", cb);
 api.onUpdate = (cb: (v: unknown) => void) => subscribe("aitest:update", cb);
 
 contextBridge.exposeInMainWorld("aitest", api);
+contextBridge.exposeInMainWorld("desktopHost", { platform: process.platform });

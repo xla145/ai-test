@@ -1,5 +1,6 @@
+import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "../shared/apiWorkspace.js";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -43,7 +44,7 @@ const filterArgs = (filters: Record<string, string | undefined>) =>
  * 编排层（架构文档第 3 节）：界面只和编排层通信；编排层驱动 Codex，凭据、审批和调度都留在这里。
  * 回归执行由编排层直接调度 pytest，不经过 Codex；只有失败用例才回到 agent。
  */
-export type EngineCall = <T = unknown>(args: string[], env?: Record<string, string>) => Promise<T>;
+export type EngineCall = <T = unknown>(args: string[], env?: Record<string, string>, opts?: { signal?: AbortSignal }) => Promise<T>;
 
 export interface AgentEngine {
   startThread(params: ThreadStartParams): Promise<string>;
@@ -62,6 +63,7 @@ export interface DatabaseInfo {
 
 export interface EnvironmentInfo {
   base_url: string;
+  api_crypto?: { protocol?: string; public_key_file?: string; private_key_file?: string; headers?: Record<string, unknown> };
   databases?: Record<string, DatabaseInfo>;
   auth_header?: string;
   production?: boolean;
@@ -162,6 +164,7 @@ export interface OrchestratorDeps {
   app?: AppDeps;
   /** 单次 agent 任务的 token 上限 */
   tokenLimit?: number;
+  uiLocateStrategy?: "dom-first" | "midscene-first";
 }
 
 export interface AppDeps {
@@ -266,6 +269,52 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine<{ tokens: number }>(["token-usage", "--project", projectId]);
   }
 
+  private apiDebugTasks = new Map<string, AbortController>();
+
+  private async apiWorkspace<T>(projectId: string, action: string, payload?: unknown, env?: Record<string, string>, signal?: AbortSignal): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), "aiprobe-api-"));
+    try {
+      const file = join(dir, "request.json");
+      writeFileSync(file, JSON.stringify(payload ?? {}), { mode: 0o600 });
+      return await this.deps.engine<T>(["api-workspace", "--project", projectId, "--action", action, "--file", file], env, ...(signal ? [{ signal }] : []));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  listApiDefinitions(projectId: string) { return this.apiWorkspace<ApiDefinition[]>(projectId, "list"); }
+  previewApiImport(projectId: string, source: string) { return this.apiWorkspace<ApiImportPreview>(projectId, "preview", { source }); }
+  importApiDefinitions(projectId: string, preview: ApiImportPreview) {
+    return this.apiWorkspace<{ definitions: ApiDefinition[] }>(projectId, "import", preview);
+  }
+  saveApiCase(projectId: string, draft: ApiCaseDraft) { return this.apiWorkspace(projectId, "save-case", draft); }
+  generateDefinitionCases(projectId: string, ids: string[]) {
+    return this.apiWorkspace<{ generated: number; skipped: number }>(projectId, "generate", { ids });
+  }
+  previewApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions) {
+    return this.apiWorkspace<ApiCaseGenerationPreview>(projectId, "preview-parameter-cases", { draft, options });
+  }
+  saveApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions, keys: string[]) {
+    return this.apiWorkspace<{ generated: number; skipped: number }>(projectId, "save-parameter-cases", { draft, options, keys });
+  }
+  listApiDebugHistory(projectId: string) { return this.apiWorkspace<ApiDebugResult[]>(projectId, "history"); }
+  async debugApiRequest(projectId: string, env: string, request: ApiCaseDraft, opts: { confirmProduction?: boolean } = {}) {
+    const project = await this.project(projectId);
+    const config = project.environments[env];
+    if (!config) throw new Error("请先配置并选择执行环境");
+    if (config.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
+    const key = `${projectId}:${env}`;
+    if (this.apiDebugTasks.has(key)) throw new Error("当前项目和环境已有接口调试正在执行");
+    const controller = new AbortController();
+    this.apiDebugTasks.set(key, controller);
+    try {
+      return await this.apiWorkspace<ApiDebugResult>(projectId, "debug", { env, request, confirmProduction: opts.confirmProduction },
+        this.deps.secretEnv(projectId, env, ["*"]), controller.signal);
+    } finally { this.apiDebugTasks.delete(key); }
+  }
+
+  stopApiDebug(projectId: string, env: string): void {
+    this.apiDebugTasks.get(`${projectId}:${env}`)?.abort();
+  }
+
   /** 接口测试主线：OpenAPI → 基线用例 → 脚本（确定性，不耗模型）；enrich=true 时让 agent 补充业务场景 */
   async generateApiSuite(projectId: string, openapiFile: string, enrich = false) {
     const generated = await this.deps.engine(["generate-api-cases", "--project", projectId, "--openapi", openapiFile]);
@@ -337,7 +386,7 @@ export class Orchestrator extends EventEmitter {
     return this.withUiTask(projectId, env, async (signal) => {
       const brief = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as ExploreCaseBrief;
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief), signal);
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy), signal);
       // 明确告诉用户有没有生成脚本，以及没生成的原因
       const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
       if (scriptGenerated) return { ...result, scriptGenerated };

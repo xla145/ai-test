@@ -120,6 +120,11 @@ function Models({ view, presets, save, busy }: SectionProps) {
                 onChange={(v) => save({ ...settings, visionModelId: v || undefined }, undefined, v ? "已切换视觉模型" : "已关闭视觉定位")}
                 options={[{ value: "", label: "不启用" }, ...visionCapable.map((m) => ({ value: m.id, label: m.name }))]} />
             </Form.Item>
+            <Form.Item label="UI 探索定位策略" extra="新探索任务生效；视觉定位失败时回退 DOM，操作仍录制为 Playwright 脚本" style={{ marginBottom: 0, width: 320 }}>
+              <Select value={settings.uiLocateStrategy ?? "dom-first"} disabled={busy || !settings.visionModelId}
+                onChange={(v) => save({ ...settings, uiLocateStrategy: v }, undefined, "已切换 UI 定位策略")}
+                options={[{ value: "midscene-first", label: "优先 Midscene 视觉定位" }, { value: "dom-first", label: "优先 DOM 定位" }]} />
+            </Form.Item>
           </Space>
         </Form>
       </Card>

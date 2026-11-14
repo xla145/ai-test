@@ -24,6 +24,7 @@ import {
   type GlobalSettings,
 } from "./settings.js";
 import { readEvidenceImage } from "./evidence.js";
+import { browserClientHeaders, browserToken, requestToken } from "./browserToken.js";
 import { Orchestrator } from "./orchestrator.js";
 import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
@@ -107,6 +108,8 @@ let mainWindow: BrowserWindow | undefined;
 let updater: Updater | undefined;
 /** 被测页面视图：每个「项目 + 角色」一个独立 session partition，Playwright 经 CDP 连接后按 URL 标记找到它 */
 const testViews = new Map<string, WebContentsView>();
+// 只在主进程内存中保存本次网页登录捕获的鉴权头。
+const apiLoginTokens = new Map<string, { header: string; value?: string; clientHeaders: Record<string, string> }>();
 let visibleView: WebContentsView | undefined;
 /** 页面提供的停靠区域（UI 测试工作台）；为空时视图占右半屏，界面收窄到左半屏 */
 let viewDock: ViewDock | null = null;
@@ -173,8 +176,8 @@ function versionOf(bin: string): Promise<RuntimeCheck> {
     });
   });
 }
-const engine = <T,>(args: string[], env: Record<string, string> = {}) =>
-  runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env } });
+const engine = <T,>(args: string[], env: Record<string, string> = {}, opts?: { signal?: AbortSignal }) =>
+  runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env }, signal: opts?.signal });
 
 /** 规则判定为 ask 时弹到界面由用户决定 */
 async function decide(kind: ApprovalRequest["kind"], verdict: Verdict, detail: unknown): Promise<Decision> {
@@ -247,6 +250,7 @@ function createWindow(): void {
     width: 1440,
     height: 900,
     title: "AIProbe",
+    ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 24, y: 18 } } : {}),
     icon: appIcon,
     webPreferences: { preload: join(here, "../preload/index.cjs"), contextIsolation: true, sandbox: true },
   });
@@ -463,6 +467,16 @@ function registerIpc(orch: Orchestrator): void {
     pageAttributions: (p: string, q) => orch.pageAttributions(p, q),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
+    listApiDefinitions: (p: string) => orch.listApiDefinitions(p),
+    previewApiImport: (p: string, source: string) => orch.previewApiImport(p, source),
+    importApiDefinitions: (p: string, preview) => orch.importApiDefinitions(p, preview),
+    saveApiCase: (p: string, draft) => orch.saveApiCase(p, draft),
+    generateDefinitionCases: (p: string, ids: string[]) => orch.generateDefinitionCases(p, ids),
+    previewApiParameterCases: (p: string, draft, options) => orch.previewApiParameterCases(p, draft, options),
+    saveApiParameterCases: (p: string, draft, options, keys: string[]) => orch.saveApiParameterCases(p, draft, options, keys),
+    stopApiDebug: (p: string, env: string) => orch.stopApiDebug(p, env),
+    debugApiRequest: (p: string, env: string, request, opts) => orch.debugApiRequest(p, env, request, opts),
+    listApiDebugHistory: (p: string) => orch.listApiDebugHistory(p),
     generateApiSuite: async (p: string, f: string, enrich: boolean) => {
       await setApprovalContext(orch, p);
       return orch.generateApiSuite(p, f, enrich);
@@ -481,6 +495,54 @@ function registerIpc(orch: Orchestrator): void {
     tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
       secretStore.set(SecretStore.ref(p, env), { authToken, authHeader }),
+    openApiLogin: async (p: string, env: string, loginUrl: string, authHeader = "Authorization") => {
+      if (orch.uiBusy()) throw new Error("请先结束正在执行的 UI 任务或调试");
+      const project = (await orch.listProjects()).find((item) => item.id === p);
+      const cfg = project?.environments[env];
+      if (!cfg) throw new Error("项目或环境不存在");
+      const url = new URL(loginUrl || "/", cfg.base_url);
+      if (!/^https?:$/.test(url.protocol)) throw new Error("登录页必须使用 HTTP 或 HTTPS");
+      await openRoleView(p, "api-login", env);
+      const key = `${p}:${env}:api-login`;
+      const view = testViews.get(key)!;
+      const capture = { header: authHeader.trim() || "Authorization", value: undefined as string | undefined, clientHeaders: {} as Record<string, string> };
+      apiLoginTokens.set(key, capture);
+      const origins = new Set([url.origin, new URL(cfg.base_url).origin]);
+      view.webContents.session.webRequest.onBeforeSendHeaders((details, callback) => {
+        if (details.webContentsId === view.webContents.id && ["xhr", "fetch"].includes(details.resourceType)) {
+          const value = requestToken(details.url, origins, details.requestHeaders, capture.header);
+          if (value) {
+            capture.value = value;
+            capture.clientHeaders = browserClientHeaders(value, details.requestHeaders);
+          }
+        }
+        callback({ requestHeaders: details.requestHeaders });
+      });
+      await view.webContents.loadURL(url.href);
+    },
+    saveApiLogin: async (p: string, env: string, options: { key?: string; prefix?: string; header?: string }) => {
+      if (orch.uiBusy()) throw new Error("请先结束正在执行的 UI 任务或调试");
+      const project = (await orch.listProjects()).find((item) => item.id === p);
+      if (!project?.environments[env]) throw new Error("项目或环境不存在");
+      const view = testViews.get(`${p}:${env}:api-login`);
+      const url = view?.webContents.getURL() ?? "";
+      if (!view || !/^https?:/.test(url)) throw new Error("请先打开登录页并完成登录");
+      const header = options.header?.trim() || "Authorization";
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header)) throw new Error("鉴权请求头名称不合法");
+      const storage = JSON.parse(await view.webContents.executeJavaScript("JSON.stringify([...Object.entries(localStorage), ...Object.entries(sessionStorage)])")) as [string, string][];
+      const cookies = await view.webContents.session.cookies.get({ url });
+      const captured = apiLoginTokens.get(`${p}:${env}:api-login`);
+      const fromRequest = !options.key?.trim() && captured?.header.toLowerCase() === header.toLowerCase() ? captured.value : undefined;
+      const authToken = fromRequest ?? browserToken([...storage, ...cookies.map((c): [string, string] => [c.name, c.value])], options.key?.trim(), options.prefix ?? "Bearer ");
+      const owner = project.inherited_environments?.[env] ?? p;
+      const { envCfg } = await orch.environmentOwner(p, env);
+      const clientHeaders = browserClientHeaders(authToken, fromRequest ? captured?.clientHeaders : undefined);
+      if (Object.keys(clientHeaders).length) {
+        await orch.setEnvironment(owner, env, { ...envCfg, api_crypto: { ...envCfg.api_crypto, headers: { ...envCfg.api_crypto?.headers, ...clientHeaders } } });
+      }
+      secretStore.set(SecretStore.ref(owner, env), { authToken, authHeader: header });
+      return { savedAt: new Date().toISOString() };
+    },
     // 留空的字段保留原值：只补接口 token 时不必重新输入账号密码
     setRoleSecret: async (p: string, role: string, username: string, password: string, token?: string) => {
       await orch.addRole(p, role);
@@ -759,6 +821,10 @@ app.whenReady().then(async () => {
     }) },
     app: { runAppSuite, maestroBin: () => maestroBin().path, pinkyEnabled: () => pinky().enabled },
     // 每次 agent 任务时读取，全局配置修改后立即生效
+    get uiLocateStrategy() {
+      const settings = loadSettings();
+      return settings.visionModelId ? settings.uiLocateStrategy ?? "dom-first" : "dom-first";
+    },
     get tokenLimit() {
       return taskTokenLimit().value;
     },

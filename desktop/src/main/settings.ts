@@ -103,6 +103,7 @@ export function validateGlobal(s: GlobalSettings): string[] {
     if (!v) errors.push("视觉模型不存在");
     else if (!PRESETS.find((p) => p.id === v.preset)?.visionFamily) errors.push(`${v.name}：该服务不提供视觉模型，不能用于视觉定位`);
   }
+  if (s.uiLocateStrategy != null && !["dom-first", "midscene-first"].includes(s.uiLocateStrategy)) errors.push("UI 定位策略无效");
   const g = s.general;
   if (!["system", "light", "dark"].includes(g.theme)) errors.push("主题无效");
   for (const [k, label] of [["maestroPath", "Maestro"], ["pinkyPath", "Pinky"]] as const) {
