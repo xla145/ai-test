@@ -104,6 +104,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           baseUrl: envCfg.base_url,
           testIdAttribute: envCfg.testid_attribute,
           cdpEndpoint: ctx.cdpEndpoint,
+          reuseExistingSession: Boolean(ctx.cdpEndpoint),
           openView: ctx.secrets.openView ? (role) => ctx.secrets.openView!(project_id, role, env) : undefined,
         });
         s.resetRecording();
@@ -291,7 +292,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     },
     {
       name: "run_playwright_script",
-      description: "试跑 UI 脚本（不入库，用于确认刚生成的脚本可通过）",
+      description: "试跑 UI 脚本（不入库）；桌面端沿用当前项目/环境各角色的内嵌登录会话，不切换到新的无头浏览器",
       input: { case_ids: z.array(z.string()).optional() },
       handler: async ({ case_ids }) => {
         const { project, env } = active(ctx);
@@ -299,13 +300,26 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: roles.map((r) => r.role_name) });
         const envCfg = project.environments[env];
         const dbRuntime = await ctx.engine<Record<string, string>>(["db-runtime-env", "--project", project.id, "--env", env], secretEnv);
+        let embedded: { cdpEndpoint: string; viewMarkers: Record<string, string> } | undefined;
+        const selected = case_ids ?? (ctx.cdpEndpoint && savedSteps.get(ctx) ? [savedSteps.get(ctx)!.caseId] : undefined);
+        if (ctx.cdpEndpoint) {
+          if (!selected?.length) throw new Error("内嵌试跑必须指定用例或先保存当前用例脚本");
+          if (!ctx.secrets.openView) throw new Error("内嵌试跑缺少角色视图连接，不能降级成未登录的浏览器");
+          const viewMarkers: Record<string, string> = {};
+          for (const role of new Set(["default", ...roles.map(r => r.role_name)])) {
+            viewMarkers[role] = await ctx.secrets.openView(project.id, role, env);
+          }
+          embedded = { cdpEndpoint: ctx.cdpEndpoint, viewMarkers };
+        }
         const out = await runUiSuite({
           workspace: project.workspace_path,
           baseUrl: envCfg.base_url,
-          caseIds: case_ids,
+          caseIds: selected,
+          ...embedded,
           env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
         });
         return {
+          session_mode: embedded ? "embedded" : "isolated",
           persisted: false,
           attribution_supported: false,
           note: "本次为未入库的试跑，没有 run_id；不要从报告目录猜测 run_id，也不要调用 record_attribution。失败原因写在任务结论中。",
