@@ -119,7 +119,8 @@ def check_test_data(case: TestCase, cfg: LintConfig) -> list[LintIssue]:
     for p in case.preconditions:
         declared.update(_TEST_DATA_RE.findall(p))
     undeclared = sorted(used - declared)
-    case.data_refs = sorted(used | declared)
+    # 显式绑定可能是模型名等非编号标识，规范检查不得将其清空。
+    case.data_refs = sorted(set(case.data_refs) | used | declared)
     if not undeclared:
         return []
     return [_issue(case, "undeclared_test_data", f"步骤引用了未声明的测试数据：{', '.join(undeclared)}",

@@ -3,6 +3,7 @@ from openpyxl import Workbook
 from aitest.importer import export_excel, import_excel, split_numbered
 from aitest.linter import can_generate_script, lint_cases
 from aitest.router import route_all
+from aitest.models import TestCase
 
 HEADERS = ["标题", "所属分组", "维护人", "前置条件", "步骤描述", "预期结果", "用例等级", "用例类型"]
 ROWS = [
@@ -75,6 +76,16 @@ def test_group_not_subdivided(tmp_path):
         c._raw["module_path"] = "特征中心"
     report = lint_cases(cases)
     assert report.rule_hits["group_not_subdivided"] == 4
+
+
+def test_lint_preserves_explicit_non_numeric_data_bindings():
+    case = TestCase(title="模型-停用", preconditions=["存在模型 qwen-plus-chat"],
+                    steps=["停用模型 qwen-plus-chat", "核对 TAG-1001"],
+                    expected=["状态为停用", "标签存在"], data_refs=["qwen-plus-chat", "fixture-models"])
+    lint_cases([case])
+    assert case.data_refs == ["TAG-1001", "fixture-models", "qwen-plus-chat"]
+    lint_cases([case])
+    assert case.data_refs == ["TAG-1001", "fixture-models", "qwen-plus-chat"]
 
 
 def test_route_execution_mode(tmp_path):
