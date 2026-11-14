@@ -48,7 +48,7 @@ Get the installer from [Releases](https://github.com/xla145/ai-test/releases/lat
 | macOS (Apple silicon) | `AIProbe-<version>-mac-arm64.dmg` |
 | Linux | `AIProbe-<version>-linux-x86_64.AppImage` |
 
-- Python 3.10+ must be installed. The engine dependencies and Codex are bundled.
+- Python 3.11+ must be installed. The engine dependencies and Codex are bundled.
 - The installers are not signed with a developer certificate:
   - **macOS**: after the first launch is blocked, open System Settings → Privacy & Security and click "Open Anyway",
     or run `xattr -dr com.apple.quarantine "/Applications/AIProbe.app"`.
@@ -57,7 +57,7 @@ Get the installer from [Releases](https://github.com/xla145/ai-test/releases/lat
 
 ## Development
 
-Requires Python ≥ 3.10 and Node.js ≥ 20.
+Requires Python ≥ 3.11 and Node.js ≥ 20.
 
 ```bash
 # Engine

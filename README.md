@@ -45,7 +45,7 @@ agent 引擎是 **Codex App Server**，被测页面在内嵌的 Chromium 中打�
 | macOS（Apple 芯片） | `AIProbe-<版本>-mac-arm64.dmg` |
 | Linux | `AIProbe-<版本>-linux-x86_64.AppImage` |
 
-- 需要本机安装 Python 3.10+；引擎依赖和 Codex 已随安装包附带。
+- 需要本机安装 Python 3.11+；引擎依赖和 Codex 已随安装包附带。
 - 安装包没有使用开发者证书签名：
   - **macOS**：首次打开被拦截后，到「系统设置 → 隐私与安全性」底部点「仍要打开」；
     也可以执行 `xattr -dr com.apple.quarantine "/Applications/AIProbe.app"`。
@@ -54,7 +54,7 @@ agent 引擎是 **Codex App Server**，被测页面在内嵌的 Chromium 中打�
 
 ## 快速开始（开发）
 
-需要 Python ≥ 3.10、Node.js ≥ 20。
+需要 Python ≥ 3.11、Node.js ≥ 20。
 
 ```bash
 # 引擎
