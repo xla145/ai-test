@@ -242,6 +242,9 @@ def write_pytest_suite(cases: list[TestCase], out_dir: str | Path, suite: str = 
         {"case_id": c.id, "title": c.title, "priority": c.priority, **c.to_dict()["api"]}
         for c in api_cases
     ]
+    for item, case in zip(data, api_cases):
+        item.update({"variable_scope": case.api_variable_scope, "inputs": case.api_inputs,
+                     "cleanup": case.to_dict()["api_cleanup"], "revision": case.api_revision})
     data_file = out / "data" / f"{suite}.json"
     data_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -249,7 +252,9 @@ def write_pytest_suite(cases: list[TestCase], out_dir: str | Path, suite: str = 
     conftest.write_text(_template("conftest.py.tpl"), encoding="utf-8")
     shutil.copyfile(Path(str(resources.files("aitest").joinpath("schema.py"))), out / "_aitest_schema.py")
     shutil.copyfile(Path(str(resources.files("aitest").joinpath("db.py"))), out / "_aitest_db.py")
-    (out / "_aitest_api.py").write_text(_template("_aitest_api.py.tpl"), encoding="utf-8")
+    (out / "_aitest_api.py").write_text(resources.files("aitest").joinpath("api_runtime.py").read_text(encoding="utf-8"), encoding="utf-8")
+
+    (out / "_aitest_crypto.py").write_text(resources.files("aitest").joinpath("api_crypto.py").read_text(encoding="utf-8"), encoding="utf-8")
 
     header = "\n".join(f"#   {c.id}  {c.title}" for c in api_cases)
     test_file = out / f"test_{suite}.py"

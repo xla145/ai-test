@@ -1,0 +1,22 @@
+// 用例 ID：tc_contract_flow
+// 标题：本地夹具-模型与故障切换配置操作流程
+// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。
+// 选择器优先级：data-testid → role / label → 文本 → 限定到行内 → CSS（不用生成的 id / class 和行号）。
+import { expect, test } from "@playwright/test";
+
+test("tc_contract_flow 本地夹具-模型与故障切换配置操作流程", async ({ page }, testInfo) => {
+  await test.step("[S1] 打开 http://127.0.0.1:49860/models", async () => { await page.goto("/models"); });
+  await test.step("[S2] 在 testid「platform-search」 输入 「MODEL-UI-001」", async () => { await page.getByTestId("platform-search").fill("MODEL-UI-001"); });
+  await test.step("[S3] 断言 testid「platform-search」 的值为「MODEL-UI-001」", async () => { await expect(page.getByTestId("platform-search")).toHaveValue("MODEL-UI-001"); });
+  await test.step("[S4] 点击 testid「edit-target」", async () => { await page.getByTestId("edit-target").click(); });
+  await test.step("[S5] 断言 testid「platform-state」 包含「正在编辑：MODEL-UI-001」", async () => { await expect(page.getByTestId("platform-state")).toContainText("正在编辑：MODEL-UI-001", { useInnerText: true }); });
+  await test.step("[S6] 勾选 testid「fallback-check」", async () => { await page.getByTestId("fallback-check").setChecked(true); });
+  await test.step("[S7] 断言 testid「fallback-state」 包含「故障切换：已启用」", async () => { await expect(page.getByTestId("fallback-state")).toContainText("故障切换：已启用", { useInnerText: true }); });
+  await test.step("[S8] 点击 testid「fallback-wrapper」", async () => { await page.getByTestId("fallback-wrapper").scrollIntoViewIfNeeded(); await page.getByTestId("fallback-wrapper").evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" })); await page.getByTestId("fallback-wrapper").click(); });
+  await test.step("[S9] 断言 testid「fallback-state」 包含「备用渠道选项：已展开」", async () => { await expect(page.getByTestId("fallback-state")).toContainText("备用渠道选项：已展开", { useInnerText: true }); });
+  await test.step("[S10] 点击 testid「fallback-option」", async () => { await page.getByTestId("fallback-option").click(); });
+  await test.step("[S11] 断言 testid「fallback-state」 包含「备用渠道：阿里云源」", async () => { await expect(page.getByTestId("fallback-state")).toContainText("备用渠道：阿里云源", { useInnerText: true }); });
+  await test.step("[S12] 断言 div.el-select__selection「阿里云源」 等于「阿里云源」", async () => { await expect(page.locator("div.el-select__selection", { hasText: "阿里云源" })).toHaveText("阿里云源", { useInnerText: true }); });
+  await test.step("[S13] 点击 testid「fallback-save」", async () => { await page.getByTestId("fallback-save").click(); });
+  await test.step("[S14] 断言 testid「fallback-state」 包含「故障切换配置：保存成功」", async () => { await expect(page.getByTestId("fallback-state")).toContainText("故障切换配置：保存成功", { useInnerText: true }); });
+});

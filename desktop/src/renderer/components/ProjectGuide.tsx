@@ -11,12 +11,13 @@ import {
   PlusOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { Button, Card, Flex, Space, Steps, Tooltip, Typography, theme } from "antd";
+import { Button, Space, Tooltip, Typography } from "antd";
 import { useState, type ReactNode } from "react";
 import { api, type Project } from "../api";
-import { useLoad, useNarrow, useProjectChanged } from "../hooks";
+import { useLoad, useProjectChanged } from "../hooks";
 import { visibleProjectTab } from "../projectTypes";
 import { useProjects } from "./ProjectSettings";
+import { WorkflowGuide } from "./WorkflowGuide";
 
 /** 本机记住的界面状态（关闭、收起）；存储不可用时只在本次会话中生效 */
 const store = {
@@ -59,11 +60,9 @@ const STEP_TITLES = ["配置执行环境", "准备用例", "人工审核", "执�
  * - 打开时已经全部完成的项目（老项目）不显示。
  */
 export function ProjectGuide({ project }: { project: Project }) {
-  const { token } = theme.useToken();
   const { goTab, openSettings } = useProjects();
   const [dismissed, setDismissed] = useState(() => store.get(DISMISS_KEY(project.id)));
   const [collapsed, setCollapsed] = useState(() => store.get(COLLAPSE_KEY));
-  const [ref, narrow] = useNarrow<HTMLDivElement>(680);
   const envCount = Object.keys(project.environments).length;
   const { data, reload } = useLoad<Progress | undefined>(async () => {
     if (store.get(DISMISS_KEY(project.id))) return undefined;
@@ -97,20 +96,20 @@ export function ProjectGuide({ project }: { project: Project }) {
 
   const finished = current < 0;
   const actions: ReactNode[] = [
-    <Button key="env" size="small" type="primary" icon={<PlusOutlined />} onClick={() => openStep(0)}>添加执行环境</Button>,
+    <Button key="env" type="primary" icon={<PlusOutlined />} onClick={() => openStep(0)}>添加执行环境</Button>,
     <Space key="cases" size={8} wrap>
-      <Button size="small" type="primary" icon={<FileExcelOutlined />} onClick={() => go("import")}>导入 Excel 用例</Button>
-      <Button size="small" icon={<ApiOutlined />} onClick={() => go("api")}>从 OpenAPI / 需求文档生成</Button>
+      <Button type="primary" icon={<FileExcelOutlined />} onClick={() => go("import")}>导入 Excel 用例</Button>
+      <Button icon={<ApiOutlined />} onClick={() => go("api")}>从 OpenAPI / 需求文档生成</Button>
     </Space>,
-    <Button key="review" size="small" type="primary" icon={<CheckOutlined />} onClick={() => go("cases")}>
+    <Button key="review" type="primary" icon={<CheckOutlined />} onClick={() => go("cases")}>
       {data.drafts ? `去用例库审核（${data.drafts} 条待审）` : "去用例库审核"}
     </Button>,
     <Space key="run" size={8} wrap>
-      <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => go("run")}>接口回归</Button>
+      <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => go("run")}>接口回归</Button>
       {visibleProjectTab("ui", project.project_type) &&
-        <Button size="small" icon={<ChromeOutlined />} onClick={() => go("ui")}>Web UI 测试</Button>}
+        <Button icon={<ChromeOutlined />} onClick={() => go("ui")}>Web UI 测试</Button>}
       {visibleProjectTab("app", project.project_type) &&
-        <Button size="small" icon={<MobileOutlined />} onClick={() => go("app")}>App 测试</Button>}
+        <Button icon={<MobileOutlined />} onClick={() => go("app")}>App 测试</Button>}
     </Space>,
   ];
   const descriptions = [
@@ -122,7 +121,7 @@ export function ProjectGuide({ project }: { project: Project }) {
 
   const title = (
     <Space size={8}>
-      {finished && <CheckCircleFilled style={{ color: token.colorSuccess }} />}
+      {finished && <CheckCircleFilled style={{ color: "var(--console-success)" }} />}
       快速开始
       <Typography.Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>{done.filter(Boolean).length}/4</Typography.Text>
     </Space>
@@ -139,51 +138,26 @@ export function ProjectGuide({ project }: { project: Project }) {
     </Tooltip>
   );
 
-  if (finished) {
-    return (
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Flex align="center" gap={8} wrap>
-          {title}
-          <Typography.Text type="secondary" style={{ flex: 1, minWidth: 200 }}>
-            环境、用例、审核、回归都已走通。之后在对应的测试页面直接执行日常回归。
-          </Typography.Text>
-          <Button size="small" type="primary" onClick={dismiss}>知道了</Button>
-        </Flex>
-      </Card>
-    );
-  }
-
-  if (collapsed) {
-    return (
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Flex align="center" gap={8} wrap>
-          {title}
-          <Typography.Text type="secondary">· 下一步：{STEP_TITLES[current]}</Typography.Text>
-          <div style={{ flex: 1 }} />
-          {actions[current]}
-          {toggleButton}
-          {closeButton}
-        </Flex>
-      </Card>
-    );
-  }
-
   return (
-    <div ref={ref}>
-      <Card size="small" style={{ marginBottom: 16 }} title={title}
-        extra={<Space size={0}>{toggleButton}{closeButton}</Space>}>
-        <Steps size="small" current={current} direction={narrow ? "vertical" : "horizontal"} onChange={openStep}
-          items={STEP_TITLES.map((t, i) => ({
-            // antd 不会为当前步骤触发 onChange：当前步骤的标题单独响应点击
-            title: i === current ? <span style={{ cursor: "pointer" }} onClick={() => openStep(i)}>{t}</span> : t,
-            description: descriptions[i],
-            status: done[i] ? "finish" : i === current ? "process" : "wait",
-          }))} />
-        <Space style={{ marginTop: 12 }} size={8} wrap>
-          <Typography.Text type="secondary">下一步：</Typography.Text>
-          {actions[current]}
-        </Space>
-      </Card>
-    </div>
+    <section className={`project-guide ${collapsed ? "is-collapsed" : ""}`} aria-label="项目快速开始">
+      <div className="project-guide-heading">
+        <div className="project-guide-title">{title}</div>
+        {!finished && <span className="project-guide-current">下一步：{STEP_TITLES[current]}</span>}
+        <div className="project-guide-controls">{!finished && toggleButton}{closeButton}</div>
+      </div>
+      {finished ? (
+        <div className="project-guide-next">
+          <Typography.Text type="secondary">环境、用例、审核、回归都已走通，可在对应测试页面执行日常回归</Typography.Text>
+          <Button onClick={dismiss}>知道了</Button>
+        </div>
+      ) : <>
+        {!collapsed && <WorkflowGuide label="项目配置与测试流程" current={current} onStepClick={openStep}
+          steps={STEP_TITLES.map((title, i) => ({ title, description: descriptions[i], done: done[i] }))} />}
+        <div className="project-guide-next">
+          {!collapsed && <Typography.Text type="secondary">{descriptions[current]}</Typography.Text>}
+          <div className="project-guide-actions">{actions[current]}</div>
+        </div>
+      </>}
+    </section>
   );
 }

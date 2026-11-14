@@ -1,0 +1,220 @@
+{
+  "startedAt": "2026-11-14T03:15:26.134Z",
+  "mode": "sequential-live",
+  "targetMode": "production-structured-target",
+  "model": "qwen3.8-omni-flash",
+  "family": "qwen3-vl",
+  "fixtureVariant": "base fixture plus el-select__selection container for selected-value assertion",
+  "observations": [
+    {
+      "step": "s1",
+      "task": "search",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "region",
+              "name": "平台模型"
+            }
+          ],
+          "control": "textbox",
+          "placeholder": "搜索模型"
+        },
+        "intent": "fill"
+      },
+      "elapsedMs": 5453,
+      "actual": "MODEL-UI-001",
+      "hits": [
+        "platform-search"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s2",
+      "task": "edit",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "region",
+              "name": "平台模型"
+            },
+            {
+              "kind": "row",
+              "name": "模型记录",
+              "key": "MODEL-UI-001"
+            }
+          ],
+          "control": "button",
+          "text": "编辑"
+        },
+        "intent": "click"
+      },
+      "elapsedMs": 2216,
+      "actual": "正在编辑：MODEL-UI-001",
+      "hits": [
+        "edit-target"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s3",
+      "task": "switch",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "region",
+              "name": "故障切换配置"
+            }
+          ],
+          "control": "checkbox",
+          "label": "启用故障切换"
+        },
+        "intent": "check"
+      },
+      "elapsedMs": 1987,
+      "actual": "故障切换：已启用",
+      "hits": [
+        "fallback-check"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s4",
+      "task": "select",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "region",
+              "name": "故障切换配置"
+            }
+          ],
+          "control": "combobox",
+          "label": "备用渠道",
+          "name": "备用渠道"
+        },
+        "intent": "click"
+      },
+      "elapsedMs": 1737,
+      "actual": "备用渠道选项：已展开",
+      "hits": [
+        "fallback-select"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s5",
+      "task": "option",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "listbox",
+              "name": "故障切换的备用渠道"
+            }
+          ],
+          "control": "option",
+          "text": "阿里云源"
+        },
+        "intent": "click"
+      },
+      "elapsedMs": 2100,
+      "actual": "备用渠道：阿里云源",
+      "hits": [
+        "fallback-option"
+      ],
+      "correct": true,
+      "componentSelectedValueVerified": true
+    },
+    {
+      "step": "s6",
+      "task": "save",
+      "request": {
+        "target": {
+          "page": "模型管理",
+          "scope": [
+            {
+              "kind": "region",
+              "name": "故障切换配置"
+            }
+          ],
+          "control": "button",
+          "text": "保存"
+        },
+        "intent": "click"
+      },
+      "elapsedMs": 2818,
+      "actual": "故障切换配置：保存成功",
+      "hits": [
+        "fallback-save"
+      ],
+      "correct": true
+    }
+  ],
+  "replays": [
+    {
+      "repetition": 1,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.502,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/implementation-live/workspace/reports/ui-2026-11-14T03-15-44-063Z/report.json"
+    },
+    {
+      "repetition": 2,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.491,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/implementation-live/workspace/reports/ui-2026-11-14T03-15-45-471Z/report.json"
+    },
+    {
+      "repetition": 3,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.486,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/implementation-live/workspace/reports/ui-2026-11-14T03-15-46-876Z/report.json"
+    }
+  ],
+  "validation": {
+    "ready": true,
+    "issues": []
+  },
+  "script": {
+    "path": "scripts/ui/tc_contract_flow.spec.ts",
+    "stepsPath": "scripts/ui/tc_contract_flow.steps.json"
+  },
+  "finishedAt": "2026-11-14T03:15:48.148Z"
+}

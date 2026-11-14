@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-14",
+  "mode": "adversarial-assertion-control",
+  "original": {
+    "action": "expectText",
+    "target": {
+      "kind": "css",
+      "value": "div.el-select__selection",
+      "hasText": "阿里云源"
+    },
+    "text": "阿里云源",
+    "exact": true,
+    "role": "default",
+    "caseStep": 5,
+    "source": "ai",
+    "id": "S12"
+  },
+  "proposedScopedAssertion": {
+    "action": "expectText",
+    "target": {
+      "kind": "css",
+      "value": ".el-select__selection",
+      "within": {
+        "css": "[role=\"region\"]",
+        "hasText": "故障切换配置"
+      }
+    },
+    "text": "阿里云源",
+    "exact": true,
+    "role": "default",
+    "caseStep": 5,
+    "source": "ai",
+    "id": "S12"
+  },
+  "positiveControl": "both passed",
+  "actualFallbackValue": "错误渠道",
+  "otherFieldValue": "阿里云源",
+  "originalRejectsWrongField": false,
+  "scopedRejectsWrongField": true
+}

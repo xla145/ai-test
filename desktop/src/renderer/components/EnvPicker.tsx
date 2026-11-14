@@ -60,7 +60,7 @@ export function RunButton({ project, env, loading, disabled, block, onRun, child
     if (!production) return onRun(false);
     modal.confirm({
       title: `在生产环境「${env}」上执行？`,
-      icon: <WarningFilled style={{ color: "#ff4d4f" }} />,
+      icon: <WarningFilled style={{ color: "var(--console-error)" }} />,
       content: (
         <>
           <Typography.Paragraph>脚本会向 <Typography.Text code>{cfg?.base_url}</Typography.Text> 发起真实请求，可能创建、修改或删除线上数据。</Typography.Paragraph>

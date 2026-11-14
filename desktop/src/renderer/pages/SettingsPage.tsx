@@ -57,7 +57,7 @@ export function SettingsPage() {
 
   const props = { view: view.data, presets: presets.data, save, busy };
   return (
-    <div ref={ref}>
+    <div ref={ref} className="settings-page">
       <PageHeader title="全局设置" description="对所有项目生效，不随项目保存。API key 存入系统钥匙串，只注入对应进程。" />
       <Tabs
         tabPosition={narrow ? "top" : "left"}
@@ -120,6 +120,11 @@ function Models({ view, presets, save, busy }: SectionProps) {
                 onChange={(v) => save({ ...settings, visionModelId: v || undefined }, undefined, v ? "已切换视觉模型" : "已关闭视觉定位")}
                 options={[{ value: "", label: "不启用" }, ...visionCapable.map((m) => ({ value: m.id, label: m.name }))]} />
             </Form.Item>
+            <Form.Item label="UI 探索定位策略" extra="新探索任务生效；视觉定位失败时回退 DOM，操作仍录制为 Playwright 脚本" style={{ marginBottom: 0, width: 320 }}>
+              <Select value={settings.uiLocateStrategy ?? "dom-first"} disabled={busy || !settings.visionModelId}
+                onChange={(v) => save({ ...settings, uiLocateStrategy: v }, undefined, "已切换 UI 定位策略")}
+                options={[{ value: "midscene-first", label: "优先 Midscene 视觉定位" }, { value: "dom-first", label: "优先 DOM 定位" }]} />
+            </Form.Item>
           </Space>
         </Form>
       </Card>
@@ -154,7 +159,7 @@ function Models({ view, presets, save, busy }: SectionProps) {
               return (
                 <Tooltip title={c.detail}>
                   <Space size={4} style={{ cursor: "pointer" }} onClick={() => test(m.id)}>
-                    {c.ok ? <CheckCircleFilled style={{ color: "#52c41a" }} /> : <CloseCircleFilled style={{ color: "#ff4d4f" }} />}
+                    {c.ok ? <CheckCircleFilled style={{ color: "var(--console-success)" }} /> : <CloseCircleFilled style={{ color: "var(--console-error)" }} />}
                     <Typography.Text ellipsis style={{ maxWidth: 150 }}>{c.ok ? `可用 · ${c.latencyMs} ms` : c.detail}</Typography.Text>
                   </Space>
                 </Tooltip>
@@ -277,7 +282,7 @@ function ModelModal({ open, entry, hasKey, presets, names, busy, onCancel, onSub
           rules={[{ required: !!needsModel, message: "请填写模型名" }]}>
           <Input className="mono" placeholder={preset?.model || (preset?.id === "ark" ? "推理接入点 ID" : "模型名")} />
         </Form.Item>
-        {preset?.visionFamily && <Form.Item name="visionFamily" label="Midscene 视觉模型族" extra="留空按模型名推断；方舟接入点或自定义模型名请明确选择实际模型族。">
+        {preset?.visionFamily && <Form.Item name="visionFamily" label="Midscene 视觉模型族" extra="qwen3-vl 系列请选择 qwen3-vl；留空时按模型名推断。自定义别名需明确选择，模型族影响定位坐标解析。">
           <Select allowClear placeholder="按模型名推断" options={["qwen2.5-vl", "qwen3-vl", "qwen3", "doubao-vision", "doubao-seed", "gpt-5", "gpt-6", "gemini", "glm-v", "kimi"].map((value) => ({ value, label: value }))} />
         </Form.Item>}
         <Form.Item name="key" label="API key" extra={hasKey ? "已保存在钥匙串，留空则不修改" : "存入系统钥匙串，不写入配置文件"}>

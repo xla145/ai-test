@@ -1,0 +1,1911 @@
+{
+  "version": 1,
+  "mode": "live",
+  "startedAt": "2026-11-14T02:50:15.483Z",
+  "timezone": "Asia/Taipei",
+  "model": "qwen3.8-omni-flash",
+  "family": "qwen3-vl",
+  "sdk": "1.17.7",
+  "fixtureSha256": "b882ddc373552c45e10ba708f377bce59b4ae36eb87ee5c250fb1eeab03690f8",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "cache": false,
+  "rounds": 3,
+  "observations": [
+    {
+      "round": 1,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 3580,
+      "center": [
+        177,
+        161
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-16-2b23513e.html",
+      "mappedTarget": {
+        "testId": "channel-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "channel-search"
+      ],
+      "actual": "",
+      "elapsedMs": 4538
+    },
+    {
+      "round": 1,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 6540,
+      "center": [
+        804,
+        161
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-20-a8ca7229.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_search_1.spec.ts",
+      "elapsedMs": 7171
+    },
+    {
+      "round": 1,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 3976,
+      "center": [
+        746,
+        527
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-27-2ec42f6b.html",
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "script": "scripts/ui/tc_contract_switch_1.spec.ts",
+      "elapsedMs": 4614
+    },
+    {
+      "round": 1,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 4314,
+      "center": [
+        112,
+        524
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-32-4c5f3c7f.html",
+      "mappedTarget": {
+        "testId": "normal-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-check"
+      ],
+      "actual": "待操作",
+      "checked": false,
+      "elapsedMs": 4994
+    },
+    {
+      "round": 1,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 17731,
+      "center": [
+        257,
+        572
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-37-61d0f3a0.html",
+      "mappedTarget": {
+        "testId": "normal-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-select"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 18434
+    },
+    {
+      "round": 1,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 4143,
+      "center": [
+        883,
+        573
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-50-56-3c45d475.html",
+      "mappedTarget": {
+        "testId": "fallback-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-select"
+      ],
+      "actual": "备用渠道选项：已展开",
+      "script": "scripts/ui/tc_contract_select_1.spec.ts",
+      "elapsedMs": 4903
+    },
+    {
+      "round": 1,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 4833,
+      "center": [
+        729,
+        754
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-01-056c05bd.html",
+      "mappedTarget": {
+        "testId": "fallback-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "fallback-option"
+      ],
+      "actual": "备用渠道：阿里云源",
+      "script": "scripts/ui/tc_contract_option_1.spec.ts",
+      "elapsedMs": 5561
+    },
+    {
+      "round": 1,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 5187,
+      "center": [
+        148,
+        755
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-06-94bca002.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 5829
+    },
+    {
+      "round": 1,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 4574,
+      "center": [
+        1117,
+        316
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-12-371b3d60.html",
+      "mappedTarget": {
+        "testId": "edit-other",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-other"
+      ],
+      "actual": "正在编辑：MODEL-UI-002",
+      "elapsedMs": 5227
+    },
+    {
+      "round": 1,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 4736,
+      "center": [
+        1117,
+        262
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-18-5bb6fb7c.html",
+      "mappedTarget": {
+        "testId": "edit-target",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-target"
+      ],
+      "actual": "正在编辑：MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_edit_1.spec.ts",
+      "elapsedMs": 5381
+    },
+    {
+      "round": 1,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 5630,
+      "center": [
+        710,
+        623
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-23-7426e1bb.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "script": "scripts/ui/tc_contract_save_1.spec.ts",
+      "elapsedMs": 6286
+    },
+    {
+      "round": 1,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 11639,
+      "center": [
+        83,
+        624
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-29-d882ad2f.html",
+      "mappedTarget": {
+        "testId": "normal-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "normal-save"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 12263
+    },
+    {
+      "round": 2,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 4233,
+      "center": [
+        177,
+        161
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-42-3d440f21.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_search_2.spec.ts",
+      "elapsedMs": 4948
+    },
+    {
+      "round": 2,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 4298,
+      "center": [
+        177,
+        161
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-47-98895bfd.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "elapsedMs": 4875
+    },
+    {
+      "round": 2,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 4127,
+      "center": [
+        694,
+        529
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-52-7940d380.html",
+      "mappedTarget": {
+        "testId": "normal-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-check"
+      ],
+      "actual": "待操作",
+      "checked": false,
+      "elapsedMs": 4739
+    },
+    {
+      "round": 2,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 4522,
+      "center": [
+        113,
+        523
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-51-57-796763f9.html",
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "script": "scripts/ui/tc_contract_switch_2.spec.ts",
+      "elapsedMs": 5156
+    },
+    {
+      "round": 2,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 4297,
+      "center": [
+        259,
+        572
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-03-822434d2.html",
+      "mappedTarget": {
+        "testId": "fallback-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-select"
+      ],
+      "actual": "备用渠道选项：已展开",
+      "script": "scripts/ui/tc_contract_select_2.spec.ts",
+      "elapsedMs": 5241
+    },
+    {
+      "round": 2,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 7461,
+      "center": [
+        883,
+        570
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-08-463274f9.html",
+      "mappedTarget": {
+        "testId": "normal-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-select"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 8187
+    },
+    {
+      "round": 2,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 6091,
+      "center": [
+        148,
+        754
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-16-59c2b3ab.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 6823
+    },
+    {
+      "round": 2,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 1782,
+      "center": [
+        729,
+        754
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-23-710d6633.html",
+      "mappedTarget": {
+        "testId": "fallback-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "fallback-option"
+      ],
+      "actual": "备用渠道：阿里云源",
+      "script": "scripts/ui/tc_contract_option_2.spec.ts",
+      "elapsedMs": 2416
+    },
+    {
+      "round": 2,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 454.015625,
+        "y": 298,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 5157,
+      "center": [
+        489,
+        317
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-25-d9322397.html",
+      "mappedTarget": {
+        "testId": "edit-target",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-target"
+      ],
+      "actual": "正在编辑：MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_edit_2.spec.ts",
+      "elapsedMs": 5896
+    },
+    {
+      "round": 2,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 454.015625,
+        "y": 298,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 2208,
+      "center": [
+        491,
+        261
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-31-119704b6.html",
+      "mappedTarget": {
+        "testId": "edit-other",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-other"
+      ],
+      "actual": "正在编辑：MODEL-UI-002",
+      "elapsedMs": 2896
+    },
+    {
+      "round": 2,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 1652,
+      "center": [
+        83,
+        623
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-34-79c9ef42.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "elapsedMs": 2351
+    },
+    {
+      "round": 2,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 1985,
+      "center": [
+        83,
+        625
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-37-fa1c3f7f.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "script": "scripts/ui/tc_contract_save_2.spec.ts",
+      "elapsedMs": 2586
+    },
+    {
+      "round": 3,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 7989,
+      "center": [
+        177,
+        161
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-39-6ab119fe.html",
+      "mappedTarget": {
+        "testId": "channel-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "channel-search"
+      ],
+      "actual": "",
+      "elapsedMs": 8582
+    },
+    {
+      "round": 3,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 2837,
+      "center": [
+        803,
+        160
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-48-98e97a21.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_search_3.spec.ts",
+      "elapsedMs": 3435
+    },
+    {
+      "round": 3,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 3230,
+      "center": [
+        685,
+        528
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-52-525c74e3.html",
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "script": "scripts/ui/tc_contract_switch_3.spec.ts",
+      "elapsedMs": 3903
+    },
+    {
+      "round": 3,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 1965,
+      "center": [
+        112,
+        524
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-56-c6f018d1.html",
+      "mappedTarget": {
+        "testId": "normal-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-check"
+      ],
+      "actual": "待操作",
+      "checked": false,
+      "elapsedMs": 2985
+    },
+    {
+      "round": 3,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 7588,
+      "center": [
+        259,
+        574
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-52-59-987eb200.html",
+      "mappedTarget": {
+        "testId": "normal-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-select"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 8277
+    },
+    {
+      "round": 3,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 2047,
+      "center": [
+        883,
+        572
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-07-44f35b44.html",
+      "mappedTarget": {
+        "testId": "fallback-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-select"
+      ],
+      "actual": "备用渠道选项：已展开",
+      "script": "scripts/ui/tc_contract_select_3.spec.ts",
+      "elapsedMs": 2832
+    },
+    {
+      "round": 3,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 1889,
+      "center": [
+        729,
+        754
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-10-7d6f3b9c.html",
+      "mappedTarget": {
+        "testId": "fallback-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "fallback-option"
+      ],
+      "actual": "备用渠道：阿里云源",
+      "script": "scripts/ui/tc_contract_option_3.spec.ts",
+      "elapsedMs": 2565
+    },
+    {
+      "round": 3,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 8015,
+      "center": [
+        150,
+        754
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-13-4d942ec1.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 8664
+    },
+    {
+      "round": 3,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 2525,
+      "center": [
+        83,
+        252
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-22-42b08385.html",
+      "mappedTarget": {
+        "testId": "channel-edit",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "channel-edit"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 3091
+    },
+    {
+      "round": 3,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 7009,
+      "center": [
+        1117,
+        261
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-25-756f5d68.html",
+      "mappedTarget": {
+        "testId": "edit-target",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-target"
+      ],
+      "actual": "正在编辑：MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_edit_3.spec.ts",
+      "elapsedMs": 7613
+    },
+    {
+      "round": 3,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 2325,
+      "center": [
+        710,
+        624
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-32-d9acafba.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "script": "scripts/ui/tc_contract_save_3.spec.ts",
+      "elapsedMs": 2976
+    },
+    {
+      "round": 3,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 2230,
+      "center": [
+        83,
+        625
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/midscene/report/playwright-2026-11-14_10-53-36-a2b5cdc3.html",
+      "mappedTarget": {
+        "testId": "normal-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "normal-save"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 2806
+    }
+  ],
+  "replays": [
+    {
+      "repetition": 1,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_1",
+          "status": "passed",
+          "duration": 0.362,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.223,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_3",
+          "status": "passed",
+          "duration": 0.242,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_1",
+          "status": "passed",
+          "duration": 0.241,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_2",
+          "status": "passed",
+          "duration": 0.236,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_3",
+          "status": "passed",
+          "duration": 0.24,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_1",
+          "status": "passed",
+          "duration": 0.247,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.235,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_3",
+          "status": "passed",
+          "duration": 0.241,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_1",
+          "status": "passed",
+          "duration": 0.188,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.183,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_3",
+          "status": "passed",
+          "duration": 0.207,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_1",
+          "status": "passed",
+          "duration": 0.349,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_2",
+          "status": "passed",
+          "duration": 0.331,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_3",
+          "status": "passed",
+          "duration": 0.303,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_1",
+          "status": "passed",
+          "duration": 0.307,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.214,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_3",
+          "status": "passed",
+          "duration": 0.231,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/workspace/reports/ui-2026-11-14T02-53-38-464Z/report.json"
+    },
+    {
+      "repetition": 2,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_1",
+          "status": "passed",
+          "duration": 0.339,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.238,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_3",
+          "status": "passed",
+          "duration": 0.212,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_1",
+          "status": "passed",
+          "duration": 0.256,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_2",
+          "status": "passed",
+          "duration": 0.304,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_3",
+          "status": "passed",
+          "duration": 0.223,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_1",
+          "status": "passed",
+          "duration": 0.255,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.228,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_3",
+          "status": "passed",
+          "duration": 0.246,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_1",
+          "status": "passed",
+          "duration": 0.227,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.185,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_3",
+          "status": "passed",
+          "duration": 0.203,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_1",
+          "status": "passed",
+          "duration": 0.257,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_2",
+          "status": "passed",
+          "duration": 0.283,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_3",
+          "status": "passed",
+          "duration": 0.312,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_1",
+          "status": "passed",
+          "duration": 0.301,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.303,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_3",
+          "status": "passed",
+          "duration": 0.265,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/workspace/reports/ui-2026-11-14T02-53-44-231Z/report.json"
+    },
+    {
+      "repetition": 3,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_1",
+          "status": "passed",
+          "duration": 0.321,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.246,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_edit_3",
+          "status": "passed",
+          "duration": 0.235,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_1",
+          "status": "passed",
+          "duration": 0.246,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_2",
+          "status": "passed",
+          "duration": 0.229,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_3",
+          "status": "passed",
+          "duration": 0.226,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_1",
+          "status": "passed",
+          "duration": 0.224,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.244,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_3",
+          "status": "passed",
+          "duration": 0.334,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_1",
+          "status": "passed",
+          "duration": 0.226,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.209,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_3",
+          "status": "passed",
+          "duration": 0.223,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_1",
+          "status": "passed",
+          "duration": 0.378,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_2",
+          "status": "passed",
+          "duration": 0.336,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_3",
+          "status": "passed",
+          "duration": 0.276,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_1",
+          "status": "passed",
+          "duration": 0.234,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.237,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_3",
+          "status": "passed",
+          "duration": 0.279,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/qwen3-vl/workspace/reports/ui-2026-11-14T02-53-49-883Z/report.json"
+    }
+  ],
+  "finishedAt": "2026-11-14T02:53:55.648Z",
+  "summary": {
+    "brief": {
+      "total": 18,
+      "rawHit": 2,
+      "mappedHit": 2,
+      "correctOutcome": 2,
+      "errors": 0,
+      "locateMedianMs": 4444
+    },
+    "structured": {
+      "total": 18,
+      "rawHit": 16,
+      "mappedHit": 18,
+      "correctOutcome": 18,
+      "errors": 0,
+      "locateMedianMs": 4188
+    }
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "caseId": "tc_contract_flow",
+  "title": "本地夹具-模型与故障切换配置操作流程",
+  "baseUrl": "http://127.0.0.1:54279",
+  "specHash": "e085aba76fb76db679a2165e9db2a3eb26f7b76a380715f75a643765b3b96b0e",
+  "steps": [
+    {
+      "action": "goto",
+      "url": "http://127.0.0.1:54279/models",
+      "role": "default",
+      "source": "ai",
+      "id": "S1"
+    },
+    {
+      "action": "fill",
+      "target": {
+        "kind": "testid",
+        "value": "platform-search",
+        "within": {
+          "css": "[role=\"region\"][aria-label=\"平台模型\"]:visible,section[aria-label=\"平台模型\"]:visible"
+        }
+      },
+      "value": "MODEL-UI-001",
+      "role": "default",
+      "caseStep": 1,
+      "source": "ai",
+      "id": "S2"
+    },
+    {
+      "action": "expectValue",
+      "target": {
+        "kind": "css",
+        "value": "input",
+        "within": {
+          "css": "section[aria-label=\"平台模型\"]:visible"
+        }
+      },
+      "value": "MODEL-UI-001",
+      "role": "default",
+      "caseStep": 1,
+      "source": "ai",
+      "id": "S3"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "edit-target",
+        "within": {
+          "css": "tr:visible,[role=\"row\"]:visible",
+          "hasExactText": "MODEL-UI-001",
+          "within": {
+            "css": "[role=\"region\"][aria-label=\"平台模型\"]:visible,section[aria-label=\"平台模型\"]:visible"
+          }
+        }
+      },
+      "role": "default",
+      "caseStep": 2,
+      "source": "ai",
+      "id": "S4"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "p.status",
+        "within": {
+          "css": "section[aria-label=\"平台模型\"]:visible"
+        }
+      },
+      "text": "正在编辑：MODEL-UI-001",
+      "role": "default",
+      "caseStep": 2,
+      "source": "ai",
+      "id": "S5"
+    },
+    {
+      "action": "check",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-check",
+        "within": {
+          "css": "[role=\"region\"][aria-label=\"故障切换配置\"]:visible,section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "checked": true,
+      "role": "default",
+      "caseStep": 3,
+      "source": "ai",
+      "id": "S6"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "p.status",
+        "within": {
+          "css": "section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "text": "故障切换：已启用",
+      "role": "default",
+      "caseStep": 3,
+      "source": "ai",
+      "id": "S7"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-wrapper",
+        "within": {
+          "css": "[role=\"region\"][aria-label=\"故障切换配置\"]:visible,section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "role": "default",
+      "scroll": "center",
+      "caseStep": 4,
+      "source": "ai",
+      "id": "S8"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "p.status",
+        "within": {
+          "css": "section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "text": "备用渠道选项：已展开",
+      "role": "default",
+      "caseStep": 4,
+      "source": "ai",
+      "id": "S9"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-option",
+        "within": {
+          "css": "[role=\"listbox\"][aria-label=\"故障切换的备用渠道\"]:visible"
+        }
+      },
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S10"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "p.status",
+        "within": {
+          "css": "section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "text": "备用渠道：阿里云源",
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S11"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "div.el-select__selection",
+        "within": {
+          "css": ".el-form-item:visible",
+          "hasExactText": "备用渠道",
+          "within": {
+            "css": "section[aria-label=\"故障切换配置\"]:visible"
+          }
+        }
+      },
+      "text": "阿里云源",
+      "exact": true,
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S12"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-save",
+        "within": {
+          "css": "[role=\"region\"][aria-label=\"故障切换配置\"]:visible,section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "role": "default",
+      "caseStep": 6,
+      "source": "ai",
+      "id": "S13"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "p.status",
+        "within": {
+          "css": "section[aria-label=\"故障切换配置\"]:visible"
+        }
+      },
+      "text": "故障切换配置：保存成功",
+      "role": "default",
+      "caseStep": 6,
+      "source": "ai",
+      "id": "S14"
+    }
+  ]
+}

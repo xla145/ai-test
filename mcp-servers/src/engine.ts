@@ -7,6 +7,7 @@ export interface EngineOptions {
   /** 只传给引擎子进程的额外环境变量（如 AITEST_AUTH_TOKEN），不会出现在工具输出里 */
   env?: Record<string, string>;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export class EngineError extends Error {}
@@ -20,6 +21,7 @@ export function engineOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): Engi
 }
 
 export function runEngine<T = unknown>(args: string[], opts: EngineOptions = {}): Promise<T> {
+  if (opts.signal?.aborted) return Promise.reject(new EngineError("请求已取消，服务端可能已处理已发送的请求"));
   const python = opts.python ?? "python3";
   const fullArgs = ["-m", "aitest", ...(opts.db ? ["--db", opts.db] : []), ...args];
   return new Promise((resolve, reject) => {
@@ -27,6 +29,9 @@ export function runEngine<T = unknown>(args: string[], opts: EngineOptions = {})
       env: { ...process.env, ...opts.env, PYTHONIOENCODING: "utf-8" },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const abort = () => { child.kill("SIGTERM"); };
+    opts.signal?.addEventListener("abort", abort, { once: true });
+    if (opts.signal?.aborted) abort();
     let out = "";
     let err = "";
     const timer = setTimeout(() => {
@@ -41,6 +46,8 @@ export function runEngine<T = unknown>(args: string[], opts: EngineOptions = {})
     });
     child.on("close", () => {
       clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", abort);
+      if (opts.signal?.aborted) { reject(new EngineError("请求已取消，服务端可能已处理已发送的请求")); return; }
       const line = out.trim().split("\n").pop() ?? "";
       let parsed: { ok: boolean; data?: T; error?: string };
       try {

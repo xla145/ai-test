@@ -20,7 +20,6 @@ import {
   Form,
   Input,
   InputNumber,
-  List,
   Modal,
   Popconfirm,
   Row,
@@ -71,7 +70,7 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
     <>
       <PageHeader
         title="数据库"
-        description="配置被测系统的数据库连接，用于入库校验：接口与 UI 用例执行后直接查询数据库确认结果。查询与断言均为只读。"
+        description="管理数据库连接，查询接口与 UI 测试的入库结果。所有查询均为只读。"
         extra={<>
           <Select value={env} onChange={setEnv} style={{ width: 160 }}
             options={envs.map((e) => ({ value: e, label: project.environments[e].production ? `${e}（生产）` : e }))} />
@@ -82,46 +81,45 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
         <Alert style={{ marginBottom: 16 }} type="warning" showIcon icon={<LockOutlined />}
           message="生产环境：只能执行只读查询，数据准备与清理被禁止。" />
       )}
-      <Row gutter={16}>
-        <Col span={8}>
-          <Card size="small" title={`连接（${env}）`}>
-            {conns.length ? (
-              <List
-                dataSource={conns}
-                renderItem={([name, c]) => (
-                  <List.Item
-                    actions={[
-                      <Tooltip key="t" title="测试连接"><Button size="small" type="text" icon={<ApiOutlined />} loading={busy} onClick={() => test(name)} /></Tooltip>,
-                      <Tooltip key="e" title="编辑"><Button size="small" type="text" icon={<EditOutlined />} onClick={() => setEditing({ name, cfg: c })} /></Tooltip>,
-                      <Popconfirm key="d" title={`删除连接 ${name}？`} onConfirm={() => run(async () => { await api().removeDatabase(project.id, env, name); await onChanged(); }, "已删除")}>
-                        <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={<DatabaseOutlined style={{ fontSize: 20, marginTop: 4 }} />}
-                      title={<Space size={4}>{name}<Tag bordered={false}>{TYPE_LABEL[c.type]}</Tag>{c.readonly !== false && <Tag bordered={false} color="green">只读</Tag>}</Space>}
-                      description={<>
-                        <Typography.Text type="secondary" className="mono" ellipsis style={{ maxWidth: 170, display: "inline-block" }}>
-                          {c.type === "sqlite" ? c.path : `${c.user ? `${c.user}@` : ""}${c.host}:${c.port ?? DEFAULT_PORT[c.type]}/${c.database ?? ""}`}
-                        </Typography.Text>
-                        {status[name] && <div><Typography.Text type={status[name].ok ? "success" : "danger"} style={{ fontSize: 12 }}>{status[name].text}</Typography.Text></div>}
-                      </>}
-                    />
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有数据库连接">
-                <Button icon={<PlusOutlined />} onClick={() => setEditing({})}>添加连接</Button>
-              </Empty>
-            )}
-          </Card>
-        </Col>
-        <Col span={16}>
-          <Console project={project} env={env} names={conns.map(([n]) => n)} />
-        </Col>
-      </Row>
+      <div className="database-layout">
+        <Card className="database-connections" size="small" title={`连接（${env}）`}>
+          {conns.length ? (
+            <ul className="database-connection-list">
+              {conns.map(([name, c]) => {
+                const address = c.type === "sqlite" ? c.path : `${c.user ? `${c.user}@` : ""}${c.host}:${c.port ?? DEFAULT_PORT[c.type]}/${c.database ?? ""}`;
+                return <li key={name} className="database-connection">
+                  <div className="database-connection-main">
+                    <DatabaseOutlined className="database-connection-icon" />
+                    <div className="database-connection-info">
+                      <div className="database-connection-heading">
+                        <Typography.Text strong>{name}</Typography.Text>
+                        <Tag bordered={false}>{TYPE_LABEL[c.type]}</Tag>
+                        {c.readonly !== false && <Tag bordered={false} color="green">只读</Tag>}
+                      </div>
+                      <Tooltip title={address}>
+                        <Typography.Text type="secondary" className="mono database-connection-address" ellipsis>{address}</Typography.Text>
+                      </Tooltip>
+                      {status[name] && <Typography.Text className="database-connection-status" type={status[name].ok ? "success" : "danger"}>{status[name].text}</Typography.Text>}
+                    </div>
+                  </div>
+                  <div className="database-connection-actions">
+                    <Button size="small" type="text" icon={<ApiOutlined />} loading={busy} onClick={() => test(name)}>测试连接</Button>
+                    <Button size="small" type="text" icon={<EditOutlined />} onClick={() => setEditing({ name, cfg: c })}>编辑</Button>
+                    <Popconfirm title={`删除连接 ${name}？`} onConfirm={() => run(async () => { await api().removeDatabase(project.id, env, name); await onChanged(); }, "已删除")}>
+                      <Button size="small" type="text" danger icon={<DeleteOutlined />}>删除</Button>
+                    </Popconfirm>
+                  </div>
+                </li>;
+              })}
+            </ul>
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有数据库连接">
+              <Button icon={<PlusOutlined />} onClick={() => setEditing({})}>添加连接</Button>
+            </Empty>
+          )}
+        </Card>
+        <Console project={project} env={env} names={conns.map(([n]) => n)} />
+      </div>
       {editing && (
         <ConnectionModal project={project} env={env} production={!!envCfg?.production} initial={editing}
           onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await onChanged(); }} />
@@ -230,16 +228,25 @@ function Console({ project, env, names }: { project: Project; env: string; names
   };
 
   return (
-    <Card size="small" title={<Space><SafetyCertificateOutlined />查询（只读）</Space>}
-      extra={<Typography.Text type="secondary">Ctrl / ⌘ + Enter 执行；参数写 :name</Typography.Text>}>
+    <Card className="database-console" size="small" title={<Space><SafetyCertificateOutlined />查询（只读）</Space>}>
       {!names.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="先添加数据库连接" /> : (
         <>
-          <Flex gap={8} style={{ marginBottom: 8 }}>
-            <Select value={current} onChange={setConn} style={{ width: 160 }} options={names.map((n) => ({ value: n, label: n }))} />
-            <Input placeholder='参数（JSON，可选），如 {"id": 1}' className="mono" value={params} onChange={(e) => setParams(e.target.value)} />
+          <div className="database-query-hint">
+            <span>仅执行只读查询，参数使用 <code>:name</code></span>
+            <span><kbd>Ctrl / ⌘</kbd> + <kbd>Enter</kbd> 执行</span>
+          </div>
+          <div className="database-query-toolbar">
+            <div className="database-query-connection">
+              <label htmlFor="database-query-connection">连接</label>
+              <Select id="database-query-connection" aria-label="查询连接" value={current} onChange={setConn} options={names.map((n) => ({ value: n, label: n }))} />
+            </div>
+            <div className="database-query-params">
+              <label htmlFor="database-query-params">查询参数（JSON，可选）</label>
+              <Input id="database-query-params" placeholder='如 {"id": 1}' className="mono" value={params} onChange={(e) => setParams(e.target.value)} />
+            </div>
             <Button type="primary" icon={<CaretRightOutlined />} loading={busy} onClick={exec}>执行</Button>
-          </Flex>
-          <Input.TextArea className="mono" rows={5} value={sql} onChange={(e) => setSql(e.target.value)}
+          </div>
+          <Input.TextArea aria-label="SQL 查询语句" className="mono database-query-sql" rows={7} value={sql} onChange={(e) => setSql(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void exec(); } }} />
           {result && (
             <>

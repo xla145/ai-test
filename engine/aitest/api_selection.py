@@ -21,7 +21,7 @@ def validate_selection(store, project_id, ids):
         case = store.get_case(case_id)
         if case is None or case.project_id != project_id:
             raise ValueError(f"用例不存在或不属于当前项目：{case_id}")
-        if (case.status != "reviewed" or case.lint_status == "blocked" or case.execution_mode != "api" or not case.is_api_executable
+        if (case.api_needs_review or case.status != "reviewed" or case.lint_status == "blocked" or case.execution_mode != "api" or not case.is_api_executable
                 or not linter.can_generate_script(case, issues)):
             raise ValueError(f"用例未审核、不可执行或存在阻断问题，请重新选择：{case_id}")
 

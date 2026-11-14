@@ -33,6 +33,7 @@ class Operation:
     responses: dict[str, dict[str, Any] | None] = field(default_factory=dict)
     secured: bool = False
     tags: list[str] = field(default_factory=list)
+    body_media_types: list[str] = field(default_factory=list)
 
     @property
     def success_status(self) -> int:
@@ -142,12 +143,15 @@ def parse(spec: dict[str, Any]) -> ApiDoc:
             params: list[Param] = []
             body_schema = None
             body_required = False
+            body_media_types = []
             for p in [*shared_params, *raw.get("parameters", [])]:
                 if p.get("in") == "body":  # swagger 2
                     body_schema = p.get("schema", {})
                     body_required = bool(p.get("required"))
+                    body_media_types.extend(raw.get("consumes") or spec.get("consumes") or ["application/json"])
                     continue
                 if p.get("in") == "formData":
+                    body_media_types.extend(raw.get("consumes") or spec.get("consumes") or ["multipart/form-data"])
                     continue
                 schema = p.get("schema") or {k: v for k, v in p.items() if k in (
                     "type", "format", "enum", "minimum", "maximum", "minLength", "maxLength", "pattern", "items")}
@@ -155,6 +159,7 @@ def parse(spec: dict[str, Any]) -> ApiDoc:
             if "requestBody" in raw:
                 rb = raw["requestBody"]
                 body_required = bool(rb.get("required"))
+                body_media_types = list((rb.get("content") or {}).keys())
                 for mime, c in (rb.get("content") or {}).items():
                     if "json" in mime:
                         body_schema = (c or {}).get("schema")
@@ -163,7 +168,7 @@ def parse(spec: dict[str, Any]) -> ApiDoc:
             secured = bool(raw["security"]) if "security" in raw else global_security
             op_id = raw.get("operationId") or f"{method}_{path.strip('/').replace('/', '_').replace('{', '').replace('}', '')}"
             ops.append(Operation(method.upper(), path, op_id, raw.get("summary", ""), params, body_schema,
-                                 body_required, responses, secured, raw.get("tags", [])))
+                                 body_required, responses, secured, raw.get("tags", []), body_media_types))
     return ApiDoc(info.get("title", ""), str(info.get("version", "")), servers, ops)
 
 

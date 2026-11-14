@@ -1,3 +1,4 @@
+import { workspaceMock } from "./pages/api/workspaceMock";
 let mockUiStopped = false;
 /**
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
@@ -260,6 +261,7 @@ const setView = (next: Partial<typeof viewState>) => { viewState = { ...viewStat
 const eventListeners = new Set<(e: { method: string; params: unknown }) => void>();
 listeners.event = event => eventListeners.forEach(cb => cb(event));
 const mockApi: AitestApi = {
+  ...workspaceMock(cases),
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
     const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
@@ -294,7 +296,7 @@ const mockApi: AitestApi = {
     return delay({ imported: 349 }, 600);
   },
   lint: (p) => delay(fresh.has(p) ? { total: 0, rule_hits: {}, blocked_case_ids: [], stats: {} } : (({ issues: _, ...summary }) => summary)(lint), 400),
-  listCases: () => delay(cases),
+  listCases: (p, filters) => delay(cases.filter((c) => (!(c as any).project_id || (c as any).project_id === p) && (!filters?.execution_mode || c.execution_mode === filters.execution_mode))),
   pageCases: (p, q) => {
     if (fresh.has(p)) return page([], q);
     const f = q.filters ?? {};
@@ -336,6 +338,8 @@ const mockApi: AitestApi = {
   }, 900)),
   tokenUsage: () => delay({ tokens: 412300 }),
   setEnvSecret: () => delay(undefined),
+  openApiLogin: async () => { setView({ visible: true }); },
+  saveApiLogin: async () => delay({ savedAt: new Date().toISOString() }),
   setRoleSecret: async (_p, role, username, _password, token) => {
     roleSecrets[role] = { account: Boolean(username) || roleSecrets[role]?.account || false, token: Boolean(token) || roleSecrets[role]?.token || false, inherited: false };
     return delay(undefined);
@@ -385,7 +389,7 @@ const mockApi: AitestApi = {
   uiCaseGroups: () => delay(groupCases(uiCasesOf()).map((g) => ({
     id: g.id, label: g.label,
     cases: g.cases.map((c) => ({ id: c.id, title: c.title, priority: c.priority, status: c.status, lint_status: c.lint_status,
-      execution_mode: c.execution_mode, variant: variantLabel(g, c.id) })),
+      module_path: c.module_path ?? [], execution_mode: c.execution_mode, variant: variantLabel(g, c.id) })),
   }))),
   deriveUiScripts: async (_id, _env, sourceCaseId, opts) => {
     const group = groupCases(uiCasesOf()).find((g) => g.cases.some((c) => c.id === sourceCaseId));

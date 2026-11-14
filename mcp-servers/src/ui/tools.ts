@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { SecretResolver } from "../secrets.js";
 import { BrowserSession } from "./browser.js";
-import { writeUiScript, type UiStep } from "./codegen.js";
+import { caseHash, writeUiScript, type UiStep } from "./codegen.js";
 import { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecord } from "./envSupport.js";
 import type { VisionAgentFactory } from "./midscene.js";
 import { runUiSuite } from "./runner.js";
+import { locateRequest, resolveTargetScope, visualTargetSchema } from "./target.js";
 
 /**
  * 有状态的 UI 工具（browser 内含 Midscene 视觉工具，二者必须共享同一页面与 ref 表）与 env-support。
@@ -64,13 +65,11 @@ async function loadProject(ctx: UiToolContext, projectId: string, env: string): 
 }
 
 /**
- * 把用例里描述的身份对应到已配置的角色：完全一致优先；否则取名称互相包含的角色
- * （如「运营管理员」→「管理员」），有多个时取最长的那个；都不匹配时原样返回。
+ * 角色是用例前置条件：不以名称相似推断权限等价。
  */
 export function resolveRole(requested: string, configured: string[]): string {
   if (configured.includes(requested)) return requested;
-  const close = configured.filter((c) => c && (requested.includes(c) || c.includes(requested)));
-  return close.sort((a, b) => b.length - a.length)[0] ?? requested;
+  throw new Error(`用例角色「${requested}」未配置；已配置角色：${configured.join("、") || "无"}。请明确角色绑定，不自动使用相近角色。`);
 }
 
 function rolesFromEnv(env: Record<string, string>): { role: string; username: string; password: string }[] {
@@ -78,6 +77,12 @@ function rolesFromEnv(env: Record<string, string>): { role: string; username: st
 }
 
 const ref = z.string().describe("snapshot 返回的元素 ref，如 e12");
+
+/** 操作结果附带操作后的页面快照，agent 不必每次操作后再单独调用 snapshot */
+async function withSnapshot<T extends object>(s: BrowserSession, out: T | void): Promise<T & { snapshot?: unknown }> {
+  const snapshot = await s.snapshotAfterAction().catch(() => undefined);
+  return { ...(out ?? ({} as T)), ...(snapshot ? { snapshot } : { note: "未取到操作后的快照，需要时调用 snapshot" }) };
+}
 
 function browserTools(ctx: UiToolContext): UiTool[] {
   const tools = allBrowserTools(ctx);
@@ -108,14 +113,13 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     {
       name: "new_role_context",
       description: "以某个角色打开独立会话（只传角色名，账号由客户端注入；登录态保存为 storageState 复用）。不传角色为匿名会话。"
-        + "角色名与已配置的角色名相近时（如「运营管理员」与「管理员」）自动使用已配置的角色，返回值中的 role 为实际使用的角色",
+        + "角色名必须与项目配置完全一致；缺失时阻塞，不自动使用相近角色",
       input: { role: z.string().optional() },
       handler: async ({ role }) => {
         const { project, env } = active(ctx);
         if (!role || role === "default") return s.newRoleContext("default");
         const roles = (await ctx.engine<{ role_name: string }[]>(["list-roles", "--project", project.id])).map((r) => r.role_name);
         const name = resolveRole(role, roles);
-        const mapped = name !== role ? { requestedRole: role, note: `用例中的「${role}」按已配置的角色「${name}」登录` } : {};
         const envCfg = project.environments[env];
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: [name] });
         const cred = rolesFromEnv(secretEnv).find((r) => r.role === name);
@@ -124,44 +128,61 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           login: envCfg.login as any,
           credentials: cred ? { username: cred.username, password: cred.password } : undefined,
         });
-        if (out.loggedIn || out.reusedState) return { ...out, ...mapped };
+        if (out.loggedIn || out.reusedState) return out;
         // 用户在「角色与登录」里手动登录过：内嵌浏览器沿用该角色的登录态（验证码、扫码等无法自动登录的场景）
         if (existsSync(join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`))) {
-          return { ...out, ...mapped, manualSession: true, note: [mapped.note, "使用在「角色与登录」中手动登录保存的登录态"].filter(Boolean).join("；") };
+          return { ...out, manualSession: true, note: "使用在「角色与登录」中手动登录保存的登录态" };
         }
         // 说明为什么没有登录，让 agent 停下来请用户配置，而不是去代码库里找账号
         const missing = [
           ...(envCfg.login ? [] : [`环境「${env}」没有配置登录方式`]),
           ...(cred ? [] : [`角色「${name}」没有配置账号${roles.length ? `（已配置的角色：${roles.join("、")}）` : "（项目还没有配置任何角色）"}`]),
         ];
-        return { ...out, ...mapped, hint: `未登录：${missing.join("；")}。请在「UI 测试 → 角色与登录」中配置登录方式与账号，或为该角色「手动登录」一次后重试；需要登录的用例不要继续探索。` };
+        return { ...out, hint: `未登录：${missing.join("；")}。请在「UI 测试 → 角色与登录」中配置登录方式与账号，或为该角色「手动登录」一次后重试；需要登录的用例不要继续探索。` };
       },
     },
     {
       name: "navigate",
-      description: "打开页面（相对路径基于环境地址）",
+      description: "打开页面（相对路径基于环境地址）。返回值带打开后的页面快照（snapshot），不必再单独调用 snapshot",
       input: { url: z.string() },
-      handler: ({ url }) => {
+      handler: async ({ url }) => {
         active(ctx);
-        return s.navigate(url);
+        return withSnapshot(s, await s.navigate(url));
       },
     },
     {
       name: "snapshot",
-      description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本",
+      description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本。navigate / click / select / press 的返回值已带操作后的快照，"
+        + "只有页面还在变化或需要更长文本时才单独调用。表格单元格、状态徽标等非交互文字不在元素列表里，用 find_text 取 ref",
       input: { max_text: z.number().int().optional() },
       handler: ({ max_text }) => s.snapshot({ maxText: max_text }),
     },
-    { name: "click", description: "点击元素", input: { ref }, handler: ({ ref }) => s.click(ref) },
+    {
+      name: "find_text",
+      description: "按文本确定性定位元素并返回 ref（不调用视觉模型，毫秒级）：找出文本包含 text 的最内层可见元素，"
+        + "用于给表格单元格、状态徽标、统计文字（如「共 2 个标签」）等非交互元素做断言。多处命中时按 context（所在行的文本）挑选；"
+        + "exact=true 要求元素文本与 text 完全相同。旧 ref 在之后的快照中仍然有效",
+      input: { text: z.string(), exact: z.boolean().optional(), limit: z.number().int().min(1).max(30).optional() },
+      handler: async ({ text, exact, limit }) => {
+        const matches = await s.findText(text, { exact, limit });
+        return matches.length ? { matches } : { matches, note: "页面上没有包含该文本的可见元素：确认文字是否准确、是否需要先滚动或展开" };
+      },
+    },
+    { name: "click", description: "点击元素。返回值带点击后的页面快照", input: { ref }, handler: async ({ ref }) => withSnapshot(s, await s.click(ref)) },
     {
       name: "type",
       description: "在输入框填写文本。敏感值不要直接传：用 secret_env 指定由客户端注入的环境变量名",
       input: { ref, text: z.string(), secret_env: z.string().optional() },
       handler: ({ ref, text, secret_env }) => s.type(ref, secret_env ? process.env[secret_env] ?? "" : text, { secretEnv: secret_env }),
     },
-    { name: "select", description: "下拉选择", input: { ref, value: z.string() }, handler: ({ ref, value }) => s.select(ref, value) },
+    { name: "select", description: "下拉选择。返回值带选择后的页面快照", input: { ref, value: z.string() }, handler: async ({ ref, value }) => withSnapshot(s, await s.select(ref, value)) },
     { name: "check", description: "勾选 / 取消勾选", input: { ref, checked: z.boolean() }, handler: ({ ref, checked }) => s.check(ref, checked) },
-    { name: "press", description: "按键，如 Enter", input: { key: z.string() }, handler: ({ key }) => s.press(key) },
+    {
+      name: "press",
+      description: "按键，如 Enter。连续按键一次传数组（如 [\"Tab\", \"Tab\", \"Enter\"]），依次按下。返回值带按键后的页面快照",
+      input: { key: z.union([z.string(), z.array(z.string()).min(1).max(20)]) },
+      handler: async ({ key }) => withSnapshot(s, await s.press(key)),
+    },
     {
       name: "screenshot",
       description: "截图保存到 workspace/evidence。默认只截当前可见区域（图小、读得快）；确实需要整页时传 full_page=true（内嵌浏览器中始终是可见区域，需要时先滚动）。找元素优先用 snapshot",
@@ -181,7 +202,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     { name: "expect_no_text", description: "断言元素不包含文本（如筛选后列表中不再出现某类记录）", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectNoText(ref, text) },
     {
       name: "expect_value",
-      description: "断言输入框 / 下拉框的当前值（下拉框比较 option 的 value；清空的输入框为空字符串）",
+      description: "断言输入框 / 下拉框的当前值（原生下拉框比较 option 的 value；Element Plus 下拉框比较展示文字，包括空选时的提示文字；清空的输入框为空字符串）",
       input: { ref, value: z.string() },
       handler: ({ ref, value }) => s.expectValue(ref, value),
     },
@@ -200,7 +221,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     },
     {
       name: "expect_request",
-      description: "断言抓到字段匹配的上报（fields 为点号路径 → 值），forbidden 为不得出现的敏感字段",
+      description: "断言抓到字段匹配的上报（fields 为点号路径 → 值，只匹配请求体 JSON / 表单里的字段，不匹配 URL 查询参数），forbidden 为不得出现的敏感字段",
       input: { name: z.string(), fields: z.record(z.string(), z.unknown()), forbidden: z.array(z.string()).optional() },
       handler: ({ name, fields, forbidden }) => s.expectRequest(name, fields, forbidden),
     },
@@ -261,7 +282,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           throw new Error("脚本没有任何断言：每个预期结果都要落成 expect_* 断言");
         }
         const c = await ctx.engine<{ id: string; title: string; steps: string[]; expected: string[] }>(["get-case", "--case", case_id]);
-        const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected });
+        const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected, caseHash: caseHash({ title: c.title, steps: c.steps, expected: c.expected }) });
         const script = await ctx.engine(["register-script", "--project", project.id, "--case", case_id, "--path", rel]);
         savedSteps.set(ctx, { caseId: case_id, steps });
         s.resetRecording();
@@ -285,6 +306,9 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
         });
         return {
+          persisted: false,
+          attribution_supported: false,
+          note: "本次为未入库的试跑，没有 run_id；不要从报告目录猜测 run_id，也不要调用 record_attribution。失败原因写在任务结论中。",
           exit_code: out.exitCode,
           errors: out.errors,
           results: out.results.map(({ reviews: _r, ...r }) => r),
@@ -295,14 +319,38 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     // ---- Midscene 视觉工具（与浏览器共享页面与 ref） ----
     {
       name: "ai_locate",
-      description: "（Midscene）用自然语言视觉定位元素，返回可录制的 ref。只在 snapshot 找不到元素时使用",
-      input: { prompt: z.string() },
-      handler: async ({ prompt }) => {
+      description: "（Midscene）优先传结构化 target（page/scope/control/name/label/placeholder/text），自动编译定位描述并验证区域、控件身份与唯一定位器。兼容旧 prompt。返回可录制的 ref。按任务配置的定位策略使用；优先 Midscene 时先调用本工具，定位失败再回退 snapshot / find_text。"
+        + "目标元素上有文字时传 text（该元素应包含的文字）：会校验定位结果，落点偏了会改用附近包含该文字的元素，仍找不到则报错而不是返回错的元素",
+      input: {
+        prompt: z.string().trim().min(1).optional(),
+        target: visualTargetSchema.optional().describe("单个目标：页面、从外到内的区域/对话框/列表行/表单项/选项列表、控件类型与精确身份；列表行必须给 key"),
+        intent: z.enum(["click", "fill", "check"]).optional().describe("目标操作类型，用于把标签或容器解析为真实控件"),
+        text: z.string().optional().describe("目标元素应包含的文字，用于校验；不传则不做文字校验；不要传参照物文字"),
+      },
+      handler: async (input) => {
+        const { prompt, text, intent, target } = locateRequest(input);
+        if (target) await resolveTargetScope(await s.page(), target);
         const agent = await vision(ctx);
+        const expect = text;
         const loc = await agent.aiLocate(prompt);
-        const el = await s.refAt(loc.center[0], loc.center[1]);
-        if (!el) throw new Error("视觉定位到的位置没有元素");
-        return el;
+        const out = await s.locateAt(loc.center[0], loc.center[1], { rect: asRect(loc.rect), expect, intent, target });
+        if (out.matched === false) {
+          const where = out.pointText ? `落点处是「${out.pointText}」` : "落点处没有元素";
+          const hint = out.elsewhere
+            ? `页面上有 ${out.elsewhere} 处包含「${expect}」，最近的离落点 ${out.nearestDistance}px：改用 find_text「${expect}」按 context 挑选`
+            : `页面可见区域没有包含「${expect}」的元素：确认文字是否准确、是否需要先滚动或展开`;
+          throw new Error(`视觉定位不准：${where}，不包含「${expect}」。${hint}`);
+        }
+        if (!out.element) throw new Error("视觉定位到的位置没有元素");
+        return {
+          ...out.element,
+          text_verified: Boolean(expect),
+          intent_verified: Boolean(intent),
+          scope_verified: Boolean(target),
+          target_verified: Boolean(target),
+          ...(expect ? { verified: true, expected: expect } : { verified: false, note: "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素" }),
+          ...(out.adjusted !== undefined ? { note: `落点处是「${out.pointText ?? ""}」，已改用 ${out.adjusted}px 外包含「${expect}」的元素` } : {}),
+        };
       },
     },
     {
@@ -337,6 +385,11 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       },
     },
   ];
+}
+
+function asRect(rect: unknown): { left: number; top: number; width: number; height: number } | undefined {
+  const r = rect as Record<string, unknown> | undefined;
+  return r && ["left", "top", "width", "height"].every((k) => Number.isFinite(r[k])) ? (r as { left: number; top: number; width: number; height: number }) : undefined;
 }
 
 async function vision(ctx: UiToolContext) {

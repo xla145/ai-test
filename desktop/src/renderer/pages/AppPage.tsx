@@ -38,6 +38,12 @@ export function AppPage({ project }: { project: Project }) {
     <>
       <PageHeader
         title="App 测试"
+        workflow={[
+          { title: "选择平台", description: "选择 Android 或 iOS 及对应执行环境" },
+          { title: "探索生成", description: "agent 通过 Pinky 操作手机并生成 Maestro 脚本" },
+          { title: "执行回归", description: "执行生成的脚本，不调用模型" },
+          { title: "查看结果", description: "查看执行结果、截图与失败归因" },
+        ]}
         description="agent 通过 Pinky 在手机上走通用例，生成 Maestro 脚本；回归直接执行脚本，不调用模型。同一份脚本在 Android 与 iOS 上运行。"
         extra={<>
           <Segmented<Platform> value={platform} onChange={setPlatform} options={[
@@ -77,8 +83,8 @@ export function AppPage({ project }: { project: Project }) {
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
             <Card size="small"><Statistic title={`${PLATFORM_LABEL[result.platform]} 用例`} value={result.run.total} /></Card>
-            <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "#3f8600" }} /></Card>
-            <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "#cf1322" : undefined }} /></Card>
+            <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
+            <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "var(--console-error)" : undefined }} /></Card>
             <Card size="small"><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>
           {failed === 0 && <Alert style={{ marginBottom: 16 }} type="success" showIcon message="全部通过" />}

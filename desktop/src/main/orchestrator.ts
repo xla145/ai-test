@@ -1,5 +1,6 @@
+import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "../shared/apiWorkspace.js";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -16,6 +17,8 @@ import {
   appExplorePrompt,
   caseGenerationPrompt,
   explorePrompt,
+  uiContractPrompt,
+  type ExploreCaseBrief,
   healPrompt,
   triagePrompt,
   type FailureBrief,
@@ -26,7 +29,8 @@ import type { ThreadStartParams } from "./codex/protocol.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 import type { UiRunOptions, UiScriptState } from "../shared/ipc.js";
 import { UiWorkflow } from "./uiWorkflow.js";
-import { writeUiScript } from "@ai-test/mcp-servers";
+import { UiExecutionContracts } from "./uiExecutionContract.js";
+import { caseHash, sha256, writeUiScript } from "@ai-test/mcp-servers";
 import { deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups.js";
 import type { UiCaseGroup, UiDeriveResult } from "../shared/ipc.js";
 import { UiDebugSession, type DebugBrowser } from "./uiDebug.js";
@@ -42,7 +46,7 @@ const filterArgs = (filters: Record<string, string | undefined>) =>
  * 编排层（架构文档第 3 节）：界面只和编排层通信；编排层驱动 Codex，凭据、审批和调度都留在这里。
  * 回归执行由编排层直接调度 pytest，不经过 Codex；只有失败用例才回到 agent。
  */
-export type EngineCall = <T = unknown>(args: string[], env?: Record<string, string>) => Promise<T>;
+export type EngineCall = <T = unknown>(args: string[], env?: Record<string, string>, opts?: { signal?: AbortSignal }) => Promise<T>;
 
 export interface AgentEngine {
   startThread(params: ThreadStartParams): Promise<string>;
@@ -61,6 +65,7 @@ export interface DatabaseInfo {
 
 export interface EnvironmentInfo {
   base_url: string;
+  api_crypto?: { protocol?: string; public_key_file?: string; private_key_file?: string; headers?: Record<string, unknown> };
   databases?: Record<string, DatabaseInfo>;
   auth_header?: string;
   production?: boolean;
@@ -107,6 +112,7 @@ interface CaseRow {
 }
 
 interface UiCaseFull extends CaseRow {
+  module_path?: string[];
   priority?: string;
   steps?: string[];
   expected?: string[];
@@ -160,6 +166,7 @@ export interface OrchestratorDeps {
   app?: AppDeps;
   /** 单次 agent 任务的 token 上限 */
   tokenLimit?: number;
+  uiLocateStrategy?: "dom-first" | "midscene-first";
 }
 
 export interface AppDeps {
@@ -264,6 +271,52 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine<{ tokens: number }>(["token-usage", "--project", projectId]);
   }
 
+  private apiDebugTasks = new Map<string, AbortController>();
+
+  private async apiWorkspace<T>(projectId: string, action: string, payload?: unknown, env?: Record<string, string>, signal?: AbortSignal): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), "aiprobe-api-"));
+    try {
+      const file = join(dir, "request.json");
+      writeFileSync(file, JSON.stringify(payload ?? {}), { mode: 0o600 });
+      return await this.deps.engine<T>(["api-workspace", "--project", projectId, "--action", action, "--file", file], env, ...(signal ? [{ signal }] : []));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  listApiDefinitions(projectId: string) { return this.apiWorkspace<ApiDefinition[]>(projectId, "list"); }
+  previewApiImport(projectId: string, source: string) { return this.apiWorkspace<ApiImportPreview>(projectId, "preview", { source }); }
+  importApiDefinitions(projectId: string, preview: ApiImportPreview) {
+    return this.apiWorkspace<{ definitions: ApiDefinition[] }>(projectId, "import", preview);
+  }
+  saveApiCase(projectId: string, draft: ApiCaseDraft) { return this.apiWorkspace(projectId, "save-case", draft); }
+  generateDefinitionCases(projectId: string, ids: string[]) {
+    return this.apiWorkspace<{ generated: number; skipped: number }>(projectId, "generate", { ids });
+  }
+  previewApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions) {
+    return this.apiWorkspace<ApiCaseGenerationPreview>(projectId, "preview-parameter-cases", { draft, options });
+  }
+  saveApiParameterCases(projectId: string, draft: ApiCaseDraft, options: ApiCaseGenerationOptions, keys: string[]) {
+    return this.apiWorkspace<{ generated: number; skipped: number }>(projectId, "save-parameter-cases", { draft, options, keys });
+  }
+  listApiDebugHistory(projectId: string) { return this.apiWorkspace<ApiDebugResult[]>(projectId, "history"); }
+  async debugApiRequest(projectId: string, env: string, request: ApiCaseDraft, opts: { confirmProduction?: boolean } = {}) {
+    const project = await this.project(projectId);
+    const config = project.environments[env];
+    if (!config) throw new Error("请先配置并选择执行环境");
+    if (config.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
+    const key = `${projectId}:${env}`;
+    if (this.apiDebugTasks.has(key)) throw new Error("当前项目和环境已有接口调试正在执行");
+    const controller = new AbortController();
+    this.apiDebugTasks.set(key, controller);
+    try {
+      return await this.apiWorkspace<ApiDebugResult>(projectId, "debug", { env, request, confirmProduction: opts.confirmProduction },
+        this.deps.secretEnv(projectId, env, ["*"]), controller.signal);
+    } finally { this.apiDebugTasks.delete(key); }
+  }
+
+  stopApiDebug(projectId: string, env: string): void {
+    this.apiDebugTasks.get(`${projectId}:${env}`)?.abort();
+  }
+
   /** 接口测试主线：OpenAPI → 基线用例 → 脚本（确定性，不耗模型）；enrich=true 时让 agent 补充业务场景 */
   async generateApiSuite(projectId: string, openapiFile: string, enrich = false) {
     const generated = await this.deps.engine(["generate-api-cases", "--project", projectId, "--openapi", openapiFile]);
@@ -333,16 +386,54 @@ export class Orchestrator extends EventEmitter {
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
   async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
     return this.withUiTask(projectId, env, async (signal) => {
-      await this.uiCase(projectId, env, caseId, opts.confirmProduction);
+      const row = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
+      const brief: ExploreCaseBrief = { title: row.title, steps: row.steps, expected: row.expected, preconditions: row.preconditions, data_refs: row.data_refs };
+      const p = await this.project(projectId);
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles), signal);
-      // 明确告诉用户有没有生成脚本，以及没生成的原因
-      const scriptGenerated = Boolean((await this.uiScriptStates(projectId, env))[caseId]);
-      if (scriptGenerated) return { ...result, scriptGenerated };
-      const reason = result.status === "interrupted_budget"
-        ? `超出单任务 token 上限，任务被中断。可在「全局设置」中调高上限后重试。`
-        : result.status !== "completed" ? `任务未正常结束（${result.status}）。` : "";
-      return { ...result, scriptGenerated, message: ["未生成脚本。", reason, result.message.trim()].filter(Boolean).join("\n") };
+      const empty = { threadId: "", turnId: "", status: "completed", tokens: 0 };
+      if (!brief.steps?.length || !brief.expected?.length) return { ...empty, scriptGenerated: false,
+        message: "用例缺少步骤或预期，请先补充；未调用 AI。", needsClarification: true };
+      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env]);
+      const workflow = new UiWorkflow(p.workspace_path);
+      const existing = (await this.uiScriptStates(projectId, env))[caseId];
+      const binding = (state: UiScriptState | undefined) => {
+        if (!state || !workflow.reusable(state.path, brief)) return undefined;
+        try { return { path: state.path, hash: state.hash, stepsHash: sha256(JSON.stringify(workflow.stepsFile(state.path))) }; }
+        catch { return undefined; }
+      };
+      const before = binding(existing);
+      const cached = contracts.read();
+      if (cached?.contract.status === "ready" && before && JSON.stringify(cached.script) === JSON.stringify(before)) {
+        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。`, scriptGenerated: true, reused: true };
+      }
+      let contract = cached?.contract;
+      let converted: TurnResult | undefined;
+      if (!contract) {
+        converted = await this.agentTask(projectId, "ui_contract", uiContractPrompt(brief, roles), signal);
+        signal.throwIfAborted();
+        if (converted.status !== "completed") return { ...converted, scriptGenerated: false };
+        try { contract = contracts.parse(converted.message); }
+        catch (e) { return { ...converted, status: "failed", scriptGenerated: false, message: `执行用例转换未通过校验，未启动浏览器：${(e as Error).message}` }; }
+        contracts.save(contract);
+      }
+      if (contract.status !== "ready") return { ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
+        contractReused: Boolean(cached), message: `待澄清，未启动 UI 探索：${contract.issues.join("；")}` };
+      const stillCurrent = async () => {
+        const latest = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
+        const latestProject = await this.project(projectId);
+        const latestRoles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map(r => r.role_name);
+        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId, latest, latestRoles, latestProject.environments[env]).fingerprint;
+      };
+      if (!await stillCurrent()) return { ...(converted ?? empty), scriptGenerated: false, message: "转换期间用例或环境已变化，请重新生成；未启动 UI 探索。" };
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy, contract), signal, converted?.tokens ?? 0);
+      signal.throwIfAborted();
+      // 保存发生在浏览器工具中，只有本次生成、内容仍匹配的脚本才能绑定缓存。
+      const after = binding((await this.uiScriptStates(projectId, env))[caseId]);
+      const unchanged = await stillCurrent();
+      const scriptGenerated = Boolean(unchanged && after && after.stepsHash !== before?.stepsHash);
+      if (scriptGenerated && result.status === "completed") contracts.save(contract, after);
+      return { ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated, contractReused: Boolean(cached),
+        message: scriptGenerated ? result.message : [unchanged ? "未生成当前版本的新脚本。" : "用例或环境配置已变化，未复用本次脚本。", result.message].join("\n") };
     });
   }
 
@@ -532,7 +623,7 @@ export class Orchestrator extends EventEmitter {
       id: g.id, label: g.label,
       cases: g.cases.map((c) => ({
         id: c.id, title: c.title, priority: c.priority ?? "", status: c.status, lint_status: c.lint_status ?? "",
-        execution_mode: c.execution_mode, variant: variantLabel(g, c.id),
+        module_path: c.module_path ?? [], execution_mode: c.execution_mode, variant: variantLabel(g, c.id),
       })),
     }));
   }
@@ -560,7 +651,7 @@ export class Orchestrator extends EventEmitter {
       if (!derived.ok) { out.skipped.push({ caseId: c.id, reason: derived.reason }); continue; }
       const { path } = writeUiScript(p.workspace_path, {
         caseId: c.id, title: c.title, steps: derived.steps, baseUrl: file.baseUrl,
-        caseSteps: c.steps, expected: c.expected, derivedFrom: sourceCaseId,
+        caseSteps: c.steps, expected: c.expected, caseHash: caseHash({ title: c.title, steps: c.steps, expected: c.expected }), derivedFrom: sourceCaseId,
       });
       await this.deps.engine(["register-script", "--project", projectId, "--case", c.id, "--path", path]);
       out.derived.push(c.id);
@@ -897,7 +988,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
-  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal): Promise<TurnResult> {
+  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0): Promise<TurnResult> {
     const project = await this.project(projectId);
     const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
       ["check-budget", "--project", projectId],
@@ -906,13 +997,14 @@ export class Orchestrator extends EventEmitter {
       throw new BudgetExceededError(`本月模型预算已用完（${budget.month_used}/${budget.monthly_budget} tokens），日常回归不受影响`);
     }
     const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
-    const tokenLimit = limits.length ? Math.min(...limits) : undefined;
+    const tokenLimit = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    if (tokenLimit !== undefined && tokenLimit <= 0) throw new BudgetExceededError("用例转换已达到单任务 token 上限；转换结果已缓存，下次可直接执行");
     signal?.throwIfAborted();
     const agent = await this.deps.agent();
     const threadId = await agent.startThread({
       cwd: project.workspace_path,
       approvalPolicy: "on-request",
-      sandbox: "workspace-write",
+      sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
     });
     const session = await this.deps.engine<{ id: string }>([
       "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,

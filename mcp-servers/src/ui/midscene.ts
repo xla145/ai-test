@@ -67,7 +67,8 @@ export function midsceneFactory(cacheId = "aitest"): VisionAgentFactory {
         aiAct: (prompt) => agent.aiAct(prompt),
         aiAssert: async (assertion) => { await agent.aiAssert(assertion); },
         aiLocate: async (prompt) => {
-          const result = await agent.aiLocate(prompt);
+          // 不用 Midscene 缓存：探索时 prompt 几乎不重复，从未命中；而定位错的结果写进缓存后会被原样复用
+          const result = await agent.aiLocate(prompt, { cacheable: false });
           return { ...result, center: cssCenter(result.center) };
         },
         get reportFile() { return agent.reportFile; },

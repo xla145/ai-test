@@ -21,7 +21,7 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: "prepare", title: "用例", items: [
     { key: "cases", label: "用例库" },
     { key: "import", label: "导入与规范检查" },
-    { key: "api", label: "生成接口用例" },
+    { key: "api", label: "接口测试" },
   ] },
   { key: "execute", title: "执行", items: [
     { key: "run", label: "接口回归" },

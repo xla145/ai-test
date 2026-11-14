@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "caseId": "tc_contract_flow",
+  "title": "本地夹具-模型与故障切换配置操作流程",
+  "baseUrl": "http://127.0.0.1:49860",
+  "specHash": "1e64a0d1dd1f172ce2c9c40384bc79c6d76d141f9d076e26f936ec2e564fe36a",
+  "steps": [
+    {
+      "action": "goto",
+      "url": "http://127.0.0.1:49860/models",
+      "role": "default",
+      "source": "ai",
+      "id": "S1"
+    },
+    {
+      "action": "fill",
+      "target": {
+        "kind": "testid",
+        "value": "platform-search"
+      },
+      "value": "MODEL-UI-001",
+      "role": "default",
+      "caseStep": 1,
+      "source": "ai",
+      "id": "S2"
+    },
+    {
+      "action": "expectValue",
+      "target": {
+        "kind": "testid",
+        "value": "platform-search"
+      },
+      "value": "MODEL-UI-001",
+      "role": "default",
+      "caseStep": 1,
+      "source": "ai",
+      "id": "S3"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "edit-target"
+      },
+      "role": "default",
+      "caseStep": 2,
+      "source": "ai",
+      "id": "S4"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "testid",
+        "value": "platform-state"
+      },
+      "text": "正在编辑：MODEL-UI-001",
+      "role": "default",
+      "caseStep": 2,
+      "source": "ai",
+      "id": "S5"
+    },
+    {
+      "action": "check",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-check"
+      },
+      "checked": true,
+      "role": "default",
+      "caseStep": 3,
+      "source": "ai",
+      "id": "S6"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-state"
+      },
+      "text": "故障切换：已启用",
+      "role": "default",
+      "caseStep": 3,
+      "source": "ai",
+      "id": "S7"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-wrapper"
+      },
+      "role": "default",
+      "scroll": "center",
+      "caseStep": 4,
+      "source": "ai",
+      "id": "S8"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-state"
+      },
+      "text": "备用渠道选项：已展开",
+      "role": "default",
+      "caseStep": 4,
+      "source": "ai",
+      "id": "S9"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-option"
+      },
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S10"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-state"
+      },
+      "text": "备用渠道：阿里云源",
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S11"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "css",
+        "value": "div.el-select__selection",
+        "hasText": "阿里云源"
+      },
+      "text": "阿里云源",
+      "exact": true,
+      "role": "default",
+      "caseStep": 5,
+      "source": "ai",
+      "id": "S12"
+    },
+    {
+      "action": "click",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-save"
+      },
+      "role": "default",
+      "caseStep": 6,
+      "source": "ai",
+      "id": "S13"
+    },
+    {
+      "action": "expectText",
+      "target": {
+        "kind": "testid",
+        "value": "fallback-state"
+      },
+      "text": "故障切换配置：保存成功",
+      "role": "default",
+      "caseStep": 6,
+      "source": "ai",
+      "id": "S14"
+    }
+  ]
+}

@@ -1,0 +1,321 @@
+{
+  "version": "ui-execution/0.1",
+  "id": "tc_contract_flow",
+  "title": "本地夹具-模型与故障切换配置操作流程",
+  "source": {
+    "caseId": "fixture-config-flow",
+    "stepIndexes": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "expectedIds": [
+      "search-e1",
+      "edit-e1",
+      "switch-e1",
+      "select-e1",
+      "option-e1",
+      "save-e1"
+    ]
+  },
+  "execution": {
+    "environment": "local-fixture",
+    "role": "fixture-operator",
+    "entry": "/models",
+    "data": [
+      {
+        "ref": "fixture-models",
+        "key": "MODEL-UI-001"
+      }
+    ]
+  },
+  "targets": {
+    "target0": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "平台模型"
+        }
+      ],
+      "control": "textbox",
+      "placeholder": "搜索模型"
+    },
+    "result0": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "平台模型"
+        }
+      ],
+      "control": "textbox",
+      "placeholder": "搜索模型"
+    },
+    "target1": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "平台模型"
+        },
+        {
+          "kind": "row",
+          "name": "模型记录",
+          "key": "MODEL-UI-001"
+        }
+      ],
+      "control": "button",
+      "text": "编辑"
+    },
+    "result1": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "平台模型"
+        }
+      ],
+      "control": "status",
+      "name": "操作结果"
+    },
+    "target2": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "checkbox",
+      "label": "启用故障切换"
+    },
+    "result2": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "status",
+      "name": "操作结果"
+    },
+    "target3": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "combobox",
+      "label": "备用渠道",
+      "name": "备用渠道"
+    },
+    "result3": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "status",
+      "name": "操作结果"
+    },
+    "target4": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "listbox",
+          "name": "故障切换的备用渠道"
+        }
+      ],
+      "control": "option",
+      "text": "阿里云源"
+    },
+    "result4": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "status",
+      "name": "操作结果"
+    },
+    "target5": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "button",
+      "text": "保存"
+    },
+    "result5": {
+      "page": "模型管理",
+      "scope": [
+        {
+          "kind": "region",
+          "name": "故障切换配置"
+        }
+      ],
+      "control": "status",
+      "name": "操作结果"
+    }
+  },
+  "steps": [
+    {
+      "id": "s1",
+      "sourceStep": 1,
+      "expectedIds": [
+        "search-e1"
+      ],
+      "target": "target0",
+      "action": "fill",
+      "value": "MODEL-UI-001",
+      "assertions": [
+        {
+          "target": "result0",
+          "kind": "value",
+          "expected": "MODEL-UI-001",
+          "evidence": "dom"
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "sourceStep": 2,
+      "expectedIds": [
+        "edit-e1"
+      ],
+      "target": "target1",
+      "action": "click",
+      "assertions": [
+        {
+          "target": "result1",
+          "kind": "text",
+          "expected": "正在编辑：MODEL-UI-001",
+          "evidence": "dom"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "sourceStep": 3,
+      "expectedIds": [
+        "switch-e1"
+      ],
+      "target": "target2",
+      "action": "check",
+      "value": true,
+      "assertions": [
+        {
+          "target": "result2",
+          "kind": "text",
+          "expected": "故障切换：已启用",
+          "evidence": "dom"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "sourceStep": 4,
+      "expectedIds": [
+        "select-e1"
+      ],
+      "target": "target3",
+      "action": "click",
+      "assertions": [
+        {
+          "target": "result3",
+          "kind": "text",
+          "expected": "备用渠道选项：已展开",
+          "evidence": "dom"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "sourceStep": 5,
+      "expectedIds": [
+        "option-e1"
+      ],
+      "target": "target4",
+      "action": "click",
+      "assertions": [
+        {
+          "target": "result4",
+          "kind": "text",
+          "expected": "备用渠道：阿里云源",
+          "evidence": "dom"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "sourceStep": 6,
+      "expectedIds": [
+        "save-e1"
+      ],
+      "target": "target5",
+      "action": "click",
+      "assertions": [
+        {
+          "target": "result5",
+          "kind": "text",
+          "expected": "故障切换配置：保存成功",
+          "evidence": "dom"
+        }
+      ]
+    }
+  ],
+  "coverage": [
+    {
+      "expectedId": "search-e1",
+      "stepIds": [
+        "s1"
+      ]
+    },
+    {
+      "expectedId": "edit-e1",
+      "stepIds": [
+        "s2"
+      ]
+    },
+    {
+      "expectedId": "switch-e1",
+      "stepIds": [
+        "s3"
+      ]
+    },
+    {
+      "expectedId": "select-e1",
+      "stepIds": [
+        "s4"
+      ]
+    },
+    {
+      "expectedId": "option-e1",
+      "stepIds": [
+        "s5"
+      ]
+    },
+    {
+      "expectedId": "save-e1",
+      "stepIds": [
+        "s6"
+      ]
+    }
+  ],
+  "unresolved": [],
+  "status": "ready"
+}

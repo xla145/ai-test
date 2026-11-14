@@ -1,0 +1,1446 @@
+{
+  "version": 1,
+  "mode": "live",
+  "startedAt": "2026-11-14T02:43:08.745Z",
+  "timezone": "Asia/Taipei",
+  "model": "qwen3.8-omni-flash",
+  "family": "qwen2.5-vl",
+  "sdk": "1.17.7",
+  "fixtureSha256": "b882ddc373552c45e10ba708f377bce59b4ae36eb87ee5c250fb1eeab03690f8",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "cache": false,
+  "rounds": 3,
+  "observations": [
+    {
+      "round": 1,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 8880,
+      "center": [
+        138,
+        176
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-43-10-bb96afed.html",
+      "mappedTarget": {
+        "testId": "channel-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "channel-search"
+      ],
+      "actual": "",
+      "elapsedMs": 10833
+    },
+    {
+      "round": 1,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 5314,
+      "center": [
+        625,
+        175
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-43-20-c0d5e791.html",
+      "error": "视觉定位不准：落点处是「渠道模型上游模型目录编辑」，不包含「搜索模型」。页面上有 2 处包含「搜索模型」，最近的离落点 180px：改用 find_text「搜索模型」按 context 挑选",
+      "elapsedMs": 6014
+    },
+    {
+      "round": 1,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 3404,
+      "center": [
+        532,
+        566.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-43-26-28c7c769.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 4041
+    },
+    {
+      "round": 1,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 18321,
+      "center": [
+        44,
+        566.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-43-30-7beaa232.html",
+      "mappedTarget": {
+        "testId": "normal-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-check"
+      ],
+      "actual": "待操作",
+      "checked": false,
+      "elapsedMs": 19376
+    },
+    {
+      "round": 1,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 11100,
+      "center": [
+        198.5,
+        620
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-43-50-697e05a5.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 11765
+    },
+    {
+      "round": 1,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 5481,
+      "center": [
+        684.5,
+        620
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-02-1fb04bb8.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "elapsedMs": 6766
+    },
+    {
+      "round": 1,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 8572,
+      "center": [
+        563.5,
+        816.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-09-3c7edfe2.html",
+      "error": "视觉定位不准：落点处是「模型管理 *{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#15233b;font」，不包含「阿里云源」。页面上有 2 处包含「阿里云源」，最近的离落点 175px：改用 find_text「阿里云源」按 context 挑选",
+      "elapsedMs": 9565
+    },
+    {
+      "round": 1,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 8551,
+      "center": [
+        113,
+        816
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-23-60dbbd0f.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源",
+        "note": "落点处是「模型管理 *{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#15233b;font」，已改用 70px 外包含「阿里云源」的元素"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 10564
+    },
+    {
+      "round": 1,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 12080,
+      "center": [
+        64.5,
+        273.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-32-2b9d19cc.html",
+      "mappedTarget": {
+        "testId": "channel-edit",
+        "role": "button",
+        "name": "编辑",
+        "note": "落点处是「渠道模型上游模型目录编辑」，已改用 28px 外包含「编辑」的元素"
+      },
+      "hits": [
+        "channel-edit"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 12841
+    },
+    {
+      "round": 1,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 5649,
+      "center": [
+        867,
+        283
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-46-208065e5.html",
+      "error": "视觉定位不准：落点处是「MODEL-UI-001」，不包含「编辑」。页面上有 3 处包含「编辑」，最近的离落点 252px：改用 find_text「编辑」按 context 挑选",
+      "elapsedMs": 7397
+    },
+    {
+      "round": 1,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 7321,
+      "center": [
+        551.5,
+        676
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-44-53-653601c4.html",
+      "error": "视觉定位不准：落点处是「待操作」，不包含「保存」。页面上有 2 处包含「保存」，最近的离落点 167px：改用 find_text「保存」按 context 挑选",
+      "elapsedMs": 8082
+    },
+    {
+      "round": 1,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 10314,
+      "center": [
+        65,
+        676
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-01-607e5a3c.html",
+      "mappedTarget": {
+        "testId": "normal-save",
+        "role": "button",
+        "name": "保存",
+        "note": "落点处是「待操作」，已改用 54px 外包含「保存」的元素"
+      },
+      "hits": [
+        "normal-save"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 11106
+    },
+    {
+      "round": 2,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 9113,
+      "center": [
+        137.5,
+        175.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-12-506cca56.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_search_2.spec.ts",
+      "elapsedMs": 9759
+    },
+    {
+      "round": 2,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 10650,
+      "center": [
+        137.5,
+        175
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-22-9e42755a.html",
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "elapsedMs": 11259
+    },
+    {
+      "round": 2,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 14708,
+      "center": [
+        44.5,
+        566.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-33-3ea8d714.html",
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "elapsedMs": 15359
+    },
+    {
+      "round": 2,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 6801,
+      "center": [
+        44,
+        567
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-49-653fd161.html",
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "script": "scripts/ui/tc_contract_switch_2.spec.ts",
+      "elapsedMs": 7566
+    },
+    {
+      "round": 2,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 9201,
+      "center": [
+        198,
+        680
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-45-56-4deac242.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 9804
+    },
+    {
+      "round": 2,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 127,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 8585,
+      "center": [
+        199,
+        619
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-46-06-61e5b55c.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 9443
+    },
+    {
+      "round": 2,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 7559,
+      "center": [
+        114,
+        815.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-46-16-e1f568ef.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源",
+        "note": "落点处是「模型管理 *{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#15233b;font」，已改用 69px 外包含「阿里云源」的元素"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 8217
+    },
+    {
+      "round": 2,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 8082,
+      "center": [
+        563,
+        816
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-46-24-0ea45210.html",
+      "error": "视觉定位不准：落点处是「模型管理 *{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#15233b;font」，不包含「阿里云源」。页面上有 2 处包含「阿里云源」，最近的离落点 175px：改用 find_text「阿里云源」按 context 挑选",
+      "elapsedMs": 8652
+    },
+    {
+      "round": 2,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 454.015625,
+        "y": 298,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 7480,
+      "center": [
+        380.5,
+        342
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-46-33-732ca6c4.html",
+      "mappedTarget": {
+        "testId": "edit-target",
+        "role": "button",
+        "name": "编辑",
+        "note": "落点处是「文本模型甲」，已改用 113px 外包含「编辑」的元素"
+      },
+      "hits": [
+        "edit-target"
+      ],
+      "actual": "正在编辑：MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_edit_2.spec.ts",
+      "elapsedMs": 8128
+    },
+    {
+      "round": 2,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 454.015625,
+        "y": 298,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 34009,
+      "center": [
+        380.5,
+        282.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-46-41-14468fde.html",
+      "mappedTarget": {
+        "testId": "edit-other",
+        "role": "button",
+        "name": "编辑",
+        "note": "落点处是「文本模型乙」，已改用 112px 外包含「编辑」的元素"
+      },
+      "hits": [
+        "edit-other"
+      ],
+      "actual": "正在编辑：MODEL-UI-002",
+      "elapsedMs": 34684
+    },
+    {
+      "round": 2,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 7281,
+      "center": [
+        65,
+        676
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-16-7e2f33a7.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存",
+        "note": "落点处是「待操作」，已改用 54px 外包含「保存」的元素"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "elapsedMs": 8061
+    },
+    {
+      "round": 2,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 47,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 6461,
+      "center": [
+        64.5,
+        675.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-24-30555441.html",
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存",
+        "note": "落点处是「待操作」，已改用 54px 外包含「保存」的元素"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "script": "scripts/ui/tc_contract_save_2.spec.ts",
+      "elapsedMs": 7170
+    },
+    {
+      "round": 3,
+      "task": "search",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "搜索模型的输入框",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 9843,
+      "center": [
+        138,
+        175.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-31-d0a1dddf.html",
+      "mappedTarget": {
+        "testId": "channel-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "channel-search"
+      ],
+      "actual": "",
+      "elapsedMs": 10614
+    },
+    {
+      "round": 3,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 6050,
+      "center": [
+        624.5,
+        191
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-42-ce6b0a96.html",
+      "error": "视觉定位不准：落点处是「渠道模型上游模型目录编辑」，不包含「搜索模型」。页面上有 2 处包含「搜索模型」，最近的离落点 182px：改用 find_text「搜索模型」按 context 挑选",
+      "elapsedMs": 6712
+    },
+    {
+      "round": 3,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 5729,
+      "center": [
+        533.5,
+        568
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-49-11e79fe8.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 6287
+    },
+    {
+      "round": 3,
+      "task": "switch",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "启用故障切换开关",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 35955,
+      "center": [
+        44.5,
+        567.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-47-55-5223743a.html",
+      "mappedTarget": {
+        "testId": "normal-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "normal-check"
+      ],
+      "actual": "待操作",
+      "checked": false,
+      "elapsedMs": 36612
+    },
+    {
+      "round": 3,
+      "task": "select",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "备用渠道下拉框",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 7471,
+      "center": [
+        199,
+        619
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-48-32-7553e9e7.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 8112
+    },
+    {
+      "round": 3,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 7322,
+      "center": [
+        686.5,
+        681.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-48-40-c45800b2.html",
+      "error": "page.evaluate: Error: 目标类型不匹配或存在多个控件，请限定表单项；不能操作文字标签或整个容器\n    at normalize (eval at evaluate (:311:30), <anonymous>:146:11)\n    at result (eval at evaluate (:311:30), <anonymous>:215:52)\n    at eval (eval at evaluate (:311:30), <anonymous>:225:15)\n    at eval (eval at evaluate (:311:30), <anonymous>:260:3)\n    at eval (<anonymous>)\n    at UtilityScript.evaluate (<anonymous>:311:30)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "elapsedMs": 7974
+    },
+    {
+      "round": 3,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 8606,
+      "center": [
+        563.5,
+        816
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-48-48-9925cdd1.html",
+      "error": "视觉定位不准：落点处是「模型管理 *{box-sizing:border-box}body{margin:0;background:#f3f5f8;color:#15233b;font」，不包含「阿里云源」。页面上有 2 处包含「阿里云源」，最近的离落点 175px：改用 find_text「阿里云源」按 context 挑选",
+      "elapsedMs": 9300
+    },
+    {
+      "round": 3,
+      "task": "option",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "阿里云源选项",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 23923,
+      "center": [
+        142.5,
+        755
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-48-58-fc4e7214.html",
+      "mappedTarget": {
+        "testId": "normal-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "normal-option"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 24611
+    },
+    {
+      "round": 3,
+      "task": "edit",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "编辑按钮",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 13485,
+      "center": [
+        64.5,
+        273.5
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-49-22-ce292d5b.html",
+      "mappedTarget": {
+        "testId": "channel-edit",
+        "role": "button",
+        "name": "编辑",
+        "note": "落点处是「渠道模型上游模型目录编辑」，已改用 28px 外包含「编辑」的元素"
+      },
+      "hits": [
+        "channel-edit"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 14203
+    },
+    {
+      "round": 3,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 6825,
+      "center": [
+        867.5,
+        282
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-49-37-92b91c1a.html",
+      "error": "视觉定位不准：落点处是「MODEL-UI-001」，不包含「编辑」。页面上有 3 处包含「编辑」，最近的离落点 251px：改用 find_text「编辑」按 context 挑选",
+      "elapsedMs": 7367
+    },
+    {
+      "round": 3,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": false,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 10111,
+      "center": [
+        552,
+        676
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-49-44-ff7b0b70.html",
+      "error": "视觉定位不准：落点处是「待操作」，不包含「保存」。页面上有 2 处包含「保存」，最近的离落点 167px：改用 find_text「保存」按 context 挑选",
+      "elapsedMs": 10682
+    },
+    {
+      "round": 3,
+      "task": "save",
+      "arm": "brief",
+      "rawHit": false,
+      "mappedHit": false,
+      "actionCompleted": true,
+      "correctOutcome": false,
+      "request": {
+        "prompt": "保存按钮",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 9190,
+      "center": [
+        65,
+        676
+      ],
+      "reportFile": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/midscene/report/playwright-2026-11-14_10-49-55-45196aae.html",
+      "mappedTarget": {
+        "testId": "normal-save",
+        "role": "button",
+        "name": "保存",
+        "note": "落点处是「待操作」，已改用 54px 外包含「保存」的元素"
+      },
+      "hits": [
+        "normal-save"
+      ],
+      "actual": "待操作",
+      "elapsedMs": 9910
+    }
+  ],
+  "replays": [
+    {
+      "repetition": 1,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.38,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.228,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.186,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.223,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/workspace/reports/ui-2026-11-14T02-50-04-763Z/report.json"
+    },
+    {
+      "repetition": 2,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.303,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.24,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.196,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.27,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/workspace/reports/ui-2026-11-14T02-50-06-752Z/report.json"
+    },
+    {
+      "repetition": 3,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_2",
+          "status": "passed",
+          "duration": 0.319,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_2",
+          "status": "passed",
+          "duration": 0.228,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_2",
+          "status": "passed",
+          "duration": 0.188,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_2",
+          "status": "passed",
+          "duration": 0.297,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/live/workspace/reports/ui-2026-11-14T02-50-08-641Z/report.json"
+    }
+  ],
+  "finishedAt": "2026-11-14T02:50:10.528Z",
+  "summary": {
+    "brief": {
+      "total": 18,
+      "rawHit": 1,
+      "mappedHit": 3,
+      "correctOutcome": 3,
+      "errors": 3,
+      "locateMedianMs": 10482
+    },
+    "structured": {
+      "total": 18,
+      "rawHit": 1,
+      "mappedHit": 4,
+      "correctOutcome": 4,
+      "errors": 13,
+      "locateMedianMs": 7073
+    }
+  }
+}

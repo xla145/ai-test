@@ -1,3 +1,5 @@
+import { ExecutionResult } from "./api/ExecutionResult";
+import type { ApiDebugResult } from "../../shared/apiWorkspace";
 import { EvidenceImage } from "../components/EvidenceImage";
 import {
   ApiOutlined,
@@ -48,6 +50,7 @@ interface RunRow {
 }
 
 interface ResultRow {
+  api_trace?: ApiDebugResult;
   case_id: string;
   title: string;
   module: string;
@@ -98,19 +101,21 @@ export function ReportsPage({ project }: { project: Project }) {
     <>
       <PageHeader
         title="测试报告"
-        description="每次回归的执行记录。可查看明细、打开 Playwright 报告，或导出可直接发给别人的汇总报告（可合并多次执行，例如接口 + UI）。"
+        description="查看回归结果与失败明细，勾选多次执行可合并导出报告。"
         extra={<>
           <Segmented value={framework} onChange={(v) => { setFramework(v as typeof framework); setSelected([]); }}
             options={[{ label: "全部", value: "all" }, { label: "接口", value: "pytest" }, { label: "UI", value: "playwright" }]} />
-          <Button icon={<ReloadOutlined />} onClick={() => runs.reload()} />
+          <Button aria-label="刷新执行记录" title="刷新执行记录" icon={<ReloadOutlined />} onClick={() => runs.reload()} />
           <Dropdown menu={exportMenu(selected)} disabled={!selected.length}>
             <Button type="primary" icon={<ExportOutlined />} loading={busy}>
-              导出{selected.length > 1 ? `（合并 ${selected.length} 次）` : selected.length ? "" : "（先勾选执行记录）"}
+              导出报告{selected.length > 0 ? `（${selected.length}）` : ""}
             </Button>
           </Dropdown>
         </>}
       />
+      <div className="data-surface reports-surface">
       <Table<RunRow>
+        size="small" scroll={{ x: 900 }}
         rowKey="id"
         loading={runs.loading}
         dataSource={runs.data}
@@ -125,7 +130,7 @@ export function ReportsPage({ project }: { project: Project }) {
           { title: "环境", dataIndex: "env", width: 90 },
           { title: "模式", dataIndex: "mode", width: 70, render: (v: string) => MODE[v] ?? v },
           { title: "通过率", dataIndex: "pass_rate", render: (v: number, r) => (
-            <Space style={{ width: "100%" }}>
+            <Space className="report-pass-rate" style={{ width: "100%" }}>
               <Progress percent={Math.round(v * 100)} size="small" style={{ width: 140, margin: 0 }} status={r.failed ? "exception" : "success"} />
               <Typography.Text type="secondary">{r.passed}/{r.total - r.skipped}</Typography.Text>
             </Space>
@@ -143,6 +148,7 @@ export function ReportsPage({ project }: { project: Project }) {
           ) },
         ]}
       />
+      </div>
       {open && <RunDrawer project={project} run={open} onClose={() => setOpen(undefined)} onExport={(f) => exportRuns([open.id], f)} busy={busy} />}
     </>
   );
@@ -164,7 +170,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
       width={860}
       onClose={onClose}
       title={<Space>{r.framework === "playwright" ? "UI" : "接口"}{MODE[r.mode] ?? r.mode}<Typography.Text type="secondary" className="mono">{r.id}</Typography.Text></Space>}
-      extra={<Space>
+      extra={<Space wrap>
         {r.html_report && <Button icon={<ChromeOutlined />} onClick={() => run(() => api().openPath(r.html_report!))}>Playwright 报告</Button>}
         {(r.html_report || r.junit) && (
           <Button icon={<FolderOpenOutlined />} onClick={() => run(() => api().showInFolder((r.html_report || r.junit)!))}>所在文件夹</Button>
@@ -180,11 +186,11 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             { key: "e", label: "环境", children: d.run.base_url ? <Tooltip title={d.run.base_url}>{d.run.env}</Tooltip> : d.run.env },
             { key: "d", label: "耗时", children: `${d.summary.duration.toFixed(1)} 秒` },
           ]} />
-          <Row gutter={12} style={{ margin: "12px 0 16px" }}>
-            <Col span={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "#3f8600" }} /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "#cf1322" : undefined }} /></Card></Col>
-            <Col span={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
+          <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
           </Row>
           {Object.keys(d.summary.failure_types).length > 0 && (
             <div style={{ marginBottom: 12 }}><Space wrap>
@@ -205,6 +211,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
               rowExpandable: (x) => !!(x.message || x.evidence_paths.length || x.reviews.length),
               expandedRowRender: (x) => (
                 <Space direction="vertical" style={{ width: "100%" }}>
+                  {x.api_trace && <ExecutionResult result={{ ...x.api_trace, id: r.id, env: r.env, title: x.title, created_at: r.started_at }} />}
                   {x.attribution_reason && <Typography.Text>{x.attribution_reason}</Typography.Text>}
                   {x.message && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0, maxHeight: 240, overflow: "auto" }}>{x.message}</pre>}
                   {x.evidence_paths.length > 0 && (

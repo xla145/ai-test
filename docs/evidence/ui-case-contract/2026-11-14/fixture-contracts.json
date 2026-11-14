@@ -1,0 +1,478 @@
+[
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_search",
+    "title": "本地夹具-search",
+    "source": {
+      "caseId": "fixture-search",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "search-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "平台模型"
+          }
+        ],
+        "control": "textbox",
+        "placeholder": "搜索模型"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "平台模型"
+          }
+        ],
+        "control": "textbox",
+        "placeholder": "搜索模型"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "search-e1"
+        ],
+        "target": "target",
+        "action": "fill",
+        "value": "MODEL-UI-001",
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "value",
+            "expected": "MODEL-UI-001",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "search-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  },
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_switch",
+    "title": "本地夹具-switch",
+    "source": {
+      "caseId": "fixture-switch",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "switch-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "checkbox",
+        "label": "启用故障切换"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "status",
+        "name": "操作结果"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "switch-e1"
+        ],
+        "target": "target",
+        "action": "check",
+        "value": true,
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "text",
+            "expected": "故障切换：已启用",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "switch-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  },
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_select",
+    "title": "本地夹具-select",
+    "source": {
+      "caseId": "fixture-select",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "select-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "combobox",
+        "label": "备用渠道",
+        "name": "备用渠道"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "status",
+        "name": "操作结果"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "select-e1"
+        ],
+        "target": "target",
+        "action": "click",
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "text",
+            "expected": "备用渠道选项：已展开",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "select-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  },
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_option",
+    "title": "本地夹具-option",
+    "source": {
+      "caseId": "fixture-option",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "option-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "listbox",
+            "name": "故障切换的备用渠道"
+          }
+        ],
+        "control": "option",
+        "text": "阿里云源"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "status",
+        "name": "操作结果"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "option-e1"
+        ],
+        "target": "target",
+        "action": "click",
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "text",
+            "expected": "备用渠道：阿里云源",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "option-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  },
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_edit",
+    "title": "本地夹具-edit",
+    "source": {
+      "caseId": "fixture-edit",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "edit-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "平台模型"
+          },
+          {
+            "kind": "row",
+            "name": "模型记录",
+            "key": "MODEL-UI-001"
+          }
+        ],
+        "control": "button",
+        "text": "编辑"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "平台模型"
+          }
+        ],
+        "control": "status",
+        "name": "操作结果"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "edit-e1"
+        ],
+        "target": "target",
+        "action": "click",
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "text",
+            "expected": "正在编辑：MODEL-UI-001",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "edit-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  },
+  {
+    "version": "ui-execution/0.1",
+    "id": "tc_contract_save",
+    "title": "本地夹具-save",
+    "source": {
+      "caseId": "fixture-save",
+      "stepIndexes": [
+        1
+      ],
+      "expectedIds": [
+        "save-e1"
+      ]
+    },
+    "execution": {
+      "environment": "local-fixture",
+      "role": "fixture-operator",
+      "entry": "/models",
+      "data": [
+        {
+          "ref": "fixture-models",
+          "key": "MODEL-UI-001"
+        }
+      ]
+    },
+    "targets": {
+      "target": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "button",
+        "text": "保存"
+      },
+      "result": {
+        "page": "模型管理",
+        "scope": [
+          {
+            "kind": "region",
+            "name": "故障切换配置"
+          }
+        ],
+        "control": "status",
+        "name": "操作结果"
+      }
+    },
+    "steps": [
+      {
+        "id": "s1",
+        "sourceStep": 1,
+        "expectedIds": [
+          "save-e1"
+        ],
+        "target": "target",
+        "action": "click",
+        "assertions": [
+          {
+            "target": "result",
+            "kind": "text",
+            "expected": "故障切换配置：保存成功",
+            "evidence": "dom"
+          }
+        ]
+      }
+    ],
+    "coverage": [
+      {
+        "expectedId": "save-e1",
+        "stepIds": [
+          "s1"
+        ]
+      }
+    ],
+    "unresolved": [],
+    "status": "ready"
+  }
+]

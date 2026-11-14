@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
+import { describeTarget, generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
 import { checkData, seedData, setServerClock } from "../src/ui/envSupport.js";
-import { candidates, toCode } from "../src/ui/locator.js";
+import { candidates, isPositional, specTexts, toCode } from "../src/ui/locator.js";
 import { chooseBrowser } from "../src/ui/chromium.js";
 import { resolveRole, UI_SERVERS } from "../src/ui/tools.js";
 import { caseIdFromTitle, classifyUiFailure, parseReport, reportErrors } from "../src/ui/runner.js";
@@ -15,6 +15,24 @@ describe("locator priority", () => {
     expect(c.map((x) => x.kind)).toEqual(["testid", "role", "text", "css"]);
     expect(candidates({ tag: "div", css: "/html/body/div" })).toEqual([]);
     expect(toCode({ kind: "role", role: "button", name: '说"明"' })).toBe('page.getByRole("button", { name: "说\\"明\\"", exact: true })');
+  });
+
+  it("puts row-scoped and text-filtered locators before positional CSS", () => {
+    const c = candidates({ tag: "button", role: "button", name: "停用", css: "tbody > tr:nth-of-type(2) > td > button",
+      cssLoose: "button.el-button", labelText: "停用", row: { css: "tr", key: "TAG-2002", inner: "button" } });
+    expect(c.map((x) => toCode(x))).toEqual([
+      'page.getByRole("button", { name: "停用", exact: true })',
+      'page.locator("tr", { hasText: "TAG-2002" }).getByRole("button", { name: "停用", exact: true })',
+      'page.locator("tr", { hasText: "TAG-2002" }).locator("button")',
+      'page.locator("button.el-button", { hasText: "停用" })',
+      'page.locator("tbody > tr:nth-of-type(2) > td > button")',
+    ]);
+    expect(c.map(isPositional)).toEqual([false, false, false, false, true]);
+    // 断言文字出现在这些定位器的识别文字里时，断言等于定位器本身
+    expect(specTexts(c[1])).toEqual(["停用", "TAG-2002"]);
+    expect(specTexts(c[3])).toEqual(["停用"]);
+    expect(describeTarget(c[1])).toBe("「TAG-2002」所在行的 button「停用」");
+    expect(describeTarget(c[3])).toBe("button.el-button「停用」");
   });
 });
 
@@ -110,12 +128,12 @@ describe("browser tools", () => {
 });
 
 describe("role resolution", () => {
-  it("maps the case's wording to the closest configured role", () => {
+  it("requires an exact role instead of silently changing permissions", () => {
     expect(resolveRole("管理员", ["管理员", "运营"])).toBe("管理员");
-    expect(resolveRole("运营管理员", ["管理员"])).toBe("管理员");
-    expect(resolveRole("运营管理员", ["管理员", "运营管理"])).toBe("运营管理");
-    expect(resolveRole("运营", ["运营管理员"])).toBe("运营管理员");
-    expect(resolveRole("访客", ["管理员"])).toBe("访客");
+    expect(() => resolveRole("运营管理员", ["管理员"])).toThrow("未配置");
+    expect(() => resolveRole("运营管理员", ["管理员", "运营管理"])).toThrow("未配置");
+    expect(() => resolveRole("运营", ["运营管理员"])).toThrow("未配置");
+    expect(() => resolveRole("访客", ["管理员"])).toThrow("未配置");
   });
 });
 
@@ -142,6 +160,21 @@ describe("browser choice", () => {
 });
 
 describe("runner report parsing", () => {
+  it("exposes page-level 5xx evidence without turning every locator timeout into an environment verdict", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-context-"));
+    try {
+      const path = join(dir, "error-context.md");
+      writeFileSync(path, '# Page snapshot\n\n```yaml\n- alert: 系统接口502异常\n```');
+      const report = (status: string) => JSON.stringify({ suites: [{ specs: [{ title: "tc_x", file: "tc_x.spec.ts", tests: [{ results: [{ status, duration: 1, error: { message: "locator.fill: Timeout" }, attachments: [{ name: "error-context", path }] }] }] }] }] });
+      const result = parseReport(report("failed"), dir)[0];
+      expect(result.environment_hint).toContain("5xx");
+      expect(result.failure_type).toBeUndefined();
+      expect(parseReport(report("passed"), dir)[0].environment_hint).toBeUndefined();
+      writeFileSync(path, '# Page snapshot\n\n```yaml\n- textbox: 搜索模型名称\n```');
+      expect(parseReport(report("failed"), dir)[0].environment_hint).toBeUndefined();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("maps playwright json to engine results with evidence and reviews", () => {
     const report = { suites: [{ suites: [{ specs: [
       { title: "tc_a 标题", file: "tc_a.spec.ts", tests: [{ annotations: [{ type: "ai-visual-check", description: "灰色" }],

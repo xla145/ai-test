@@ -20,6 +20,7 @@ from . import api_selection, apigen, db, docparser, heal, hierarchy, importer, l
 from .models import PROJECT_TYPES, AgentSession, Project, ReviewItem, RoleAccount, Run, RunResult, Script, TestCase, TestData, dumps
 from .schema import validate_case
 from .store import CaseValidationError, Store
+from . import api_workspace
 
 DEFAULT_DB = os.environ.get("AITEST_DB", str(Path.home() / ".aitest" / "aitest.db"))
 
@@ -129,6 +130,11 @@ def cmd_parse_openapi(store: Store, a: argparse.Namespace) -> Any:
     }
 
 
+def cmd_api_workspace(store: Store, a: argparse.Namespace) -> Any:
+    payload = json.loads(Path(a.file).read_text(encoding="utf-8")) if a.file else {}
+    return api_workspace.dispatch(store, a.project, a.action, payload)
+
+
 def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     _leaf(store, a.project)
     column_map = json.loads(a.column_map) if a.column_map else None
@@ -202,6 +208,22 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
         raise KeyError(a.case)
     patch = json.loads(a.json)
     merged = {**case.to_dict(), **patch, "id": case.id, "project_id": case.project_id}
+    if case.is_api_executable and case.api_variable_scope == "case":
+        execution_changed = bool(set(patch) - {"status", "owner", "title", "priority", "module_path"})
+        if execution_changed:
+            merged["status"] = "draft"
+            merged["api_revision"] = case.api_revision + 1
+        if merged.get("status") == "reviewed":
+            requests = [merged["api"]] if merged.get("api") else merged.get("api_flow", [])
+            api_workspace.validate_requests(requests, merged.get("api_inputs"), merged.get("api_cleanup"))
+            if merged.get("api_needs_review"):
+                raise ValueError("接口定义已变化，请同步或确认来源版本后重新保存")
+            api_workspace.ensure_schema(store)
+            definition_map = {d["id"]: d for d in api_workspace.definitions(store, case.project_id)}
+            if any(definition_map.get(s.get("definition_id"), {}).get("unsupported_body") for s in [*requests, *merged.get("api_cleanup", [])]):
+                raise ValueError("当前仅支持 JSON 请求体，其他请求类型暂不能审核回归")
+            if any(not (s.get("expected_status") or s.get("expected_fields") or s.get("assertions") or s.get("response_schema")) for s in requests):
+                raise ValueError("正式回归用例的每个请求都需要断言")
     # 导入草稿允许不完整，逐项修正时只校验本次修改；审核后的用例必须完整。
     reviewing = merged.get("status") == "reviewed"
     errors = validate_case(merged if reviewing else patch, partial=not reviewing)
@@ -285,10 +307,24 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
         auth_token=os.environ.get("AITEST_AUTH_TOKEN", ""),
         timeout=float(env_cfg.get("timeout", 30)),
         api_login=env_cfg.get("api_login") or None,
+        api_crypto=env_cfg.get("api_crypto") or None,
     )
     suite_dir = Path(p.workspace_path) / "scripts" / "api"
+    # New workbench cases may only execute the reviewed revision, including legacy full-suite calls.
+    expected_revisions = {}
+    compiled_ids = set()
+    if case_ids is None:
+        for data_file in (suite_dir / "data").glob("*.json"):
+            compiled_ids.update(item.get("case_id") for item in json.loads(data_file.read_text(encoding="utf-8")))
+    selected_ids = set(case_ids) if case_ids is not None else compiled_ids
+    for case in store.list_cases(p.id, execution_mode="api"):
+        if case.api_variable_scope == "case" and case.id in selected_ids:
+            api_selection.validate_selection(store, p.id, [case.id])
+            expected_revisions[case.id] = case.api_revision
     # 入库校验需要的数据库连接（密码来自 AITEST_DB_PASSWORDS，只传给脚本进程）
     db_env = db.runtime_env(db.configs_for_env(env_cfg))
+    if expected_revisions:
+        db_env["AITEST_API_REVISIONS"] = json.dumps(expected_revisions)
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
                                      report_dir=Path(p.workspace_path) / "reports", extra_env=db_env, case_ids=case_ids)
     store.save_run(run, results)
@@ -681,6 +717,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("list-sections", cmd_list_sections, (("--project",), req), (("--query",), {}),
         (("--full",), {"action": "store_true"}))
     add("parse-openapi", cmd_parse_openapi, (("--file",), {**req, "help": "JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址"}))
+    add("api-workspace", cmd_api_workspace, (("--project",), req), (("--action",), req), (("--file",), {}))
     add("import-excel", cmd_import_excel, (("--project",), req), (("--file",), req), (("--sheet",), {}),
         (("--column-map",), {}))
     add("lint", cmd_lint, (("--project",), req), (("--case-ids",), {}),

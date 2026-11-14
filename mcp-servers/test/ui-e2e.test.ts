@@ -30,6 +30,7 @@ let client: Client;
 let projectId: string;
 let caseId: string;
 let matrixCaseId: string;
+let visionTarget = (page: any) => page.getByPlaceholder("搜索标签");
 
 const call = async (name: string, args: Record<string, unknown> = {}) => {
   const res = await client.callTool({ name, arguments: args });
@@ -52,7 +53,7 @@ beforeAll(async () => {
   caseId = await mk({ title: "标签管理-停用标签", steps: ["进入标签管理", "停用 TAG-1001"], expected: ["列表显示 TAG-1001", "状态显示已停用，并上报 click 埋点"] });
   matrixCaseId = await mk({ title: "权限-标签管理菜单", steps: ["管理员登录查看菜单", "访客登录查看菜单"], expected: ["显示标签管理", "不显示标签管理"] });
 
-  // 视觉定位用假的 Midscene：返回元素中心坐标
+  // 视觉定位用假的 Midscene：返回 visionTarget 指向元素的中心坐标（默认搜索框）
   let pageRef: any;
   const vision: VisionAgentFactory = async (page) => {
     pageRef = page;
@@ -60,7 +61,7 @@ beforeAll(async () => {
       aiAct: async () => undefined,
       aiAssert: async (a) => { if (a.includes("红色")) throw new Error("不是红色"); },
       aiLocate: async () => {
-        const box = (await pageRef.getByPlaceholder("搜索标签").boundingBox())!;
+        const box = (await visionTarget(pageRef).boundingBox())!;
         return { center: [box.x + box.width / 2, box.y + box.height / 2] as [number, number] };
       },
     };
@@ -136,6 +137,8 @@ describe("browser MCP server: explore → script → regression → heal input",
 
   it("runs the generated scripts as a regression without any model", async () => {
     const out = await call("run_playwright_script", {});
+    expect(out).toMatchObject({ persisted: false, attribution_supported: false });
+    expect(out.note).toContain("不要调用 record_attribution");
     expect(out.results.map((r: any) => [r.case_id, r.status])).toEqual(
       expect.arrayContaining([[caseId, "passed"], [matrixCaseId, "passed"]]),
     );
@@ -159,5 +162,137 @@ describe("browser MCP server: explore → script → regression → heal input",
     const run = await engine<any>(["save-run", "--project", projectId, "--env", "test", "--results-file", join(dir, "r.json")]);
     expect(run.needs_agent).toEqual([caseId]);
     app.state.version = 1;
+  }, 120_000);
+
+  it("explores with fewer round trips: actions return snapshots, find_text locates plain text, mismatches fail fast", async () => {
+    await call("open_project", { project_id: projectId, env: "test" });
+    await call("new_role_context", { role: "admin" });
+    const nav = await call("navigate", { url: "/tags" });
+    expect(nav.snapshot.title).toBe("标签管理");
+    const search = nav.snapshot.elements.find((e: any) => e.placeholder === "搜索标签");
+
+    // 非交互文字：不调用视觉模型，按文本拿到可录制的 ref，带所在行的上下文
+    const found = await call("find_text", { text: "TAG-1001", exact: true });
+    expect(found.matches).toHaveLength(1);
+    expect(found.matches[0]).toMatchObject({ text: "TAG-1001" });
+    expect(found.matches[0].context).toContain("TAG-1001");
+    await call("expect_text", { ref: found.matches[0].ref, text: "TAG-1001" });
+    expect((await call("find_text", { text: "不存在的文字" })).matches).toEqual([]);
+
+    // 连续按键一次完成，每个按键各录一步；返回操作后的快照
+    await call("click", { ref: search.ref });
+    const pressed = await call("press", { key: ["Tab", "Tab"] });
+    expect(pressed.snapshot.elements.length).toBeGreaterThan(0);
+    // 旧 ref 在新快照后仍可用
+    await call("expect_text", { ref: found.matches[0].ref, text: "TAG-1001" });
+
+    // 已抓到请求但字段不匹配：很快失败，并给出实际抓到的内容
+    await call("start_capture", { name: "fastEvents", url_pattern: "/track" });
+    const btn = (await call("snapshot")).elements.find((e: any) => /^disable-|^tag-disable-/.test(e.testId ?? ""));
+    const clicked = await call("click", { ref: btn.ref });
+    expect(clicked.snapshot).toBeDefined();
+    await call("expect_request", { name: "fastEvents", fields: { event: "click" } });
+    const t0 = Date.now();
+    await expect(call("expect_request", { name: "fastEvents", fields: { event: "nope" } })).rejects.toThrow(/最近抓到：POST .*\/track/);
+    expect(Date.now() - t0).toBeLessThan(1500);
+
+    const steps = await call("recording");
+    expect(steps.filter((st: any) => st.action === "press").map((st: any) => st.key)).toEqual(["Tab", "Tab"]);
+    // 对按 TAG-1001 找到的单元格断言「包含 TAG-1001」恒成立：录成等价的可见断言
+    expect(steps.filter((st: any) => st.action === "expectVisible")).toHaveLength(2);
+    expect(steps.filter((st: any) => st.action === "expectText")).toHaveLength(0);
+    await call("open_project", { project_id: projectId, env: "test" }); // 清空录制，不影响其它用例
+  }, 60_000);
+
+  it("verifies visual locating against the target text instead of returning whatever is under the point", async () => {
+    await call("open_project", { project_id: projectId, env: "test" });
+    await call("new_role_context", { role: "admin" });
+    await call("navigate", { url: "/tags" });
+    const status = (await call("find_text", { text: "TAG-1001", exact: true })).matches[0];
+    const statusText = (await call("snapshot")).text.includes("已停用") ? "已停用" : "启用中";
+    try {
+      // 模型点到了同一行的标签编号单元格，要找的是状态：改用附近包含目标文字的元素
+      visionTarget = (page) => page.getByText("TAG-1001", { exact: true });
+      const fixed = await call("ai_locate", { prompt: `TAG-1001 这一行的状态文字`, text: statusText });
+      expect(fixed).toMatchObject({ verified: true, expected: statusText, testId: "status-TAG-1001" });
+      expect(fixed.note).toContain("已改用");
+      await call("expect_text", { ref: fixed.ref, text: statusText });
+
+      // 落点正确：不调整
+      visionTarget = (page) => page.getByTestId("status-TAG-1001");
+      const exact = await call("ai_locate", { prompt: `状态徽标「${statusText}」`, text: statusText });
+      expect(exact).toMatchObject({ verified: true, testId: "status-TAG-1001" });
+      expect(exact.note).toBeUndefined();
+
+      // 页面上根本没有目标文字：报错，不返回错的元素
+      await expect(call("ai_locate", { prompt: "状态徽标「已归档」", text: "已归档" })).rejects.toThrow(/视觉定位不准：落点处是「.*」，不包含「已归档」/);
+
+      // 多处引号无法判断目标：不校验，并明确告知
+      visionTarget = (page) => page.getByText("TAG-1001", { exact: true });
+      const unverified = await call("ai_locate", { prompt: "「TAG-1001」所在行的「状态」" });
+      expect(unverified).toMatchObject({ verified: false, text: "TAG-1001" });
+      // 引号也可能描述参照物，不能自动把它当作目标文字。
+      visionTarget = (page) => page.getByPlaceholder("搜索标签");
+      const input = await call("ai_locate", { prompt: "「搜索」按钮左侧的输入框", intent: "fill" });
+      expect(input).toMatchObject({ verified: false, text_verified: false, intent_verified: true, role: "textbox" });
+      await call("type", { ref: input.ref, text: "TAG" });
+      expect(status.ref).toBeTruthy();
+    } finally {
+      visionTarget = (page) => page.getByPlaceholder("搜索标签");
+      await call("open_project", { project_id: projectId, env: "test" });
+    }
+  }, 60_000);
+
+  it("records selectors that survive row reordering and asserts on the element that shows the text", async () => {
+    const listCase = (await engine<{ id: string }>(["create-case", "--project", projectId, "--json", JSON.stringify({
+      type: "ui", priority: "P1", title: "标签列表-停用第二个标签", steps: ["停用 TAG-2002"], expected: ["TAG-2002 状态为已停用", "共 3 条"] })])).id;
+    await call("open_project", { project_id: projectId, env: "test" });
+    await call("new_role_context", { role: "admin" });
+    const nav = await call("navigate", { url: "/list" });
+
+    // 每行都有「停用」：限定到 TAG-2002 那一行，不用行号，也不用 el-id-* 这类生成的 id
+    const btn = (await call("find_text", { text: "停用", exact: true })).matches.find((m: any) => m.context?.includes("TAG-2002"));
+    const clicked = await call("click", { ref: btn.ref });
+    expect(clicked.locator).toEqual({ kind: "role", role: "button", name: "停用", within: { css: "tr", hasText: "TAG-2002" } });
+
+    // 状态单元格：按行 + 行内位置断言，而不是按「已停用」这段字找（TAG-2003 也是已停用）
+    const status = (await call("find_text", { text: "已停用", exact: true })).matches.find((m: any) => m.context?.includes("TAG-2002"));
+    const st = await call("expect_text", { ref: status.ref, text: "已停用" });
+    expect(st.locator).toEqual({ kind: "css", value: "span.status", within: { css: "tr", hasText: "TAG-2002" } });
+
+    // 断言落在整块区域上：收窄到显示这段文字的元素
+    const region = nav.snapshot.elements.find((e: any) => e.role === "region");
+    const total = await call("expect_text", { ref: region.ref, text: "共 3 条" });
+    expect(total.note).toContain("已改为断言其中显示「共 3 条」的元素");
+    expect(total.locator).toEqual({ kind: "css", value: "span.el-pagination__total" });
+    // 「不包含」仍对整块区域断言；选择器不带生成的 id 和状态 class
+    const none = await call("expect_no_text", { ref: region.ref, text: "TAG-9999" });
+    expect(none.locator).toEqual({ kind: "css", value: "div.fc-split-main" });
+
+    // 按 TAG-2001 找到的单元格再断言包含 TAG-2001：录成「可见」，再断言一次不重复录入
+    const key = (await call("find_text", { text: "TAG-2001", exact: true })).matches[0];
+    const same = await call("expect_text", { ref: key.ref, text: "TAG-2001" });
+    expect(same.note).toContain("已录为「可见」断言");
+    expect(same.locator).toEqual({ kind: "text", value: "TAG-2001" });
+    expect((await call("expect_visible", { ref: key.ref })).note).toContain("未重复录入");
+
+    const saved = await call("save_ui_script", { case_id: listCase });
+    const spec = readFileSync(join(dir, "ws", saved.path), "utf8");
+    expect(spec).toContain('await page.locator("tr", { hasText: "TAG-2002" }).getByRole("button", { name: "停用", exact: true }).click();');
+    expect(spec).not.toMatch(/nth-of-type|el-id-|is-active|el-table_1/);
+    expect(spec.match(/toBeVisible/g)).toHaveLength(1);
+
+    // 行顺序变了，脚本照样通过
+    app.state.listOrder = ["TAG-2002", "TAG-2003", "TAG-2001"];
+    try {
+      const out = await runUiSuite({
+        workspace: join(dir, "ws"), baseUrl: app.url, caseIds: [listCase],
+        env: { AITEST_ROLES: JSON.stringify(ROLES), AITEST_LOGIN: JSON.stringify(LOGIN) },
+      });
+      expect(out.results.map((r) => [r.status, r.message])).toEqual([["passed", ""]]);
+    } finally {
+      app.state.listOrder = ["TAG-2001", "TAG-2002", "TAG-2003"];
+      await call("open_project", { project_id: projectId, env: "test" });
+    }
   }, 120_000);
 });

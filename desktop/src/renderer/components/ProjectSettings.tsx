@@ -309,7 +309,8 @@ function EnvModal({ open, name, base, overriding, existing, suggestName, busy, o
         ]}>
           <Input className="mono" placeholder="https://test.example.com" />
         </Form.Item>
-        <Form.Item name="auth_header" label="鉴权头" extra="留空使用 Authorization">
+        <Form.Item name="auth_header" label="鉴权请求头名称" extra="填写 Authorization 等头名称，不能填写 token；留空使用 Authorization"
+          rules={[{ pattern: /^[!#$%&'*+.^_`|~0-9A-Za-z-]*$/, message: "这里只填写请求头名称，例如 Authorization；token 请通过网页登录或环境凭据保存" }]}>
           <Input placeholder="Authorization" />
         </Form.Item>
         <Form.Item name="production" label="生产环境" valuePropName="checked" extra="执行回归前需要二次确认">

@@ -25,7 +25,7 @@ export function EnvCredentials({ project, env, onEnvChange }: { project: Project
         <Form.Item name="token" rules={[{ required: true, message: "请输入 token" }]}>
           <Input.Password placeholder={`「${env}」的鉴权 token，如 Bearer xxx`} style={{ width: 320, maxWidth: "100%" }} />
         </Form.Item>
-        <Form.Item name="header"><Input placeholder="鉴权头（默认 Authorization）" style={{ width: 220 }} /></Form.Item>
+        <Form.Item name="header" rules={[{ pattern: /^[!#$%&'*+.^_`|~0-9A-Za-z-]*$/, message: "请填写请求头名称，例如 Authorization" }]}><Input placeholder="请求头名称（默认 Authorization）" style={{ width: 220 }} /></Form.Item>
         <Form.Item><Button htmlType="submit" loading={busy} disabled={!env}>保存到钥匙串</Button></Form.Item>
       </Form>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>

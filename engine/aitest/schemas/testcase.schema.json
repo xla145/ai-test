@@ -166,7 +166,7 @@
               "items": {
                 "type": "integer"
               },
-              "minItems": 1
+              "minItems": 0
             },
             "response_schema": {
               "type": [
@@ -243,6 +243,49 @@
                   }
                 }
               }
+            },
+            "definition_id": {
+              "type": "string"
+            },
+            "definition_revision": {
+              "type": "integer"
+            },
+            "timeout": {
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 300
+            },
+            "assertions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "operator"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "operator": {
+                    "enum": [
+                      "eq",
+                      "ne",
+                      "exists",
+                      "not_empty",
+                      "contains",
+                      "gt",
+                      "gte",
+                      "lt",
+                      "lte"
+                    ]
+                  }
+                }
+              }
+            },
+            "encrypt": {
+              "type": "boolean"
             }
           }
         }
@@ -290,7 +333,7 @@
             "items": {
               "type": "integer"
             },
-            "minItems": 1
+            "minItems": 0
           },
           "response_schema": {
             "type": [
@@ -367,9 +410,234 @@
                 }
               }
             }
+          },
+          "definition_id": {
+            "type": "string"
+          },
+          "definition_revision": {
+            "type": "integer"
+          },
+          "timeout": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 300
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "operator"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "exists",
+                    "not_empty",
+                    "contains",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte"
+                  ]
+                }
+              }
+            }
+          },
+          "encrypt": {
+            "type": "boolean"
           }
         }
       }
+    },
+    "api_cleanup": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "method",
+          "path",
+          "expected_status"
+        ],
+        "properties": {
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "path_params": {
+            "type": "object"
+          },
+          "query": {
+            "type": "object"
+          },
+          "headers": {
+            "type": "object"
+          },
+          "auth": {
+            "type": "boolean"
+          },
+          "expected_status": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "minItems": 0
+          },
+          "response_schema": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "expected_fields": {
+            "type": "object"
+          },
+          "extract": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "db_setup": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "db_checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sql"
+              ],
+              "properties": {
+                "db": {
+                  "type": "string"
+                },
+                "sql": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "params": {
+                  "type": "object"
+                },
+                "expect": {
+                  "type": "object"
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "definition_id": {
+            "type": "string"
+          },
+          "definition_revision": {
+            "type": "integer"
+          },
+          "timeout": {
+            "type": "number",
+            "minimum": 0.01,
+            "maximum": 300
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "operator"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "exists",
+                    "not_empty",
+                    "contains",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte"
+                  ]
+                }
+              }
+            }
+          },
+          "encrypt": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "api_inputs": {
+      "type": "object"
+    },
+    "api_variable_scope": {
+      "enum": [
+        "legacy",
+        "case"
+      ]
+    },
+    "api_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "api_needs_review": {
+      "type": "boolean"
     }
   }
 }

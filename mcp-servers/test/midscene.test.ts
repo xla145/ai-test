@@ -3,11 +3,11 @@ import type { Page } from "playwright-core";
 import { describe, expect, it, vi } from "vitest";
 import { cssCenter, midsceneFactory } from "../src/ui/midscene.js";
 
-const sdk = vi.hoisted(() => ({ options: [] as unknown[], pages: [] as unknown[], destroy: vi.fn(async () => undefined) }));
+const sdk = vi.hoisted(() => ({ options: [] as unknown[], pages: [] as unknown[], agents: [] as any[], destroy: vi.fn(async () => undefined) }));
 vi.mock("@midscene/web/playwright", () => ({
   PlaywrightAgent: class {
     reportFile = "/tmp/report.html";
-    constructor(page: unknown, options: unknown) { sdk.pages.push(page); sdk.options.push(options); }
+    constructor(page: unknown, options: unknown) { sdk.pages.push(page); sdk.options.push(options); sdk.agents.push(this); }
     aiAct = vi.fn(async () => "done");
     aiAssert = vi.fn(async (text: string) => { if (text === "fail") throw new Error("assertion failed"); });
     aiLocate = vi.fn(async () => ({ center: [240, 160], dpr: 2, rect: {} }));
@@ -44,12 +44,15 @@ describe("Midscene adapter", () => {
 
   it("reuses one SDK agent per page, preserves assertion errors and cleans up on close", async () => {
     const page = new EventEmitter() as unknown as Page;
+    sdk.agents.length = 0;
     const factory = midsceneFactory("test-project");
     const [a, b] = await Promise.all([factory(page), factory(page)]);
     expect(a).toBe(b);
     expect(sdk.options).toEqual([{ cache: { id: "test-project", strategy: "read-write" },
       generateReport: true, outputFormat: "single-html", autoPrintReportMsg: false }]);
     expect((await a.aiLocate("save")).center).toEqual([240, 160]);
+    // 定位不读写 Midscene 缓存：错的定位结果不会被原样复用
+    expect(sdk.agents[0].aiLocate).toHaveBeenCalledWith("save", { cacheable: false });
     await expect(a.aiAssert("fail")).rejects.toThrow("assertion failed");
     await expect(a.aiAct("open")).resolves.toBe("done");
     expect(a.reportFile).toBe("/tmp/report.html");

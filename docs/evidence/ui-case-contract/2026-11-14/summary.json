@@ -1,0 +1,354 @@
+{
+  "control": {
+    "mode": "control",
+    "model": "deterministic DOM center (NOT a visual model)",
+    "family": null,
+    "sdk": "1.17.7",
+    "summary": {
+      "brief": {
+        "total": 0,
+        "rawHit": 0,
+        "mappedHit": 0,
+        "correctOutcome": 0,
+        "errors": 0,
+        "locateMedianMs": null,
+        "wrongAction": 0,
+        "correctedHit": 0
+      },
+      "structured": {
+        "total": 6,
+        "rawHit": 6,
+        "mappedHit": 6,
+        "correctOutcome": 6,
+        "errors": 0,
+        "locateMedianMs": 0,
+        "wrongAction": 0,
+        "correctedHit": 0
+      }
+    },
+    "perTask": {
+      "search": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "switch": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "select": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "option": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "edit": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "save": {
+        "brief": {
+          "total": 0,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 1,
+          "raw": 1,
+          "correct": 1
+        }
+      }
+    },
+    "replay": {
+      "rounds": 1,
+      "total": 6,
+      "passed": 6,
+      "errors": []
+    }
+  },
+  "live": {
+    "mode": "live",
+    "model": "qwen3.8-omni-flash",
+    "family": "qwen2.5-vl",
+    "sdk": "1.17.7",
+    "summary": {
+      "brief": {
+        "total": 18,
+        "rawHit": 1,
+        "mappedHit": 3,
+        "correctOutcome": 3,
+        "errors": 3,
+        "locateMedianMs": 10482,
+        "wrongAction": 12,
+        "correctedHit": 2
+      },
+      "structured": {
+        "total": 18,
+        "rawHit": 1,
+        "mappedHit": 4,
+        "correctOutcome": 4,
+        "errors": 13,
+        "locateMedianMs": 7073,
+        "wrongAction": 1,
+        "correctedHit": 3
+      }
+    },
+    "perTask": {
+      "search": {
+        "brief": {
+          "total": 3,
+          "raw": 1,
+          "correct": 1
+        },
+        "structured": {
+          "total": 3,
+          "raw": 1,
+          "correct": 1
+        }
+      },
+      "switch": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 1
+        },
+        "structured": {
+          "total": 3,
+          "raw": 0,
+          "correct": 1
+        }
+      },
+      "select": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        }
+      },
+      "option": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        }
+      },
+      "edit": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 0,
+          "correct": 1
+        }
+      },
+      "save": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 1
+        },
+        "structured": {
+          "total": 3,
+          "raw": 0,
+          "correct": 1
+        }
+      }
+    },
+    "replay": {
+      "rounds": 3,
+      "total": 12,
+      "passed": 12,
+      "errors": []
+    }
+  },
+  "qwen3-vl": {
+    "mode": "live",
+    "model": "qwen3.8-omni-flash",
+    "family": "qwen3-vl",
+    "sdk": "1.17.7",
+    "summary": {
+      "brief": {
+        "total": 18,
+        "rawHit": 2,
+        "mappedHit": 2,
+        "correctOutcome": 2,
+        "errors": 0,
+        "locateMedianMs": 4444,
+        "wrongAction": 16,
+        "correctedHit": 0
+      },
+      "structured": {
+        "total": 18,
+        "rawHit": 16,
+        "mappedHit": 18,
+        "correctOutcome": 18,
+        "errors": 0,
+        "locateMedianMs": 4188,
+        "wrongAction": 0,
+        "correctedHit": 2
+      }
+    },
+    "perTask": {
+      "search": {
+        "brief": {
+          "total": 3,
+          "raw": 1,
+          "correct": 1
+        },
+        "structured": {
+          "total": 3,
+          "raw": 3,
+          "correct": 3
+        }
+      },
+      "switch": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 1,
+          "correct": 3
+        }
+      },
+      "select": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 3,
+          "correct": 3
+        }
+      },
+      "option": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 3,
+          "correct": 3
+        }
+      },
+      "edit": {
+        "brief": {
+          "total": 3,
+          "raw": 0,
+          "correct": 0
+        },
+        "structured": {
+          "total": 3,
+          "raw": 3,
+          "correct": 3
+        }
+      },
+      "save": {
+        "brief": {
+          "total": 3,
+          "raw": 1,
+          "correct": 1
+        },
+        "structured": {
+          "total": 3,
+          "raw": 3,
+          "correct": 3
+        }
+      }
+    },
+    "replay": {
+      "rounds": 3,
+      "total": 54,
+      "passed": 54,
+      "errors": []
+    }
+  },
+  "flow-control": {
+    "mode": "sequential-control",
+    "model": "deterministic DOM center (NOT a visual model)",
+    "family": null,
+    "completed": 6,
+    "correct": 6,
+    "error": null,
+    "replay": {
+      "rounds": 3,
+      "total": 3,
+      "passed": 3,
+      "errors": []
+    }
+  },
+  "flow": {
+    "mode": "sequential-live",
+    "model": "qwen3.8-omni-flash",
+    "family": "qwen3-vl",
+    "completed": 6,
+    "correct": 6,
+    "error": null,
+    "replay": {
+      "rounds": 3,
+      "total": 3,
+      "passed": 3,
+      "errors": []
+    }
+  }
+}

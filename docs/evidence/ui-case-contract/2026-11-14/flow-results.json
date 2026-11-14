@@ -1,0 +1,157 @@
+{
+  "startedAt": "2026-11-14T02:54:08.417Z",
+  "mode": "sequential-live",
+  "model": "qwen3.8-omni-flash",
+  "family": "qwen3-vl",
+  "fixtureVariant": "base fixture plus el-select__selection container for selected-value assertion",
+  "observations": [
+    {
+      "step": "s1",
+      "task": "search",
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "elapsedMs": 3640,
+      "actual": "MODEL-UI-001",
+      "hits": [
+        "platform-search"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s2",
+      "task": "edit",
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "elapsedMs": 2161,
+      "actual": "正在编辑：MODEL-UI-001",
+      "hits": [
+        "edit-target"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s3",
+      "task": "switch",
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "elapsedMs": 3824,
+      "actual": "故障切换：已启用",
+      "hits": [
+        "fallback-check"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s4",
+      "task": "select",
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "elapsedMs": 3068,
+      "actual": "备用渠道选项：已展开",
+      "hits": [
+        "fallback-select"
+      ],
+      "correct": true
+    },
+    {
+      "step": "s5",
+      "task": "option",
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "elapsedMs": 2009,
+      "actual": "备用渠道：阿里云源",
+      "hits": [
+        "fallback-option"
+      ],
+      "correct": true,
+      "componentSelectedValueVerified": true
+    },
+    {
+      "step": "s6",
+      "task": "save",
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "elapsedMs": 2483,
+      "actual": "故障切换配置：保存成功",
+      "hits": [
+        "fallback-save"
+      ],
+      "correct": true
+    }
+  ],
+  "replays": [
+    {
+      "repetition": 1,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.545,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/flow/workspace/reports/ui-2026-11-14T02-54-26-587Z/report.json"
+    },
+    {
+      "repetition": 2,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.499,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/flow/workspace/reports/ui-2026-11-14T02-54-28-066Z/report.json"
+    },
+    {
+      "repetition": 3,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_flow",
+          "status": "passed",
+          "duration": 0.489,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/flow/workspace/reports/ui-2026-11-14T02-54-29-434Z/report.json"
+    }
+  ],
+  "validation": {
+    "ready": true,
+    "issues": []
+  },
+  "script": {
+    "path": "scripts/ui/tc_contract_flow.spec.ts",
+    "stepsPath": "scripts/ui/tc_contract_flow.steps.json"
+  },
+  "finishedAt": "2026-11-14T02:54:30.762Z"
+}

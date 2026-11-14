@@ -155,9 +155,11 @@ class Store:
         ]
         # 三期的表由 ops.ensure_schema 创建，可能不存在
         existing = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        statements += [(t, f"DELETE FROM {t} WHERE project_id=?") for t in ("event_log", "attribution", "project_setting")
+        statements += [(t, f"DELETE FROM {t} WHERE project_id=?") for t in ("event_log", "attribution", "project_setting", "api_source", "api_definition", "api_debug")
                        if t in existing]
         counts: dict[str, int] = {}
+        if "api_revision" in existing:
+            statements.insert(0, ("api_revision", "DELETE FROM api_revision WHERE definition_id IN (SELECT id FROM api_definition WHERE project_id=?)"))
         with self.conn:
             for table, sql in statements:
                 counts[table] = self.conn.execute(sql, (project_id,)).rowcount

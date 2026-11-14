@@ -107,8 +107,14 @@ export function ImportPage({ project }: { project: Project }) {
   return (
     <>
       <PageHeader
-        title="用例导入与规范检查"
-        description="导入团队已有的 Excel 用例。结构类规则由代码检查、不耗模型；阻断级问题修复前不会生成脚本。"
+        title="导入与规范检查"
+        workflow={[
+          { title: "导入 Excel", description: "选择团队已有的 Excel 用例文件" },
+          { title: "规范检查", description: "检查结构、步骤、预期和用例等级，不调用模型" },
+          { title: "修复阻断", description: "阻断级问题修复前不会生成脚本" },
+          { title: "人工审核", description: "在用例库中审核后进入回归" },
+        ]}
+        description="导入 Excel 后自动检查规范；修复阻断问题并审核后，才能生成回归脚本。"
         extra={<>
           <Button icon={<ReloadOutlined />} loading={checking} disabled={busy} onClick={recheck}>重新检查</Button>
           <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
@@ -138,9 +144,9 @@ export function ImportPage({ project }: { project: Project }) {
         </Card>
       ) : (
         <>
-          <div className="stat-grid">
+          <div className="stat-grid metric-strip">
             <Card><Statistic title="用例总数" value={report.total} /></Card>
-            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "#cf1322" : undefined }} /></Card>
+            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
             <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
             <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
           </div>

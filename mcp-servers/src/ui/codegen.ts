@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,14 +14,14 @@ type Base = { role?: string };
 export type Step = Base &
   (
     | { action: "goto"; url: string }
-    | { action: "click"; target: LocatorSpec }
+    | { action: "click"; target: LocatorSpec; scroll?: "center" }
     | { action: "fill"; target: LocatorSpec; value: string; secretEnv?: string }
     | { action: "select"; target: LocatorSpec; value: string }
     | { action: "check"; target: LocatorSpec; checked: boolean }
     | { action: "press"; key: string }
     | { action: "expectVisible"; target: LocatorSpec }
     | { action: "expectHidden"; target: LocatorSpec }
-    | { action: "expectText"; target: LocatorSpec; text: string }
+    | { action: "expectText"; target: LocatorSpec; text: string; exact?: boolean }
     | { action: "expectNoText"; target: LocatorSpec; text: string }
     | { action: "expectValue"; target: LocatorSpec; value: string }
     | { action: "expectUrl"; pattern: string }
@@ -56,6 +56,9 @@ export interface StepsFile {
   title: string;
   baseUrl?: string;
   specHash: string;
+  /** 用例内容指纹；一致时可直接复用脚本而无需重新调用 AI。 */
+  caseHash?: string;
+  generationId?: string;
   /** 由同组另一条用例的脚本按参数替换生成时，记录模板用例 ID */
   derivedFrom?: string;
   steps: UiStep[];
@@ -69,6 +72,8 @@ export interface SpecInput {
   /** 用例步骤与预期，写进注释便于反向追溯 */
   caseSteps?: string[];
   expected?: string[];
+  /** 用例内容指纹，避免同一用例重复触发 AI 探索。 */
+  caseHash?: string;
   /** 模板用例 ID：本脚本由它的步骤按参数替换生成 */
   derivedFrom?: string;
 }
@@ -116,7 +121,7 @@ export function generateSpec(input: SpecInput): string {
         wrap(`await ${p}.goto(${s(relativeUrl(st.url, input.baseUrl))});`);
         break;
       case "click":
-        wrap(`await ${loc}.click();`);
+        wrap(`${st.scroll === "center" ? `await ${loc}.scrollIntoViewIfNeeded(); await ${loc}.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" })); ` : ""}await ${loc}.click();`);
         break;
       case "fill":
         if (st.secretEnv) wrap(`await ${loc}.fill(process.env[${s(st.secretEnv)}] ?? "");`, "敏感值由客户端注入");
@@ -139,7 +144,7 @@ export function generateSpec(input: SpecInput): string {
         break;
       case "expectText":
         // 与录制、调试时的校验一致：按页面可见文本（innerText，单元格之间有空白）比较
-        wrap(`await expect(${loc}).toContainText(${s(st.text)}, { useInnerText: true });`);
+        wrap(`await expect(${loc}).${st.exact ? "toHaveText" : "toContainText"}(${s(st.text)}, { useInnerText: true });`);
         break;
       case "expectNoText":
         wrap(`await expect(${loc}).not.toContainText(${s(st.text)}, { useInnerText: true });`);
@@ -185,7 +190,7 @@ export function generateSpec(input: SpecInput): string {
     input.derivedFrom
       ? `// 由 AIProbe 按参数替换自用例 ${input.derivedFrom} 的脚本生成；回归直接执行本脚本，不调用模型。`
       : "// 由 AIProbe 在探索模式生成；回归直接执行本脚本，不调用模型。",
-    "// 选择器优先级：data-testid → role / label → 文本 → CSS。",
+    "// 选择器优先级：data-testid → role / label → 文本 → 限定到行内 → CSS（不用生成的 id / class 和行号）。",
   ];
   if (singleNamedRole) helpers.add("storageStateFor");
   const imports = [`import { expect, test } from "@playwright/test";`];
@@ -231,14 +236,17 @@ export function stepIdFromTitle(title: string): string | undefined {
 }
 
 export function describeTarget(t: LocatorSpec): string {
-  switch (t.kind) {
-    case "testid": return `testid「${t.value}」`;
-    case "role": return `${t.role}「${t.name}」`;
-    case "label": return `标签「${t.value}」`;
-    case "placeholder": return `占位「${t.value}」`;
-    case "text": return `文本「${t.value}」`;
-    case "css": return t.value;
-  }
+  const own = (() => {
+    switch (t.kind) {
+      case "testid": return `testid「${t.value}」`;
+      case "role": return `${t.role}「${t.name}」`;
+      case "label": return `标签「${t.value}」`;
+      case "placeholder": return `占位「${t.value}」`;
+      case "text": return `文本「${t.value}」`;
+      case "css": return t.hasText ? `${t.value}「${t.hasText}」` : t.value;
+    }
+  })();
+  return t.within ? `「${t.within.hasText ?? t.within.hasExactText ?? t.within.css}」所在行的 ${own}` : own;
 }
 
 export function describeStep(st: Step): string {
@@ -251,7 +259,7 @@ export function describeStep(st: Step): string {
     case "press": return `按键 ${st.key}`;
     case "expectVisible": return `断言可见 ${describeTarget(st.target)}`;
     case "expectHidden": return `断言隐藏 ${describeTarget(st.target)}`;
-    case "expectText": return `断言 ${describeTarget(st.target)} 包含「${st.text}」`;
+    case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;
     case "expectValue": return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
     case "expectUrl": return `断言 URL 包含 ${st.pattern}`;
@@ -293,6 +301,11 @@ export function stepsPath(workspace: string, caseId: string): { abs: string; rel
 
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
+/** 只由会影响 UI 执行的用例内容计算指纹；标题、步骤或预期变化都会使旧脚本失效。 */
+export function caseHash(input: { title?: string; steps?: string[]; expected?: string[] }): string {
+  return sha256(JSON.stringify({ title: input.title ?? "", steps: input.steps ?? [], expected: input.expected ?? [] }));
+}
+
 /** 由步骤生成 spec，同时写出 steps.json（脚本的结构化来源），返回 spec 的相对路径 */
 export function writeUiScript(workspace: string, input: SpecInput): { path: string; stepsPath: string } {
   ensureUiScaffold(workspace);
@@ -301,7 +314,7 @@ export function writeUiScript(workspace: string, input: SpecInput): { path: stri
   const spec = specPath(workspace, input.caseId);
   const meta = stepsPath(workspace, input.caseId);
   writeFileSync(spec.abs, code);
-  const file: StepsFile = { version: 1, caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code),
+  const file: StepsFile = { version: 1, generationId: randomUUID(), caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code), ...(input.caseHash ? { caseHash: input.caseHash } : {}),
     ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}), steps };
   writeFileSync(meta.abs, JSON.stringify(file, null, 2) + "\n");
   return { path: spec.rel, stepsPath: meta.rel };

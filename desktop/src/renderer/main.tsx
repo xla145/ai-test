@@ -1,10 +1,11 @@
-import { App as AntApp, ConfigProvider, theme } from "antd";
+import { App as AntApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import type { GlobalSettingsView } from "../shared/ipc";
 import { SETTINGS_EVENT } from "./pages/SettingsPage";
+import { consoleTheme } from "./theme";
 import "./styles.css";
 
 function usePrefersDark(): boolean {
@@ -36,14 +37,11 @@ function Root() {
   const prefersDark = usePrefersDark();
   const mode = useThemeMode();
   const dark = mode === "system" ? prefersDark : mode === "dark";
+  useEffect(() => { document.documentElement.dataset.theme = dark ? "dark" : "light"; }, [dark]);
   return (
     <ConfigProvider
       locale={zhCN}
-      theme={{
-        algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: { colorPrimary: "#3b6ef5", borderRadius: 8, fontSize: 14 },
-        components: { Layout: { siderBg: dark ? "#141414" : "#ffffff", headerBg: dark ? "#141414" : "#ffffff" } },
-      }}
+      theme={consoleTheme(dark)}
     >
       <AntApp>
         <App />

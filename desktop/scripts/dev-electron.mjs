@@ -31,6 +31,15 @@ async function buildAndLaunch() {
   building = true;
   pending = false;
   try {
+    // 主进程读取 MCP 包 dist 中的类型和代码，先更新依赖以免使用旧声明。
+    console.log("[desktop] 正在编译 MCP 依赖…");
+    compiler = spawn(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", "../mcp-servers/tsconfig.json", "--noEmitOnError"],
+      { cwd, stdio: "inherit" });
+    const dependencyCode = await new Promise((done, reject) => {
+      compiler.once("error", reject);
+      compiler.once("exit", done);
+    });
+    if (stopping || pending || dependencyCode !== 0) return;
     console.log("[desktop] 正在编译主进程和 preload…");
     compiler = spawn(process.execPath, [require.resolve("typescript/bin/tsc"), "-p", "tsconfig.main.json", "--noEmitOnError"],
       { cwd, stdio: "inherit" });
@@ -67,11 +76,12 @@ function schedule() {
   timer = setTimeout(() => void buildAndLaunch(), 500);
 }
 
-const watchers = ["src/main", "src/preload", "src/shared"].map((path) =>
+const watchers = ["src/main", "src/preload", "src/shared", "../mcp-servers/src"].map((path) =>
   watch(resolve(cwd, path), { recursive: true }, (_event, file) => {
     if (!file || /\.(?:ts|cts)$/.test(file)) schedule();
   }));
 watchers.push(watch(resolve(cwd, "tsconfig.main.json"), schedule));
+watchers.push(watch(resolve(cwd, "../mcp-servers/tsconfig.json"), schedule));
 
 async function shutdown(code) {
   if (stopping) return;
