@@ -1,0 +1,328 @@
+{
+  "version": 1,
+  "mode": "control",
+  "startedAt": "2026-11-14T02:42:32.509Z",
+  "timezone": "Asia/Taipei",
+  "model": "deterministic DOM center (NOT a visual model)",
+  "family": null,
+  "sdk": "1.17.7",
+  "fixtureSha256": "b882ddc373552c45e10ba708f377bce59b4ae36eb87ee5c250fb1eeab03690f8",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "cache": false,
+  "rounds": 1,
+  "observations": [
+    {
+      "round": 1,
+      "task": "search",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内，定位可编辑输入框，占位文字为「搜索模型」，用于输入内容。目标必须能由这些条件唯一确定。",
+        "intent": "fill",
+        "text": "搜索模型"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 142,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 0,
+      "center": [
+        804,
+        161
+      ],
+      "mappedTarget": {
+        "testId": "platform-search",
+        "role": "textbox",
+        "name": ""
+      },
+      "hits": [
+        "platform-search"
+      ],
+      "actual": "MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_search_1.spec.ts",
+      "elapsedMs": 1867
+    },
+    {
+      "round": 1,
+      "task": "switch",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位复选框开关，关联标签为「启用故障切换」，用于设置勾选状态。目标必须能由这些条件唯一确定。",
+        "intent": "check"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 513,
+        "width": 24,
+        "height": 24
+      },
+      "locateMs": 0,
+      "center": [
+        686,
+        525
+      ],
+      "mappedTarget": {
+        "testId": "fallback-check",
+        "role": "checkbox",
+        "name": "启用故障切换",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-check"
+      ],
+      "actual": "故障切换：已启用",
+      "checked": true,
+      "script": "scripts/ui/tc_contract_switch_1.spec.ts",
+      "elapsedMs": 744
+    },
+    {
+      "round": 1,
+      "task": "select",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位下拉框，关联标签为「备用渠道」，名称为「备用渠道」，用于打开选项。目标必须能由这些条件唯一确定。",
+        "intent": "click"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "acceptedWrapperBox": {
+        "x": 754,
+        "y": 554,
+        "width": 260,
+        "height": 38
+      },
+      "locateMs": 0,
+      "center": [
+        884,
+        573
+      ],
+      "mappedTarget": {
+        "testId": "fallback-wrapper",
+        "note": "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素"
+      },
+      "hits": [
+        "fallback-select"
+      ],
+      "actual": "备用渠道选项：已展开",
+      "script": "scripts/ui/tc_contract_select_1.spec.ts",
+      "elapsedMs": 812
+    },
+    {
+      "round": 1,
+      "task": "option",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的选项列表「故障切换的备用渠道」内，定位选项，自身文字为「阿里云源」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "阿里云源"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 736,
+        "width": 106,
+        "height": 38
+      },
+      "locateMs": 0,
+      "center": [
+        727,
+        755
+      ],
+      "mappedTarget": {
+        "testId": "fallback-option",
+        "role": "option",
+        "name": "阿里云源"
+      },
+      "hits": [
+        "fallback-option"
+      ],
+      "actual": "备用渠道：阿里云源",
+      "script": "scripts/ui/tc_contract_option_1.spec.ts",
+      "elapsedMs": 684
+    },
+    {
+      "round": 1,
+      "task": "edit",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「平台模型」内的列表行「模型记录」（对象「MODEL-UI-001」）内，定位按钮，自身文字为「编辑」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "编辑"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 1081.015625,
+        "y": 243,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 0,
+      "center": [
+        1118.015625,
+        262
+      ],
+      "mappedTarget": {
+        "testId": "edit-target",
+        "role": "button",
+        "name": "编辑"
+      },
+      "hits": [
+        "edit-target"
+      ],
+      "actual": "正在编辑：MODEL-UI-001",
+      "script": "scripts/ui/tc_contract_edit_1.spec.ts",
+      "elapsedMs": 766
+    },
+    {
+      "round": 1,
+      "task": "save",
+      "arm": "structured",
+      "rawHit": true,
+      "mappedHit": true,
+      "actionCompleted": true,
+      "correctOutcome": true,
+      "request": {
+        "prompt": "在「模型管理」页面的区域「故障切换配置」内，定位按钮，自身文字为「保存」，用于点击。目标必须能由这些条件唯一确定。",
+        "intent": "click",
+        "text": "保存"
+      },
+      "dpr": 1,
+      "browser": "157.0.8103.52",
+      "targetBox": {
+        "x": 674,
+        "y": 606,
+        "width": 74,
+        "height": 38
+      },
+      "locateMs": 0,
+      "center": [
+        711,
+        625
+      ],
+      "mappedTarget": {
+        "testId": "fallback-save",
+        "role": "button",
+        "name": "保存"
+      },
+      "hits": [
+        "fallback-save"
+      ],
+      "actual": "故障切换配置：保存成功",
+      "script": "scripts/ui/tc_contract_save_1.spec.ts",
+      "elapsedMs": 735
+    }
+  ],
+  "replays": [
+    {
+      "repetition": 1,
+      "exitCode": 0,
+      "results": [
+        {
+          "case_id": "tc_contract_edit_1",
+          "status": "passed",
+          "duration": 0.376,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_option_1",
+          "status": "passed",
+          "duration": 0.289,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_save_1",
+          "status": "passed",
+          "duration": 0.289,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_search_1",
+          "status": "passed",
+          "duration": 0.2,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_select_1",
+          "status": "passed",
+          "duration": 0.281,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        },
+        {
+          "case_id": "tc_contract_switch_1",
+          "status": "passed",
+          "duration": 0.258,
+          "message": "",
+          "evidence_paths": [],
+          "reviews": []
+        }
+      ],
+      "errors": [],
+      "reportJson": "/Users/mac/rjgf/project/ai-test/.release/ui-case-contract/control/workspace/reports/ui-2026-11-14T02-42-39-404Z/report.json"
+    }
+  ],
+  "finishedAt": "2026-11-14T02:42:42.174Z",
+  "summary": {
+    "brief": {
+      "total": 0,
+      "rawHit": 0,
+      "mappedHit": 0,
+      "correctOutcome": 0,
+      "errors": 0,
+      "locateMedianMs": null
+    },
+    "structured": {
+      "total": 6,
+      "rawHit": 6,
+      "mappedHit": 6,
+      "correctOutcome": 6,
+      "errors": 0,
+      "locateMedianMs": 0
+    }
+  }
+}
