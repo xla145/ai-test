@@ -14,14 +14,14 @@ type Base = { role?: string };
 export type Step = Base &
   (
     | { action: "goto"; url: string }
-    | { action: "click"; target: LocatorSpec }
+    | { action: "click"; target: LocatorSpec; scroll?: "center" }
     | { action: "fill"; target: LocatorSpec; value: string; secretEnv?: string }
     | { action: "select"; target: LocatorSpec; value: string }
     | { action: "check"; target: LocatorSpec; checked: boolean }
     | { action: "press"; key: string }
     | { action: "expectVisible"; target: LocatorSpec }
     | { action: "expectHidden"; target: LocatorSpec }
-    | { action: "expectText"; target: LocatorSpec; text: string }
+    | { action: "expectText"; target: LocatorSpec; text: string; exact?: boolean }
     | { action: "expectNoText"; target: LocatorSpec; text: string }
     | { action: "expectValue"; target: LocatorSpec; value: string }
     | { action: "expectUrl"; pattern: string }
@@ -116,7 +116,7 @@ export function generateSpec(input: SpecInput): string {
         wrap(`await ${p}.goto(${s(relativeUrl(st.url, input.baseUrl))});`);
         break;
       case "click":
-        wrap(`await ${loc}.click();`);
+        wrap(`${st.scroll === "center" ? `await ${loc}.scrollIntoViewIfNeeded(); await ${loc}.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" })); ` : ""}await ${loc}.click();`);
         break;
       case "fill":
         if (st.secretEnv) wrap(`await ${loc}.fill(process.env[${s(st.secretEnv)}] ?? "");`, "敏感值由客户端注入");
@@ -139,7 +139,7 @@ export function generateSpec(input: SpecInput): string {
         break;
       case "expectText":
         // 与录制、调试时的校验一致：按页面可见文本（innerText，单元格之间有空白）比较
-        wrap(`await expect(${loc}).toContainText(${s(st.text)}, { useInnerText: true });`);
+        wrap(`await expect(${loc}).${st.exact ? "toHaveText" : "toContainText"}(${s(st.text)}, { useInnerText: true });`);
         break;
       case "expectNoText":
         wrap(`await expect(${loc}).not.toContainText(${s(st.text)}, { useInnerText: true });`);
@@ -241,7 +241,7 @@ export function describeTarget(t: LocatorSpec): string {
       case "css": return t.hasText ? `${t.value}「${t.hasText}」` : t.value;
     }
   })();
-  return t.within ? `「${t.within.hasText}」所在行的 ${own}` : own;
+  return t.within ? `「${t.within.hasText ?? t.within.hasExactText ?? t.within.css}」所在行的 ${own}` : own;
 }
 
 export function describeStep(st: Step): string {
@@ -254,7 +254,7 @@ export function describeStep(st: Step): string {
     case "press": return `按键 ${st.key}`;
     case "expectVisible": return `断言可见 ${describeTarget(st.target)}`;
     case "expectHidden": return `断言隐藏 ${describeTarget(st.target)}`;
-    case "expectText": return `断言 ${describeTarget(st.target)} 包含「${st.text}」`;
+    case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;
     case "expectValue": return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
     case "expectUrl": return `断言 URL 包含 ${st.pattern}`;

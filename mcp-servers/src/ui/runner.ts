@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { chooseBrowser, type BrowserChoice } from "./chromium.js";
 import { ensureUiScaffold } from "./codegen.js";
 
@@ -37,6 +37,7 @@ export interface UiCaseResult {
   message: string;
   evidence_paths: string[];
   failure_type?: string;
+  environment_hint?: string;
   reviews: { kind: string; description: string; evidence_paths: string[] }[];
 }
 
@@ -201,6 +202,21 @@ export function parseReport(json: string, workspace: string): UiCaseResult[] {
         const status = r.status === "passed" ? "passed" : r.status === "skipped" ? "skipped" : r.status === "failed" ? "failed" : "error";
         const message = [r.error?.message, ...(r.errors ?? []).map((e) => e.message)].filter(Boolean)[0]?.replace(ANSI, "") ?? "";
         const attachments = (r.attachments ?? []).filter((a) => a.path);
+        let environmentHint: string | undefined;
+        if (status === "failed" || status === "error") {
+          for (const a of attachments.filter(a => a.path?.endsWith("error-context.md"))) {
+            const path = resolve(workspace, a.path!);
+            const inside = relative(resolve(workspace), path);
+            if (inside.startsWith("..") || isAbsolute(inside)) continue;
+            try {
+              const context = readFileSync(path, "utf8");
+              const snapshot = context.split("# Page snapshot")[1]?.split("```")[1] ?? "";
+              if (/系统接口\s*50[234]\s*异常/.test(snapshot)) {
+                environmentHint = "失败页面显示系统接口 5xx 异常，请先检查环境服务；不要仅按控件不存在反复定位。";
+              }
+            } catch { /* 证据可能未生成；保持原始失败结果 */ }
+          }
+        }
         const visual = attachments.filter((a) => a.name === "ai-visual-check").map((a) => rel(a.path!));
         const reviews = (t.annotations ?? [])
           .filter((a) => a.type === "ai-visual-check")
@@ -210,6 +226,7 @@ export function parseReport(json: string, workspace: string): UiCaseResult[] {
           status,
           duration: r.duration / 1000,
           message: message.slice(0, 4000),
+          ...(environmentHint ? { environment_hint: environmentHint } : {}),
           evidence_paths: attachments.filter((a) => a.name !== "ai-visual-check").map((a) => rel(a.path!)),
           failure_type: status === "passed" || status === "skipped" ? undefined : classifyUiFailure(message),
           reviews,

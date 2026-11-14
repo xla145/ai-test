@@ -3,7 +3,8 @@ import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { chooseBrowser } from "./chromium.js";
 import { DEFAULT_ROLE, type DbCheck, type Step, type UiStep } from "./codegen.js";
-import { candidates, COLLECT_SCRIPT, isPositional, pickUnique, specTexts, toLocator, type ElementInfo, type LocatorSpec } from "./locator.js";
+import { candidates, COLLECT_SCRIPT, isPositional, pickUnique, scopeLocator, specTexts, toLocator, type ElementInfo, type LocatorSpec, type Within } from "./locator.js";
+import { resolveTargetScope, type VisualTarget } from "./target.js";
 
 /**
  * 探索模式的浏览器会话（browser MCP Server 的实现）。
@@ -56,6 +57,7 @@ export interface SnapshotElement {
 interface RefEntry {
   role: string;
   info: ElementInfo;
+  scope?: Within;
 }
 
 interface CapturedRequest {
@@ -239,7 +241,7 @@ export class BrowserSession {
       if (this.refs.size <= MAX_REFS) break;
       this.refs.delete(old);
     }
-    const { css: _css, tag: _tag, cssLoose: _loose, labelText: _label, row: _row, ...rest } = info;
+    const { nodeId: _node, css: _css, tag: _tag, cssLoose: _loose, labelText: _label, row: _row, scope: _scope, ...rest } = info;
     return { ref, ...rest };
   }
 
@@ -287,19 +289,31 @@ export class BrowserSession {
    * - rect 为模型给出的元素框，用来在落点的祖先里挑框最接近的。
    * - expect 为目标元素应包含的文字：落点处的元素不含它时，在 radius 像素内找最近的包含它的元素；找不到返回 matched=false。
    */
-  async locateAt(x: number, y: number, opts: { rect?: { left: number; top: number; width: number; height: number }; expect?: string; radius?: number } = {}): Promise<{
+  async locateAt(x: number, y: number, opts: { rect?: { left: number; top: number; width: number; height: number }; expect?: string; radius?: number; intent?: "click" | "fill" | "check"; target?: VisualTarget; scope?: Within } = {}): Promise<{
     element?: SnapshotElement; matched?: boolean; adjusted?: number; pointText?: string; elsewhere?: number; nearestDistance?: number;
   }> {
     const page = await this.page();
     const rect = opts.rect && opts.rect.width > 10 && opts.rect.height > 10 ? opts.rect : undefined;
     const expect = opts.expect?.replace(/\s+/g, " ").trim() || undefined;
-    const [info] = (await page.evaluate(
-      `(${COLLECT_SCRIPT})(${JSON.stringify({ testIdAttribute: this.testIdAttr(), point: { x, y, rect, expect, radius: opts.radius ?? 150 } })})`,
-    )) as (ElementInfo & { matched?: boolean; adjusted?: number; pointText?: string; elsewhere?: number; nearestDistance?: number })[];
+    const scope = opts.target ? await resolveTargetScope(page, opts.target) : opts.scope;
+    const args = { testIdAttribute: this.testIdAttr(), point: { x, y, rect, expect, intent: opts.intent, target: opts.target, radius: opts.radius ?? 150 } };
+    const infos = scope
+      ? await scopeLocator(page, scope).evaluate((root, input) => {
+        const collect = new Function("args", `return (${input.script})(args)`);
+        return collect({ ...input.args, scopeElement: root });
+      }, { script: COLLECT_SCRIPT, args })
+      : await page.evaluate(`(${COLLECT_SCRIPT})(${JSON.stringify(args)})`);
+    const [info] = infos as (ElementInfo & { matched?: boolean; adjusted?: number; pointText?: string; elsewhere?: number; nearestDistance?: number })[];
     if (!info) return {};
     const { matched, adjusted, pointText, elsewhere, nearestDistance, ...el } = info;
     if (matched === false) return { matched, pointText, elsewhere, nearestDistance };
-    return { element: this.addRef(el), matched, adjusted, pointText };
+    const element = this.addRef(el);
+    if (scope) {
+      this.refs.get(element.ref)!.scope = scope;
+      // A structured target is usable only if its selector resolves to that same node.
+      await this.target(element.ref);
+    }
+    return { element, matched, adjusted, pointText };
   }
 
   private testIdAttr(): string {
@@ -311,20 +325,25 @@ export class BrowserSession {
    * avoidText：断言的文字。按这段文字找到的定位器（getByText("已停用")、名称里带它的按钮）再断言它，
    * 等于什么都没验证，这类候选排到不依赖文字的定位器之后，选中时 dependent=true，由调用方改成「可见」断言。
    */
-  private async target(ref: string, opts: { avoidText?: string } = {}): Promise<{ page: Page; spec: LocatorSpec; role: string; dependent: boolean }> {
+  private async target(ref: string, opts: { avoidText?: string; independent?: boolean } = {}): Promise<{ page: Page; spec: LocatorSpec; role: string; dependent: boolean }> {
     const entry = this.refs.get(ref);
     if (!entry) throw new Error(`未知的 ref：${ref}，请先调用 snapshot`);
     const page = await this.page(entry.role);
-    const all = candidates(entry.info);
+    if (entry.scope && await scopeLocator(page, entry.scope).count() !== 1) throw new Error("目标范围已变化或不唯一，请重新定位");
+    const all = entry.scope
+      ? candidates({ ...entry.info, scope: undefined, row: undefined }).map(c => ({ ...c, within: entry.scope }))
+      : candidates(entry.info);
     const avoid = opts.avoidText?.toLowerCase();
     const dependent = (c: LocatorSpec) => Boolean(avoid) && specTexts(c).some((t) => t.toLowerCase().includes(avoid!));
     // 不依赖文字的稳定定位器 → 依赖文字的 → 位置选择器（nth-of-type）
-    const tiers = [all.filter((c) => !dependent(c) && !isPositional(c)), all.filter(dependent), all.filter((c) => !dependent(c) && isPositional(c))];
+    const tiers = opts.independent
+      ? [all.filter(c => !dependent(c) && !(c.kind === "css" && c.value.includes(":nth-of-type")))]
+      : [all.filter((c) => !dependent(c) && !isPositional(c)), all.filter(dependent), all.filter((c) => !dependent(c) && isPositional(c))];
     for (const tier of tiers) {
-      const spec = await pickUnique(page, tier);
+      const spec = await pickUnique(page, tier, entry.info.nodeId);
       if (spec) return { page, spec, role: entry.role, dependent: dependent(spec) };
     }
-    throw new Error(`元素 ${ref} 没有唯一的定位器，请为被测页面补充 data-testid 或换一个元素`);
+    throw new Error(`元素 ${ref} 没有唯一的定位器或目标已变化${opts.independent ? "；取值断言需要不依赖预期值的字段定位器" : ""}，请限定区域/表单项或补充 data-testid 后重新定位`);
   }
 
   /** 录入断言；与上一次操作之后已录的断言完全相同时不重复录入 */
@@ -355,17 +374,46 @@ export class BrowserSession {
       return { ref, note: `断言目标是整块区域（${inner.length} 字），其中「${text}」出现 ${info?.matches ?? 0} 处，无法自动收窄；建议用 find_text 取具体元素再断言` };
     }
     const narrowed = this.addRef(info);
+    this.refs.get(narrowed.ref)!.scope = this.refs.get(ref)?.scope;
     return { ref: narrowed.ref, note: `断言目标是整块区域（${inner.length} 字），已改为断言其中显示「${text}」的元素（${narrowed.ref}）` };
   }
 
+  private async adaptRef(ref: string, intent: "click" | "fill" | "check" | "selected"): Promise<string> {
+    const entry = this.refs.get(ref);
+    if (!entry) throw new Error(`未知的 ref：${ref}，请重新定位`);
+    const { page, spec } = await this.target(ref);
+    const root = entry.scope ? await scopeLocator(page, entry.scope).elementHandle() : undefined;
+    let info: ElementInfo | undefined;
+    try {
+      [info] = await toLocator(page, spec).evaluate((el, args) => {
+        const collect = new Function("args", `return (${args.script})(args)`);
+        return collect({ testIdAttribute: args.testIdAttribute, scopeElement: args.scopeElement, normalize: { element: el, intent: args.intent } });
+      }, { script: COLLECT_SCRIPT, testIdAttribute: this.testIdAttr(), intent, scopeElement: root }) as ElementInfo[];
+    } finally { await root?.dispose(); }
+    if (!info) return ref;
+    // 保留原角色，避免并行角色操作把 ref 绑定到其它页面。
+    const next = this.addRef(info);
+    this.refs.get(next.ref)!.role = entry.role;
+    this.refs.get(next.ref)!.scope = entry.scope;
+    return next.ref;
+  }
+
   async click(ref: string) {
+    ref = await this.adaptRef(ref, "click");
     const { page, spec, role } = await this.target(ref);
-    await toLocator(page, spec).click();
-    this.record({ action: "click", target: spec, role });
+    const loc = toLocator(page, spec);
+    const center = await loc.evaluate(el => el.matches(".el-select__wrapper"));
+    if (center) {
+      await loc.scrollIntoViewIfNeeded();
+      await loc.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" }));
+    }
+    await loc.click();
+    this.record({ action: "click", target: spec, role, ...(center ? { scroll: "center" as const } : {}) });
     return { locator: spec, url: page.url() };
   }
 
   async type(ref: string, text: string, opts: { secretEnv?: string } = {}) {
+    ref = await this.adaptRef(ref, "fill");
     const { page, spec, role } = await this.target(ref);
     await toLocator(page, spec).fill(text);
     this.record({ action: "fill", target: spec, value: opts.secretEnv ? "" : text, secretEnv: opts.secretEnv, role });
@@ -380,6 +428,7 @@ export class BrowserSession {
   }
 
   async check(ref: string, checked: boolean) {
+    ref = await this.adaptRef(ref, "check");
     const { page, spec, role } = await this.target(ref);
     await toLocator(page, spec).setChecked(checked);
     this.record({ action: "check", target: spec, checked, role });
@@ -445,9 +494,18 @@ export class BrowserSession {
     return { locator: spec, ...(recorded ? {} : { note: "与已录入的断言相同，未重复录入" }) };
   }
 
-  /** 输入框 / 下拉框的当前值（下拉框为 option 的 value，如「全部」常为空字符串） */
+  /** 原生控件读取 value；Element Plus 下拉框读取展示文字并录制精确文本断言。 */
   async expectValue(ref: string, value: string, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS) {
-    const { page, spec, role } = await this.target(ref);
+    const selected = await this.adaptRef(ref, "selected");
+    if (selected !== ref) {
+      const { page, spec, role } = await this.target(selected, { avoidText: value, independent: true });
+      const loc = toLocator(page, spec);
+      const ok = await poll(async () => (await loc.innerText({ timeout: 1000 })).replace(/\s+/g, " ").trim() === value, timeoutMs);
+      if (!ok) throw new Error(`断言不成立：下拉框选中值不等于「${value}」`);
+      this.recordAssertion({ action: "expectText", target: spec, text: value, exact: true, role });
+      return { locator: spec, note: "已按组件显示值校验并录制精确文本断言" };
+    }
+    const { page, spec, role } = await this.target(ref, { avoidText: value, independent: true });
     const loc = toLocator(page, spec);
     let actual = "";
     const ok = await poll(async () => (actual = await loc.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === value, timeoutMs);
@@ -577,6 +635,10 @@ export class BrowserSession {
         await page.goto(this.absolute(step.url), { timeout: Math.max(timeout, 30_000) });
         return {};
       case "click":
+        if (step.scroll === "center") {
+          await loc!.scrollIntoViewIfNeeded({ timeout });
+          await loc!.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" }));
+        }
         await loc!.click({ timeout });
         return {};
       case "fill": {
@@ -604,7 +666,7 @@ export class BrowserSession {
         let actual = "";
         const ok = await poll(async () => {
           actual = (await loc!.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
-          return actual.includes(step.text);
+          return step.exact ? actual.trim() === step.text : actual.includes(step.text);
         }, timeout);
         if (!ok) throw new Error(`断言不成立：元素文本为「${actual.slice(0, 200)}」，不包含「${step.text}」`);
         return {};

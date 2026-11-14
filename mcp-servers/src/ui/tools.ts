@@ -7,6 +7,7 @@ import { writeUiScript, type UiStep } from "./codegen.js";
 import { checkData, seedData, setServerClock, type EnvConfig, type TestDataRecord } from "./envSupport.js";
 import type { VisionAgentFactory } from "./midscene.js";
 import { runUiSuite } from "./runner.js";
+import { locateRequest, resolveTargetScope, visualTargetSchema } from "./target.js";
 
 /**
  * 有状态的 UI 工具（browser 内含 Midscene 视觉工具，二者必须共享同一页面与 ref 表）与 env-support。
@@ -64,13 +65,11 @@ async function loadProject(ctx: UiToolContext, projectId: string, env: string): 
 }
 
 /**
- * 把用例里描述的身份对应到已配置的角色：完全一致优先；否则取名称互相包含的角色
- * （如「运营管理员」→「管理员」），有多个时取最长的那个；都不匹配时原样返回。
+ * 角色是用例前置条件：不以名称相似推断权限等价。
  */
 export function resolveRole(requested: string, configured: string[]): string {
   if (configured.includes(requested)) return requested;
-  const close = configured.filter((c) => c && (requested.includes(c) || c.includes(requested)));
-  return close.sort((a, b) => b.length - a.length)[0] ?? requested;
+  throw new Error(`用例角色「${requested}」未配置；已配置角色：${configured.join("、") || "无"}。请明确角色绑定，不自动使用相近角色。`);
 }
 
 function rolesFromEnv(env: Record<string, string>): { role: string; username: string; password: string }[] {
@@ -114,14 +113,13 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     {
       name: "new_role_context",
       description: "以某个角色打开独立会话（只传角色名，账号由客户端注入；登录态保存为 storageState 复用）。不传角色为匿名会话。"
-        + "角色名与已配置的角色名相近时（如「运营管理员」与「管理员」）自动使用已配置的角色，返回值中的 role 为实际使用的角色",
+        + "角色名必须与项目配置完全一致；缺失时阻塞，不自动使用相近角色",
       input: { role: z.string().optional() },
       handler: async ({ role }) => {
         const { project, env } = active(ctx);
         if (!role || role === "default") return s.newRoleContext("default");
         const roles = (await ctx.engine<{ role_name: string }[]>(["list-roles", "--project", project.id])).map((r) => r.role_name);
         const name = resolveRole(role, roles);
-        const mapped = name !== role ? { requestedRole: role, note: `用例中的「${role}」按已配置的角色「${name}」登录` } : {};
         const envCfg = project.environments[env];
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: [name] });
         const cred = rolesFromEnv(secretEnv).find((r) => r.role === name);
@@ -130,17 +128,17 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           login: envCfg.login as any,
           credentials: cred ? { username: cred.username, password: cred.password } : undefined,
         });
-        if (out.loggedIn || out.reusedState) return { ...out, ...mapped };
+        if (out.loggedIn || out.reusedState) return out;
         // 用户在「角色与登录」里手动登录过：内嵌浏览器沿用该角色的登录态（验证码、扫码等无法自动登录的场景）
         if (existsSync(join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`))) {
-          return { ...out, ...mapped, manualSession: true, note: [mapped.note, "使用在「角色与登录」中手动登录保存的登录态"].filter(Boolean).join("；") };
+          return { ...out, manualSession: true, note: "使用在「角色与登录」中手动登录保存的登录态" };
         }
         // 说明为什么没有登录，让 agent 停下来请用户配置，而不是去代码库里找账号
         const missing = [
           ...(envCfg.login ? [] : [`环境「${env}」没有配置登录方式`]),
           ...(cred ? [] : [`角色「${name}」没有配置账号${roles.length ? `（已配置的角色：${roles.join("、")}）` : "（项目还没有配置任何角色）"}`]),
         ];
-        return { ...out, ...mapped, hint: `未登录：${missing.join("；")}。请在「UI 测试 → 角色与登录」中配置登录方式与账号，或为该角色「手动登录」一次后重试；需要登录的用例不要继续探索。` };
+        return { ...out, hint: `未登录：${missing.join("；")}。请在「UI 测试 → 角色与登录」中配置登录方式与账号，或为该角色「手动登录」一次后重试；需要登录的用例不要继续探索。` };
       },
     },
     {
@@ -204,7 +202,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     { name: "expect_no_text", description: "断言元素不包含文本（如筛选后列表中不再出现某类记录）", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectNoText(ref, text) },
     {
       name: "expect_value",
-      description: "断言输入框 / 下拉框的当前值（下拉框比较 option 的 value；清空的输入框为空字符串）",
+      description: "断言输入框 / 下拉框的当前值（原生下拉框比较 option 的 value；Element Plus 下拉框比较展示文字，包括空选时的提示文字；清空的输入框为空字符串）",
       input: { ref, value: z.string() },
       handler: ({ ref, value }) => s.expectValue(ref, value),
     },
@@ -308,6 +306,9 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
         });
         return {
+          persisted: false,
+          attribution_supported: false,
+          note: "本次为未入库的试跑，没有 run_id；不要从报告目录猜测 run_id，也不要调用 record_attribution。失败原因写在任务结论中。",
           exit_code: out.exitCode,
           errors: out.errors,
           results: out.results.map(({ reviews: _r, ...r }) => r),
@@ -318,17 +319,21 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     // ---- Midscene 视觉工具（与浏览器共享页面与 ref） ----
     {
       name: "ai_locate",
-      description: "（Midscene）用自然语言视觉定位元素，返回可录制的 ref。每次要数秒且可能定位偏，只在 snapshot 与 find_text 都找不到元素时使用（如纯图标）。"
+      description: "（Midscene）优先传结构化 target（page/scope/control/name/label/placeholder/text），自动编译定位描述并验证区域、控件身份与唯一定位器。兼容旧 prompt。返回可录制的 ref。按任务配置的定位策略使用；优先 Midscene 时先调用本工具，定位失败再回退 snapshot / find_text。"
         + "目标元素上有文字时传 text（该元素应包含的文字）：会校验定位结果，落点偏了会改用附近包含该文字的元素，仍找不到则报错而不是返回错的元素",
       input: {
-        prompt: z.string(),
-        text: z.string().optional().describe("目标元素应包含的文字，用于校验；不传时取 prompt 里唯一一处「」或引号中的文字"),
+        prompt: z.string().trim().min(1).optional(),
+        target: visualTargetSchema.optional().describe("单个目标：页面、从外到内的区域/对话框/列表行/表单项/选项列表、控件类型与精确身份；列表行必须给 key"),
+        intent: z.enum(["click", "fill", "check"]).optional().describe("目标操作类型，用于把标签或容器解析为真实控件"),
+        text: z.string().optional().describe("目标元素应包含的文字，用于校验；不传则不做文字校验；不要传参照物文字"),
       },
-      handler: async ({ prompt, text }) => {
+      handler: async (input) => {
+        const { prompt, text, intent, target } = locateRequest(input);
+        if (target) await resolveTargetScope(await s.page(), target);
         const agent = await vision(ctx);
-        const expect = text ?? quotedTarget(prompt);
+        const expect = text;
         const loc = await agent.aiLocate(prompt);
-        const out = await s.locateAt(loc.center[0], loc.center[1], { rect: asRect(loc.rect), expect });
+        const out = await s.locateAt(loc.center[0], loc.center[1], { rect: asRect(loc.rect), expect, intent, target });
         if (out.matched === false) {
           const where = out.pointText ? `落点处是「${out.pointText}」` : "落点处没有元素";
           const hint = out.elsewhere
@@ -339,6 +344,10 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
         if (!out.element) throw new Error("视觉定位到的位置没有元素");
         return {
           ...out.element,
+          text_verified: Boolean(expect),
+          intent_verified: Boolean(intent),
+          scope_verified: Boolean(target),
+          target_verified: Boolean(target),
           ...(expect ? { verified: true, expected: expect } : { verified: false, note: "未校验：没有给出目标文字，请核对 text / name 是否是要找的元素" }),
           ...(out.adjusted !== undefined ? { note: `落点处是「${out.pointText ?? ""}」，已改用 ${out.adjusted}px 外包含「${expect}」的元素` } : {}),
         };
@@ -376,13 +385,6 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       },
     },
   ];
-}
-
-/** prompt 中唯一一处被「」“”或引号括起的文字，作为目标元素应包含的文字；有多处时无法判断哪一处是目标，不校验 */
-export function quotedTarget(prompt: string): string | undefined {
-  const found = [...prompt.matchAll(/「([^」]{1,60})」|“([^”]{1,60})”|"([^"]{1,60})"/g)].map((m) => (m[1] ?? m[2] ?? m[3]).trim()).filter(Boolean);
-  const unique = [...new Set(found)];
-  return unique.length === 1 ? unique[0] : undefined;
 }
 
 function asRect(rect: unknown): { left: number; top: number; width: number; height: number } | undefined {

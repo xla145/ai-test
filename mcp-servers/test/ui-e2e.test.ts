@@ -137,6 +137,8 @@ describe("browser MCP server: explore → script → regression → heal input",
 
   it("runs the generated scripts as a regression without any model", async () => {
     const out = await call("run_playwright_script", {});
+    expect(out).toMatchObject({ persisted: false, attribution_supported: false });
+    expect(out.note).toContain("不要调用 record_attribution");
     expect(out.results.map((r: any) => [r.case_id, r.status])).toEqual(
       expect.arrayContaining([[caseId, "passed"], [matrixCaseId, "passed"]]),
     );
@@ -218,17 +220,22 @@ describe("browser MCP server: explore → script → regression → heal input",
 
       // 落点正确：不调整
       visionTarget = (page) => page.getByTestId("status-TAG-1001");
-      const exact = await call("ai_locate", { prompt: `状态徽标「${statusText}」` });
+      const exact = await call("ai_locate", { prompt: `状态徽标「${statusText}」`, text: statusText });
       expect(exact).toMatchObject({ verified: true, testId: "status-TAG-1001" });
       expect(exact.note).toBeUndefined();
 
       // 页面上根本没有目标文字：报错，不返回错的元素
-      await expect(call("ai_locate", { prompt: "状态徽标「已归档」" })).rejects.toThrow(/视觉定位不准：落点处是「.*」，不包含「已归档」/);
+      await expect(call("ai_locate", { prompt: "状态徽标「已归档」", text: "已归档" })).rejects.toThrow(/视觉定位不准：落点处是「.*」，不包含「已归档」/);
 
       // 多处引号无法判断目标：不校验，并明确告知
       visionTarget = (page) => page.getByText("TAG-1001", { exact: true });
       const unverified = await call("ai_locate", { prompt: "「TAG-1001」所在行的「状态」" });
       expect(unverified).toMatchObject({ verified: false, text: "TAG-1001" });
+      // 引号也可能描述参照物，不能自动把它当作目标文字。
+      visionTarget = (page) => page.getByPlaceholder("搜索标签");
+      const input = await call("ai_locate", { prompt: "「搜索」按钮左侧的输入框", intent: "fill" });
+      expect(input).toMatchObject({ verified: false, text_verified: false, intent_verified: true, role: "textbox" });
+      await call("type", { ref: input.ref, text: "TAG" });
       expect(status.ref).toBeTruthy();
     } finally {
       visionTarget = (page) => page.getByPlaceholder("搜索标签");

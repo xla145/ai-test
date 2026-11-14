@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describeTarget, generateSpec, sha256, stepIdFromTitle, withStepIds, writeUiScript } from "../src/ui/codegen.js";
@@ -128,12 +128,12 @@ describe("browser tools", () => {
 });
 
 describe("role resolution", () => {
-  it("maps the case's wording to the closest configured role", () => {
+  it("requires an exact role instead of silently changing permissions", () => {
     expect(resolveRole("管理员", ["管理员", "运营"])).toBe("管理员");
-    expect(resolveRole("运营管理员", ["管理员"])).toBe("管理员");
-    expect(resolveRole("运营管理员", ["管理员", "运营管理"])).toBe("运营管理");
-    expect(resolveRole("运营", ["运营管理员"])).toBe("运营管理员");
-    expect(resolveRole("访客", ["管理员"])).toBe("访客");
+    expect(() => resolveRole("运营管理员", ["管理员"])).toThrow("未配置");
+    expect(() => resolveRole("运营管理员", ["管理员", "运营管理"])).toThrow("未配置");
+    expect(() => resolveRole("运营", ["运营管理员"])).toThrow("未配置");
+    expect(() => resolveRole("访客", ["管理员"])).toThrow("未配置");
   });
 });
 
@@ -160,6 +160,21 @@ describe("browser choice", () => {
 });
 
 describe("runner report parsing", () => {
+  it("exposes page-level 5xx evidence without turning every locator timeout into an environment verdict", () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-context-"));
+    try {
+      const path = join(dir, "error-context.md");
+      writeFileSync(path, '# Page snapshot\n\n```yaml\n- alert: 系统接口502异常\n```');
+      const report = (status: string) => JSON.stringify({ suites: [{ specs: [{ title: "tc_x", file: "tc_x.spec.ts", tests: [{ results: [{ status, duration: 1, error: { message: "locator.fill: Timeout" }, attachments: [{ name: "error-context", path }] }] }] }] }] });
+      const result = parseReport(report("failed"), dir)[0];
+      expect(result.environment_hint).toContain("5xx");
+      expect(result.failure_type).toBeUndefined();
+      expect(parseReport(report("passed"), dir)[0].environment_hint).toBeUndefined();
+      writeFileSync(path, '# Page snapshot\n\n```yaml\n- textbox: 搜索模型名称\n```');
+      expect(parseReport(report("failed"), dir)[0].environment_hint).toBeUndefined();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("maps playwright json to engine results with evidence and reviews", () => {
     const report = { suites: [{ suites: [{ specs: [
       { title: "tc_a 标题", file: "tc_a.spec.ts", tests: [{ annotations: [{ type: "ai-visual-check", description: "灰色" }],
@@ -202,16 +217,5 @@ describe("env-support", () => {
     const fetch = vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof globalThis.fetch;
     expect(await setServerClock(env, { offset_seconds: 86340 }, { fetch })).toEqual({ ok: true, detail: undefined });
     await expect(setServerClock({ base_url: "x" }, { offset_seconds: 1 })).rejects.toThrow("降级为手工");
-  });
-});
-
-describe("quotedTarget", () => {
-  it("uses the single quoted text in a prompt as the expected element text", async () => {
-    const { quotedTarget } = await import("../src/ui/tools.js");
-    expect(quotedTarget("表格上方的统计文字「共 1 个标签」")).toBe("共 1 个标签");
-    expect(quotedTarget("按钮“保存”")).toBe("保存");
-    expect(quotedTarget("在「测试1」这一行，状态「草稿」")).toBeUndefined();
-    expect(quotedTarget("右上角的设置图标")).toBeUndefined();
-    expect(quotedTarget("「草稿」状态徽标，文字为「草稿」")).toBe("草稿");
   });
 });
