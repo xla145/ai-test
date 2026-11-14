@@ -146,8 +146,8 @@ export function App() {
   }, [update?.status, update?.version, notification]);
   const current = projects.find((p) => p.id === currentId) ?? projects.find((p) => !isGroup(p)) ?? projects[0];
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
-  const compact = viewVisible;
-  const parent = current?.parent_id ? projects.find((x) => x.id === current.parent_id) : undefined;
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const compact = viewVisible || navigationCollapsed;
   const group = isGroup(current);
 
   const savedNav = current ? navByProject[current.id] ?? lastNav(current.id) : "home";
@@ -252,23 +252,60 @@ export function App() {
   return (
     <ProjectsContext.Provider value={projectsCtx}>
     <NavContext.Provider value={navCtx}>
-    <Layout className={`app-shell ${viewVisible ? "with-view" : ""}`}>
-      <Sider width={240} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
+    <Layout className={`app-shell ${viewVisible ? "with-view" : ""} ${window.desktopHost?.platform === "darwin" ? "native-mac" : ""}`}>
+          <Header className="workspace-header">
+            <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
+              <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
+                <div className="header-project-switcher">
+                  <ProjectSwitcher projects={projects} current={current} compact={false}
+                    onSelect={openProject} onCreate={setCreating} />
+                </div>
+                {(showSettings || (current && nav !== "home")) && <>
+                  <span className="header-path-divider" aria-hidden="true">/</span>
+                  <Typography.Text className="header-page-name" ellipsis>
+                    {showSettings ? "全局设置" : navLabel(nav)}
+                  </Typography.Text>
+                </>}
+                {!viewVisible && (
+                  <Tooltip title={compact ? "展开导航" : "收起导航"} placement="bottom">
+                    <Button type="text" className="header-navigation-toggle"
+                      aria-label={compact ? "展开导航" : "收起导航"} aria-expanded={!compact}
+                      icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                        <rect x="3" y="3.5" width="18" height="17" rx="3.5" />
+                        <path d="M9 3.5v17" />
+                      </svg>}
+                      onClick={() => setNavigationCollapsed((value) => !value)} />
+                  </Tooltip>
+                )}
+              </Flex>
+              {current && !showSettings && <Space size={4} style={{ flexShrink: 0 }}>
+                {!compact && Object.entries(current.environments).map(([name, env]) => (
+                  <Tooltip key={name} title={env.base_url}>
+                    <Tag className="workspace-environment" color={env.production ? "red" : "blue"} bordered={false}>{env.production ? `${name}（生产）` : name}</Tag>
+                  </Tooltip>
+                ))}
+                {!group && (
+                  <Tooltip title="项目设置：名称、测试端、执行环境">
+                    <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
+                  </Tooltip>
+                )}
+                {viewVisible && (
+                  <Button size="small" icon={<CloseOutlined />} onClick={() => api().hideTestView?.()}>收起浏览器</Button>
+                )}
+              </Space>}
+            </Flex>
+          </Header>
+      <Layout className="workspace-body">
+      <Sider width={224} collapsedWidth={64} collapsed={compact} trigger={null} theme="light"
+        breakpoint="lg" onBreakpoint={setNavigationCollapsed}
         style={{ borderRight: `1px solid ${token.colorBorderSecondary}` }}>
         <Flex vertical style={{ height: "100%" }}>
-          <div className={`brand ${compact ? "compact" : ""}`}>
-            <img className="brand-logo" src="./icon.svg" alt="" />
-            {!compact && <span className="brand-wordmark">AIProbe<span className="brand-caption">测试工作台</span></span>}
-          </div>
-          <div className="sider-section">
-            <ProjectSwitcher projects={projects} current={current} compact={compact}
-              onSelect={openProject} onCreate={setCreating} />
-          </div>
           <Menu
             mode="inline"
             className="side-nav"
             inlineCollapsed={compact}
-            style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", marginTop: 4 }}
+            style={{ borderInlineEnd: "none", flex: 1, overflow: "auto", paddingTop: 12 }}
             selectedKeys={current && !showSettings ? [nav] : []}
             onClick={(e) => {
               if (e.key.startsWith("new:")) return setCreating({ parent: e.key.slice(4) });
@@ -317,49 +354,6 @@ export function App() {
       </Sider>
 
       <Layout>
-        {current && !showSettings && (
-          <Header className="workspace-header" style={{ padding: "0 32px", height: 56, lineHeight: "normal", borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
-            <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
-              <Flex align="center" gap={8} style={{ minWidth: 0 }}>
-                {parent && (
-                  <>
-                    <Typography.Link type="secondary" style={{ whiteSpace: "nowrap" }} onClick={() => openProject(parent.id)}>{parent.name}</Typography.Link>
-                    <Typography.Text type="secondary">/</Typography.Text>
-                  </>
-                )}
-                {nav !== "home" ? (
-                  <>
-                    <Typography.Link type="secondary" style={{ whiteSpace: "nowrap" }} onClick={() => go("home")}>{current.name}</Typography.Link>
-                    <Typography.Text type="secondary">/</Typography.Text>
-                    <Typography.Text strong ellipsis style={{ minWidth: 0 }}>{navLabel(nav)}</Typography.Text>
-                  </>
-                ) : (
-                  <Typography.Text strong ellipsis style={{ minWidth: 0 }}>{current.name}</Typography.Text>
-                )}
-                {group ? <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>大项目</Tag> : !compact && (
-                  <Tag bordered={false} style={{ marginInlineEnd: 0 }}>
-                    {projectTypeOptions.find((o) => o.value === (current.project_type ?? "multi"))?.label}
-                  </Tag>
-                )}
-              </Flex>
-              <Space size={4} style={{ flexShrink: 0 }}>
-                {!compact && Object.entries(current.environments).map(([name, env]) => (
-                  <Tooltip key={name} title={env.base_url}>
-                    <Tag color={env.production ? "red" : "blue"} bordered={false}>{env.production ? `${name}（生产）` : name}</Tag>
-                  </Tooltip>
-                ))}
-                {!group && (
-                  <Tooltip title="项目设置：名称、测试端、执行环境">
-                    <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
-                  </Tooltip>
-                )}
-                {viewVisible && (
-                  <Button size="small" icon={<CloseOutlined />} onClick={() => api().hideTestView?.()}>收起浏览器</Button>
-                )}
-              </Space>
-            </Flex>
-          </Header>
-        )}
         <Content style={{ overflow: "hidden" }}>
           {showSettings ? (
             <div className="page"><SettingsPage /></div>
@@ -383,6 +377,7 @@ export function App() {
             </Flex>
           )}
         </Content>
+      </Layout>
       </Layout>
 
       {current && (

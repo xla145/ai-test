@@ -1,5 +1,5 @@
 import { CheckOutlined, ClearOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
-import { App, Button, Card, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
+import { App, Button, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import { useRef, useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
@@ -74,26 +74,36 @@ export function CasesPage({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHeader title="用例库" description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。"
+      <PageHeader title="用例库"
+        workflow={[
+          { title: "筛选用例", description: "按模块、执行方式、等级和审核状态筛选" },
+          { title: "检查规范", description: "核对用例内容，先处理阻断级问题" },
+          { title: "人工审核", description: "通过审核的用例才能进入回归" },
+          { title: "执行回归", description: "到对应测试页面生成并执行脚本" },
+        ]} description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。"
         extra={<>
           <Button icon={<FileExcelOutlined />} loading={activeAction === "export"} disabled={busy && activeAction !== "export"}
           onClick={() => runAction("export", async () => {
             const out = await api().exportCasesExcel(project.id, project.name);
             if (out) await api().showInFolder(out.path).catch(() => undefined);
           })}>导出 Excel</Button>
-          <Button danger icon={<ClearOutlined />} loading={activeAction === "clear"} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
+          <Button type="text" danger icon={<ClearOutlined />} loading={activeAction === "clear"} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
         </>} />
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Flex gap={8} wrap align="center">
-          <Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID" style={{ width: 260 }}
+      <div className="data-surface cases-surface">
+        <div className="case-filter-grid">
+          <Input className="case-search" aria-label="搜索用例" allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID"
             value={query} onChange={(e) => setQuery(e.target.value)} />
-          <Select allowClear placeholder="执行方式" style={{ width: 120 }} options={options(MODE)} value={filters.mode} onChange={(v) => setFilters({ ...filters, mode: v })} />
-          <Select allowClear placeholder="等级" style={{ width: 100 }} options={["P0", "P1", "P2", "P3"].map((p) => ({ value: p, label: p }))} value={filters.priority} onChange={(v) => setFilters({ ...filters, priority: v })} />
-          <Select allowClear placeholder="审核状态" style={{ width: 110 }} options={options(STATUS)} value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })} />
-          <Select allowClear placeholder="规范检查" style={{ width: 110 }} options={options(LINT)} value={filters.lint} onChange={(v) => setFilters({ ...filters, lint: v })} />
-          <div style={{ flex: 1 }} />
+          <Select aria-label="执行方式" allowClear placeholder="执行方式" options={options(MODE)} value={filters.mode} onChange={(v) => setFilters({ ...filters, mode: v })} />
+          <Select aria-label="等级" allowClear placeholder="等级" options={["P0", "P1", "P2", "P3"].map((p) => ({ value: p, label: p }))} value={filters.priority} onChange={(v) => setFilters({ ...filters, priority: v })} />
+          <Select aria-label="审核状态" allowClear placeholder="审核状态" options={options(STATUS)} value={filters.status} onChange={(v) => setFilters({ ...filters, status: v })} />
+          <Select aria-label="规范检查" allowClear placeholder="规范检查" options={options(LINT)} value={filters.lint} onChange={(v) => setFilters({ ...filters, lint: v })} />
+        </div>
+        {(query || Object.values(filters).some(Boolean)) && <div className="filter-feedback">
+          <Typography.Text type="secondary">找到 {pagination.total ?? 0} 条用例</Typography.Text>
+          <Button type="link" size="small" onClick={() => { setQuery(""); setFilters({}); }}>重置筛选</Button>
+        </div>}
           {selected.length > 0 && (
-            <Space>
+            <Space className="selection-toolbar" wrap>
               <Typography.Text type="secondary">已选 {selected.length} 条</Typography.Text>
               <Button type="primary" icon={<CheckOutlined />} loading={activeAction === "reviewed:selection"} disabled={busy && activeAction !== "reviewed:selection"} onClick={() => setStatus(selected, "reviewed")}>审核通过</Button>
               <Popconfirm title="确定废弃选中的用例？" disabled={busy} onConfirm={() => setStatus(selected, "deprecated")}>
@@ -101,10 +111,8 @@ export function CasesPage({ project }: { project: Project }) {
               </Popconfirm>
             </Space>
           )}
-        </Flex>
-      </Card>
       <Table
-        size="middle"
+        size="small"
         rowKey="id"
         loading={loading}
         dataSource={rows}
@@ -115,7 +123,7 @@ export function CasesPage({ project }: { project: Project }) {
         onRow={(r) => ({ onDoubleClick: () => setDetail(r) })}
         columns={[
           { title: "标题", dataIndex: "title", width: 280, render: (t: string, r: TestCase) => (
-            <a onClick={() => setDetail(r)}>{t?.trim() || "未填写标题"}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{r.module_path.join(" / ")}</Typography.Text></div></a>
+            <button type="button" className="case-title-link" onClick={() => setDetail(r)}><span>{t?.trim() || "未填写标题"}</span><small>{r.module_path.join(" / ")}</small></button>
           ) },
           { title: "等级", dataIndex: "priority", width: 80,
             render: (p: string) => <Tag color={PRIORITY_COLOR[p]} bordered={false}>{p}</Tag> },
@@ -127,6 +135,7 @@ export function CasesPage({ project }: { project: Project }) {
           ) },
         ]}
       />
+      </div>
       <CaseDrawer caseId={detail?.id} data={detail} onClose={() => setDetail(undefined)}
         extra={(c) => c.status === "draft" && (
           <Button type="primary" loading={activeAction === `reviewed:drawer:${c.id}`} disabled={busy || c.lint_status === "blocked"} onClick={() => setStatus([c.id], "reviewed", `drawer:${c.id}`).then(() => setDetail(undefined))}>审核通过</Button>

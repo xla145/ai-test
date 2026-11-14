@@ -38,12 +38,13 @@ function visibleRect(el: HTMLElement): DOMRect {
  * 内嵌浏览器停靠区：把主进程的被测页面视图嵌进页面布局，而不是浮在右半屏。
  * 视图未打开时显示占位提示。
  */
-export function BrowserDock({ url, title = "内嵌浏览器", session }: { url?: string; title?: string; session?: { projectId: string; env: string } }) {
+export function BrowserDock({ url, title = "内嵌浏览器", session, suspended = false }: { url?: string; title?: string; session?: { projectId: string; env: string }; suspended?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [shown, setShown] = useState(false);
 
   useEffect(() => api().onViewChange?.((v) => { setVisible(v.visible); setShown(v.shown ?? v.visible); }), []);
+  useEffect(() => () => { void api().dockTestView?.(null); }, []);
 
   useEffect(() => {
     const el = box.current;
@@ -59,7 +60,7 @@ export function BrowserDock({ url, title = "内嵌浏览器", session }: { url?:
           return;
         }
         const r = visibleRect(el);
-        const dock: ViewDock = { x: r.left, y: r.top, width: r.width, height: r.height, suspended: covered(r) };
+        const dock: ViewDock = { x: r.left, y: r.top, width: r.width, height: r.height, suspended: suspended || covered(r) };
         const key = JSON.stringify(dock);
         if (key === last) return;
         last = key;
@@ -86,9 +87,8 @@ export function BrowserDock({ url, title = "内嵌浏览器", session }: { url?:
       window.removeEventListener("resize", report);
       document.removeEventListener("transitionend", report, true);
       document.removeEventListener("animationend", report, true);
-      void api().dockTestView!(null);
     };
-  }, []);
+  }, [suspended]);
 
   return (
     <div className="browser-dock">
@@ -113,7 +113,7 @@ export function BrowserDock({ url, title = "内嵌浏览器", session }: { url?:
         </Space>
       </div>
       <div ref={box} className="browser-dock-view" data-view={!visible ? "closed" : shown ? "shown" : "suspended"}>
-        {visible && !shown && <Typography.Text type="secondary">浏览器已暂时隐藏，关闭弹窗后恢复</Typography.Text>}
+        {visible && !shown && <Typography.Text type="secondary">{suspended ? "正在调整宽度，松开后恢复浏览器" : "浏览器已暂时隐藏，关闭弹窗后恢复"}</Typography.Text>}
         {!visible && (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={<>
             <div>AI 生成和试跑时，被测页面会显示在这里</div>

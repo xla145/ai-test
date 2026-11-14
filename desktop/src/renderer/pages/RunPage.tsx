@@ -37,6 +37,12 @@ function ApiRunPage({ project }: { project: Project }) {
     <>
       <PageHeader
         title="接口回归"
+        workflow={[
+          { title: "选择环境", description: "确认被测地址；生产环境执行前需要确认" },
+          { title: "选择范围", description: "选择已审核、无阻断问题的接口用例" },
+          { title: "执行脚本", description: "全量或仅执行选中项，不调用模型" },
+          { title: "分析结果", description: "查看失败归因并在工程化页面确认" },
+        ]}
         description="直接执行已生成的脚本，不调用模型；只有原因不明的失败才交给 agent 归因。"
         extra={<>
           <EnvSelect project={project} value={env} onChange={setEnv} showUrl />

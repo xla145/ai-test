@@ -1,10 +1,9 @@
-import { CheckOutlined, EyeOutlined, LoginOutlined } from "@ant-design/icons";
-import { Alert, Badge, Button, Card, Col, Form, Input, Row, Segmented, Select, Space, Tag, Tooltip, Typography, theme } from "antd";
+import { CheckOutlined, EyeOutlined, LoginOutlined, QuestionCircleOutlined } from "@ant-design/icons";
+import { Alert, Badge, Button, Card, Col, Form, Input, Row, Popover, Segmented, Select, Space, Tag, Tooltip, Typography, theme } from "antd";
 import { useEffect, useState, type CSSProperties } from "react";
 import type { GlobalSettingsView } from "../../shared/ipc";
 import { api, envOwner, type Project } from "../api";
 import { EnvSelect, NoEnvironment, useEnvChoice } from "../components/EnvPicker";
-import { PageHeader } from "../components/PageHeader";
 import { useProjects } from "../components/ProjectSettings";
 import { RoleAccounts } from "../components/RoleAccounts";
 import { useAction, useKeyedAction, useLoad, usePaged, useProjectChanged } from "../hooks";
@@ -47,8 +46,17 @@ export function UiPage({ project }: { project: Project }) {
   } as CSSProperties;
   return (
     <div className="uix" style={vars}>
-      <PageHeader title="UI 测试" description="AI 生成脚本并在内嵌浏览器中试跑，确认后加入回归；日常回归直接执行脚本，不调用模型。"
-        extra={<>
+      <header className="uix-heading">
+        <Typography.Title level={4}>UI 测试</Typography.Title>
+        <Popover title="UI 测试流程" trigger="click" content={<ol className="uix-help-steps">
+          <li>生成脚本：AI 探索页面，生成操作与断言</li>
+          <li>试跑校验：在内嵌浏览器中验证脚本</li>
+          <li>确认脚本：人工确认后加入日常回归</li>
+          <li>执行回归：直接执行脚本，不调用模型</li>
+        </ol>}>
+          <Button type="text" icon={<QuestionCircleOutlined />} aria-label="查看 UI 测试流程">流程说明</Button>
+        </Popover>
+        <div className="uix-heading-settings">
           {modelView && (
             <Tooltip title={visionModel
               ? "探索时可用视觉定位辅助生成脚本，视觉判定进入人工复核。实际可用性取决于模型服务；普通回归直接执行脚本。"
@@ -57,7 +65,8 @@ export function UiPage({ project }: { project: Project }) {
             </Tooltip>
           )}
           <EnvSelect project={project} value={env} onChange={setEnv} disabled={working} showUrl width={260} />
-        </>} />
+        </div>
+      </header>
       <Segmented<View> className="uix-nav" value={view} disabled={working} onChange={setView} options={[
         { value: "workspace", label: "工作台" },
         { value: "inbox", label: <span className="uix-nav-item">待处理<Badge count={todo} size="small" /></span> },

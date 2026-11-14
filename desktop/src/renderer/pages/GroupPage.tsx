@@ -32,7 +32,7 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
         description="大项目存放共享的执行环境、凭据、角色账号与预算，子项目自动继承；用例、脚本与执行记录在各子项目中。"
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={onNewChild}>新建子项目</Button>}
       />
-      <div className="stat-grid" style={{ marginBottom: 16 }}>
+      <div className="stat-grid metric-strip" style={{ marginBottom: 16 }}>
         <Card size="small"><Statistic title="子项目" value={children.length} /></Card>
         <Card size="small"><Statistic title="用例总数" value={totalCases} /></Card>
         <Card size="small"><Statistic title="本月 token" value={monthTokens} /></Card>

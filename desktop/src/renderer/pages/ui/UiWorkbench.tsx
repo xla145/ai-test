@@ -5,13 +5,14 @@ import {
 import { App, Button, Checkbox, Empty, Input, Progress, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { UiCaseGroup, UiDebugCommand, UiDebugState, UiGroupCase, UiScriptState } from "../../../shared/ipc";
+import { reviewedUiGroups } from "../../../shared/reviewedUiGroups";
 import { UiCaseTree } from "./UiCaseTree";
 import { api, type Project, type TestCase } from "../../api";
 import { BrowserDock } from "../../components/BrowserDock";
 import { CaseLink, CaseTitles } from "../../components/CaseLink";
 import { FAILURE, LabelTag } from "../../components/labels";
 import { ScriptSteps, type StepRunState } from "../../components/ScriptSteps";
-import { notifyProjectChanged, useAction, useKeyedAction, useLoad, useNarrow, useProjectChanged } from "../../hooks";
+import { notifyProjectChanged, useAction, useKeyedAction, useLoad, useProjectChanged } from "../../hooks";
 
 interface UiFailure { case_id: string; status: string; failure_type: string; message: string; reason?: string }
 interface UiRunResult {
@@ -75,7 +76,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const [filter, setFilter] = useState<Stage | "all">("all");
   const scripts = useLoad(() => api().uiScriptStates(project.id, env), [project.id, env]);
   const groupsLoad = useLoad(() => api().uiCaseGroups(project.id), [project.id]);
-  const groups = groupsLoad.data ?? [];
+  const groups = useMemo(() => reviewedUiGroups(groupsLoad.data ?? []), [groupsLoad.data]);
   const stageById = (id: string) => stageOf(scripts.data?.[id]);
   const index = useMemo(() => {
     const groupOf = new Map<string, UiCaseGroup>();
@@ -108,15 +109,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   currentId.current = current?.id;
   const [selected, setSelected] = useState<Record<string, UiGroupCase>>({});
   const [listCollapsed, setListCollapsed] = useState(false);
-  // 工作台较窄时自动收起用例列表，保证内嵌浏览器留在首屏
-  const [benchRef, narrow] = useNarrow<HTMLDivElement>(1040);
-  // 只恢复自动收起的列表；用户手动收起的保持不变
-  const autoCollapsed = useRef(false);
-  useEffect(() => {
-    if (narrow && !listCollapsed) { autoCollapsed.current = true; setListCollapsed(true); }
-    if (!narrow && autoCollapsed.current) { autoCollapsed.current = false; setListCollapsed(false); }
-  }, [narrow]); // eslint-disable-line react-hooks/exhaustive-deps
-  const toggleList = (collapsed: boolean) => { autoCollapsed.current = false; setListCollapsed(collapsed); };
+  const toggleList = (collapsed: boolean) => setListCollapsed(collapsed);
   const [autoValidate, setAutoValidate] = useState(() => pref(AUTO_VALIDATE_KEY) !== "0");
   const changeAutoValidate = (on: boolean) => { setAutoValidate(on); savePref(AUTO_VALIDATE_KEY, on ? "1" : "0"); };
   /** 无头试跑 / 回归的并行数；内嵌浏览器里的探索与试跑始终逐条执行 */
@@ -215,6 +208,10 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     }
   }), [project.id, env]);
   useProjectChanged(project.id, () => { if (!busy) void refresh(); });
+  useEffect(() => {
+    if (!locked && groupsLoad.data && current && !index.caseOf.has(current.id)) setCurrent(undefined);
+    setSelected((old) => Object.fromEntries(Object.entries(old).filter(([id]) => index.caseOf.has(id))));
+  }, [index, locked, groupsLoad.data, current]);
 
   const resetRunView = () => { setLogs([]); setStepStates({}); setConclusion(""); setConclusionFailed(false); };
   /** 列表里只有摘要，详情（步骤、预期、前置条件）按需读取 */
@@ -387,7 +384,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   });
 
   // ---- 多选：按所选用例的阶段给出可做的批量操作 ----
-  const picked = Object.values(selected);
+  const picked = Object.keys(selected).flatMap((id) => index.caseOf.get(id) ? [index.caseOf.get(id)!] : []);
   const blocked = (c: { lint_status: string }) => c.lint_status === "blocked";
   const canGenerate = picked.filter((c) => stageById(c.id) === "none" && !blocked(c));
   const canConfirm = picked.filter((c) => stageById(c.id) === "validated");
@@ -461,15 +458,13 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
         </div>
       ) : (
         <div className="uix-hero-main">
-          <div className="uix-hero-icon"><CodeOutlined style={{ fontSize: 22 }} /></div>
           <div className="uix-hero-text">
-            <div className="uix-hero-title">{noneCount ? `${noneCount} 条用例还没有脚本` : counts ? "所有用例都已生成脚本" : "AI 生成 UI 脚本"}</div>
-            <Typography.Text type="secondary">
-              {pendingGeneration.length
-                ? exploreCount < pendingGeneration.length
-                  ? <span>AI 只需探索 <b className="uix-em">{exploreCount}</b> 次，其余 {pendingGeneration.length - exploreCount} 条按参数生成</span>
-                  : "AI 逐条探索被测页面、生成脚本"
-                : noneCount ? "剩余用例被规范检查阻断，修正后才能生成" : "选中用例可继续试跑、确认或执行回归"}
+            <Tooltip title={pendingGeneration.length
+              ? `AI 探索 ${exploreCount} 次，其余按参数生成；仅处理审核通过且未被规范检查阻断的 UI 用例`
+              : noneCount ? "剩余用例被规范检查阻断，修正后才能生成" : "选中用例可继续试跑、确认或执行回归"}>
+              <span className="uix-generation-summary">{noneCount ? `${noneCount} 条待生成` : counts?.all ? "脚本已全部生成" : "暂无可生成用例"}</span>
+            </Tooltip>
+            <div className="uix-generation-options">
               <span className="uix-hero-switch">
                 <Switch size="small" checked={autoValidate} onChange={changeAutoValidate} disabled={locked} aria-label="生成后自动试跑" />
                 自动试跑
@@ -481,22 +476,21 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                     options={[1, 2, 3, 4, 6].map((n) => ({ value: n, label: `${n} 路` }))} />
                 </span>
               </Tooltip>
-            </Typography.Text>
+            </div>
           </div>
           {stoppable
             ? <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button>
-            : <Button type="primary" size="large" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 18 }} />}
+            : <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 18 }} />}
                 disabled={locked || !pendingGeneration.length} onClick={() => guard((ok) => pipeline(pendingGeneration, ok), "批量生成脚本")}>一键生成全部</Button>}
         </div>
       )}
       <div className="uix-stats" role="tablist" aria-label="按脚本阶段筛选">
-        {STAGES.map((s, i) => (
+        {STAGES.map((s) => (
           <Tooltip key={s.key} title={s.hint} mouseEnterDelay={0.4}>
             <button type="button" role="tab" aria-selected={filter === s.key} className={`uix-stat ${s.key} ${filter === s.key ? "active" : ""}`}
               disabled={locked} onClick={() => setFilter(filter === s.key ? "all" : s.key)}>
               <span className="uix-stat-value">{counts ? counts[s.key] : "–"}</span>
               <span className="uix-stat-label"><i className={`uix-dot ${s.key}`} />{s.label}</span>
-              {i < STAGES.length - 1 && <span className="uix-stat-arrow" aria-hidden>›</span>}
             </button>
           </Tooltip>
         ))}
@@ -551,7 +545,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       </div>
     )}
 
-    <div ref={benchRef} className={`uix-bench ${summary || result ? "has-banner" : ""} ${listCollapsed ? "list-collapsed" : ""} ${narrow ? "narrow" : ""}`}>
+    <div className={`uix-bench ${summary || result ? "has-banner" : ""} ${listCollapsed ? "list-collapsed" : ""}`}>
       {/* 用例列表 */}
       {listCollapsed ? (
         <div className="uix-rail">
@@ -565,7 +559,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           <div className="uix-panel-head">
             <Checkbox checked={allSelected} indeterminate={!allSelected && shown.some((c) => selected[c.id])} disabled={locked || !shown.length}
               aria-label="全选" onChange={(e) => pick(shown, e.target.checked)} />
-            <span className="uix-panel-title">{filter === "all" ? "全部用例" : STAGE_LABEL[filter]}</span>
+            <span className="uix-panel-title">{filter === "all" ? "已审核 UI 用例" : STAGE_LABEL[filter]}</span>
             <span className="uix-count">{visibleCount}</span>
             {filter !== "all" && <Button size="small" type="link" disabled={locked} onClick={() => setFilter("all")} style={{ padding: 0 }}>看全部</Button>}
             <span style={{ flex: 1 }} />
@@ -576,7 +570,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           </div>
           <div className="uix-list-body">
             <Spin spinning={(groupsLoad.loading && !groupsLoad.data) || (scripts.loading && !scripts.data)}>
-              {!visible.length && groupsLoad.data && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={query ? "没有匹配的用例" : "这个阶段没有用例"} style={{ marginTop: 40 }} />}
+              {!visible.length && groupsLoad.data && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={query ? "没有匹配的用例" : !groups.length ? "暂无审核通过的 UI 用例，请先到用例库审核" : "这个阶段没有用例"} style={{ marginTop: 40 }} />}
               <UiCaseTree key={`${filter}:${query}`} cases={shown} selected={selected} currentId={current?.id} query={query} locked={locked}
                 onPick={pick} onChoose={choose} renderMeta={(c) => {
                   const st = stageById(c.id);
