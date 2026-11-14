@@ -36,10 +36,12 @@ class EnvConfig:
     timeout: float = 30
     # 多账号：环境的接口登录配置（不含凭据），角色账号密码由客户端以 AITEST_ROLES 注入
     api_login: dict | None = None
+    api_crypto: dict | None = None
 
     def to_env(self) -> dict[str, str]:
         return {
             "AITEST_BASE_URL": self.base_url,
+            "AITEST_API_CRYPTO": json.dumps(self.api_crypto or {}),
             "AITEST_AUTH_HEADER": self.auth_header,
             "AITEST_AUTH_TOKEN": self.auth_token,
             "AITEST_TIMEOUT": str(self.timeout),
@@ -94,9 +96,11 @@ def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_
     cmd = [sys.executable, "-m", "pytest", str(suite_dir), f"--junitxml={junit}", "-q", "-p", "no:cacheprovider",
            "--rootdir", str(suite_dir), *(extra_args or [])]
     proc_env = {**os.environ, **env.to_env(), **(extra_env or {})}
-    if case_ids is not None:
+    trace_dir = report_dir / f"{run.id}-steps"
+    proc_env["AITEST_TRACE_DIR"] = str(trace_dir)
+    if case_ids is not None or proc_env.get("AITEST_API_REVISIONS"):
         cmd.extend(["-p", "aitest.pytest_selection"])
-        proc_env["AITEST_SELECTED_CASE_IDS"] = json.dumps(case_ids)
+        proc_env["AITEST_SELECTED_CASE_IDS"] = json.dumps(case_ids) if case_ids is not None else "null"
         # 桌面端捆绑的引擎也可被脚本子进程导入；无需改写已有脚本。
         proc_env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent.parent),
                                                               proc_env.get("PYTHONPATH", "")]))
@@ -104,8 +108,12 @@ def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_
     if proc.returncode not in (0, 1):
         raise RuntimeError("接口脚本未能执行：" + (proc.stderr or proc.stdout)[-4000:])
     results = parse_junit(junit, run.id) if junit.exists() else []
+    for result in results:
+        trace = trace_dir / (re.sub(r"[^a-zA-Z0-9_-]", "_", result.case_id) + ".json")
+        if trace.exists():
+            result.evidence_paths.append(str(trace))
     run.result = summarize(results)
-    run.result.update({"exit_code": proc.returncode, "junit": str(junit),
+    run.result.update({"base_url": env.base_url, "exit_code": proc.returncode, "junit": str(junit),
                        "stdout_tail": proc.stdout[-2000:], "stderr_tail": proc.stderr[-2000:]})
     if case_ids is not None:
         run.result["selected_case_ids"] = list(dict.fromkeys(case_ids))

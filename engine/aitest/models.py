@@ -99,6 +99,7 @@ class ApiSpec:
     headers: dict[str, Any] = field(default_factory=dict)
     body: Any = None
     auth: bool = True
+    encrypt: bool = False
     expected_status: list[int] = field(default_factory=lambda: [200])
     response_schema: dict[str, Any] | None = None
     expected_fields: dict[str, Any] = field(default_factory=dict)
@@ -112,6 +113,10 @@ class ApiSpec:
     role: str = ""
     # 流程步骤名（api_flow 中使用），如「买家下单」
     name: str = ""
+    definition_id: str = ""
+    definition_revision: int = 0
+    assertions: list[dict[str, Any]] = field(default_factory=list)
+    timeout: float = 30
 
 
 @dataclass
@@ -137,6 +142,11 @@ class TestCase:
     # 接口流程：多个请求按顺序执行（每步可用不同角色），如 下单 → 支付 → 审核 → 退款；
     # 步骤间用 extract + ${var} 传值，任一步失败即整条用例失败
     api_flow: list[ApiSpec] = field(default_factory=list)
+    api_cleanup: list[ApiSpec] = field(default_factory=list)
+    api_inputs: dict[str, Any] = field(default_factory=dict)
+    api_variable_scope: str = "legacy"
+    api_revision: int = 1
+    api_needs_review: bool = False
     source_row: int | None = None
     id: str = field(default_factory=lambda: new_id("tc"))
 
@@ -148,10 +158,12 @@ class TestCase:
         data = dict(data)
         api = data.pop("api", None)
         flow = data.pop("api_flow", None) or []
+        cleanup = data.pop("api_cleanup", None) or []
         tc = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
         if api:
             tc.api = ApiSpec(**api) if isinstance(api, dict) else api
         tc.api_flow = [ApiSpec(**s) if isinstance(s, dict) else s for s in flow]
+        tc.api_cleanup = [ApiSpec(**s) if isinstance(s, dict) else s for s in cleanup]
         return tc
 
     @property

@@ -73,7 +73,21 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
     for rr in store.list_run_results(run_id):
         case = store.get_case(rr.case_id)
         attr = attributions.get(rr.case_id, {})
+        api_trace = None
+        if project:
+            root = Path(project.workspace_path).resolve()
+            for evidence in rr.evidence_paths:
+                path = Path(evidence).resolve()
+                if path.suffix == ".json" and path.is_relative_to(root) and path.is_file() and path.stat().st_size < 1024 * 1024:
+                    try:
+                        candidate = json.loads(path.read_text(encoding="utf-8"))
+                        if isinstance(candidate, dict) and "steps" in candidate and "status" in candidate:
+                            api_trace = candidate
+                            break
+                    except (OSError, ValueError):
+                        pass
         results.append({
+            "api_trace": api_trace,
             "case_id": rr.case_id,
             "title": case.title if case else rr.case_id,
             "module": " / ".join(case.module_path) if case else "",
@@ -94,7 +108,7 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
         "run": {
             "id": run_id, "env": r["env"], "mode": r["mode"], "started_at": r["started_at"],
             "framework": _framework(result), "html_report": result.get("html_report"), "junit": result.get("junit"),
-            "base_url": (_effective_envs(store, project).get(r["env"], {}) or {}).get("base_url", "") if project else "",
+            "base_url": result.get("base_url") or ((_effective_envs(store, project).get(r["env"], {}) or {}).get("base_url", "") if project else ""),
         },
         "project": {"id": project.id, "name": project.name, "workspace_path": project.workspace_path} if project else None,
         "summary": _summary(results),
