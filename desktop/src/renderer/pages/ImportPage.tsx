@@ -171,6 +171,7 @@ export function ImportPage({ project }: { project: Project }) {
             </div>
             <div style={{ flex: "3 1 420px" }}>
               <Card
+                className="responsive-card"
                 title="问题明细"
                 size="small"
                 extra={<Segmented size="small" value={level} onChange={(v) => setLevel(String(v))} options={[

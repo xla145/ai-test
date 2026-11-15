@@ -46,22 +46,24 @@ function ApiRunPage({ project }: { project: Project }) {
         description="直接执行已生成的脚本，不调用模型；只有原因不明的失败才交给 agent 归因。"
         extra={<>
           <EnvSelect project={project} value={env} onChange={setEnv} showUrl />
-          <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>在内嵌浏览器打开</Button>
+          <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>打开测试页面</Button>
           <RunButton project={project} env={env} loading={busy} disabled={preparing || !available.length}
             onRun={(confirmProduction) => run(async () => {
+              await api().writeReviewedApiSuite(project.id);
               setResult((await api().runRegression(project.id, env, { confirmProduction, caseIds: available.map((c) => c.id) })) as RunResult);
               notifyProjectChanged(project.id);
             })}>
-            全量回归（{available.length} 条已审核用例）
+            全量回归（{available.length}）
           </RunButton>
         </>}
       />
       <ApiCasePicker projectId={project.id} selected={selected} onSelect={setSelected} onAvailable={setAvailable}
         disabled={busy} onBusyChange={setPreparing} />
-      <Space style={{ marginBottom: 16 }}>
+      <Space wrap style={{ marginBottom: 16 }}>
         <RunButton project={project} env={env} loading={busy}
           disabled={preparing || !selected.length || selected.some((id) => !available.some((c) => c.id === id))}
           onRun={(confirmProduction) => run(async () => {
+            await api().writeReviewedApiSuite(project.id);
             setResult((await api().runRegression(project.id, env, { confirmProduction, caseIds: selected })) as RunResult);
             notifyProjectChanged(project.id);
           })}>
@@ -72,7 +74,7 @@ function ApiRunPage({ project }: { project: Project }) {
       <EnvCredentials project={project} env={env} />
       <Collapse size="small" style={{ marginBottom: 16 }} items={[{
         key: "roles",
-        label: <Space>多账号<Typography.Text type="secondary" style={{ fontSize: 12 }}>流程用例中每步可用不同角色（如 买家下单 → 运营审核 → 买家退款）</Typography.Text></Space>,
+        label: <Space wrap>多账号<Typography.Text type="secondary" style={{ fontSize: 12 }}>流程用例中每步可用不同角色（如 买家下单 → 运营审核 → 买家退款）</Typography.Text></Space>,
         children: (
           <div className="split">
             <div style={{ flex: "1 1 320px" }}><RoleAccounts project={project} purpose="api" /></div>
@@ -82,7 +84,7 @@ function ApiRunPage({ project }: { project: Project }) {
       }]} />
       {result && (
         <>
-          <div className="stat-grid">
+          <div className="stat-grid result-summary">
             <Card>
               <Space align="center" size={16}>
                 <Progress type="circle" size={64} percent={Math.round(result.run.pass_rate * 100)} status={failed ? "exception" : "success"} />
@@ -95,7 +97,7 @@ function ApiRunPage({ project }: { project: Project }) {
           </div>
           {failed === 0 && result.run.total > 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
           {result.run.total === 0 && <Alert style={{ marginTop: 16 }} type="warning" showIcon message="没有执行任何用例，请检查脚本与测试范围" />}
-          <Space style={{ marginTop: 16 }}>
+          <Space wrap style={{ marginTop: 16 }}>
             <Button size="small" loading={busy} onClick={() => run(async () => {
               const out = await api().exportReport([result.run.run_id], "html");
               if (out) await api().showInFolder(out.path).catch(() => undefined);
