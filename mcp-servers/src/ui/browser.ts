@@ -1,3 +1,4 @@
+import { numericEqual, readValue, equalValue, validateObservedExpectation, type ValueSource } from "./components.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
@@ -5,6 +6,9 @@ import { chooseBrowser } from "./chromium.js";
 import { DEFAULT_ROLE, type DbCheck, type Step, type UiStep } from "./codegen.js";
 import { candidates, COLLECT_SCRIPT, isPositional, pickUnique, scopeLocator, specTexts, toLocator, type ElementInfo, type LocatorSpec, type Within } from "./locator.js";
 import { resolveTargetScope, type VisualTarget } from "./target.js";
+import { UiReadiness } from './readiness.js';
+
+
 
 /**
  * 探索模式的浏览器会话（browser MCP Server 的实现）。
@@ -89,13 +93,18 @@ export interface StepRunOptions {
 export class BrowserSession {
   private browser?: Browser;
   private readonly pages = new Map<string, Page>();
+  private readonly readiness = new WeakMap<Page, UiReadiness>();
   private readonly contexts = new Map<string, BrowserContext>();
   private requiredLogin = new Map<string, LoginRecipe | undefined>();
   private refs = new Map<string, RefEntry>();
   private refSeq = 0;
   private steps: UiStep[] = [];
+  private observed = new Map<string, unknown>();
   /** 之后录制的步骤对应用例第几步（从 1 开始），用于界面对照 */
   currentCaseStep?: number;
+  currentExpected: number[] = [];
+  currentPreconditions: number[] = [];
+  currentPreconditionChecks: string[] = [];
   private captures = new Map<string, { role: string; pattern: string; list: CapturedRequest[]; off?: () => void }>();
   currentRole = DEFAULT_ROLE;
 
@@ -173,6 +182,7 @@ export class BrowserSession {
       page.setDefaultTimeout(EXPLORE_ACTION_TIMEOUT_MS);
       page.setDefaultNavigationTimeout(30_000);
       this.pages.set(role, page);
+      this.readiness.set(page, new UiReadiness(page));
     }
     this.currentRole = role;
     let loggedIn = false;
@@ -182,7 +192,7 @@ export class BrowserSession {
         const current = new URL(page.url());
         const base = new URL(this.opts.baseUrl);
         const login = opts.login && new URL(opts.login.url, this.opts.baseUrl);
-        reusedState = current.origin === base.origin && (!login || current.pathname !== login.pathname);
+        reusedState = current.origin === base.origin && (!login || current.pathname !== login.pathname || current.hash !== login.hash);
       } catch { /* 空白页没有可复用的站点会话 */ }
     }
     if (opts.requireLogin) {
@@ -233,7 +243,8 @@ export class BrowserSession {
   }
 
   private record(step: Step): void {
-    this.steps.push({ ...step, role: step.role ?? this.currentRole, ...(this.currentCaseStep ? { caseStep: this.currentCaseStep } : {}), source: "ai" });
+    this.steps.push({ ...step, role: step.role ?? this.currentRole, ...(this.currentCaseStep ? { caseStep: this.currentCaseStep } : {}), source: "ai", ...((step.action.startsWith("expect") || step.action === "visualCheck") ? { expectedIndices: [...this.currentExpected], preconditionIndices: [...this.currentPreconditions] } : {}) });
+    if (step.action.startsWith('expect') && this.currentPreconditionChecks.length) this.steps[this.steps.length - 1].preconditionCheckIds = [...this.currentPreconditionChecks];
   }
 
   private absolute(url: string): string {
@@ -285,7 +296,7 @@ export class BrowserSession {
     const page = await this.page();
     for (let attempt = 0; attempt < 2; attempt++) {
       await page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined);
-      await page.waitForTimeout(250);
+      await this.readiness.get(page)?.wait();
       try {
         return await this.snapshot({ maxText: 1500 });
       } catch {
@@ -352,6 +363,29 @@ export class BrowserSession {
     return this.opts.testIdAttribute ?? "data-testid";
   }
 
+  async bindingFor(ref: string): Promise<LocatorSpec> {
+    return (await this.target(ref)).spec;
+  }
+
+  targetIdentity(ref: string): string {
+    const entry = this.refs.get(ref);
+    return entry ? JSON.stringify([entry.role, entry.info.nodeId ?? entry.info.css]) : ref;
+  }
+
+  /** Re-resolve against the live DOM; cached identity alone is never evidence. */
+  async restoreBinding(spec: LocatorSpec, options: { target: VisualTarget; expect?: string; intent?: "click" | "fill" | "check" }) {
+    const page = await this.page();
+    const loc = toLocator(page, spec);
+    if (await loc.count() !== 1 || !await loc.isVisible()) return undefined;
+    const box = await loc.boundingBox();
+    if (!box) return undefined;
+    const result = await this.locateAt(box.x + box.width / 2, box.y + box.height / 2, options);
+    if (!result.element || result.matched === false || result.adjusted) return undefined;
+    if (!await pickUnique(page, [spec], this.refs.get(result.element.ref)?.info.nodeId)) return undefined;
+    // locateAt also verifies target scope/control and the newly generated unique locator.
+    return result;
+  }
+
   /**
    * ref → 唯一定位器。
    * avoidText：断言的文字。按这段文字找到的定位器（getByText("已停用")、名称里带它的按钮）再断言它，
@@ -382,7 +416,7 @@ export class BrowserSession {
   private recordAssertion(step: Step): boolean {
     const key = (x: Step) => JSON.stringify({ ...x, role: x.role ?? this.currentRole, caseStep: undefined, source: undefined, id: undefined });
     for (let i = this.steps.length - 1; i >= 0 && this.steps[i].action.startsWith("expect"); i--) {
-      if (key(this.steps[i]) === key(step)) return false;
+      if (key(this.steps[i]) === key({ ...step, expectedIndices: this.currentExpected, preconditionIndices: this.currentPreconditions, ...(this.currentPreconditionChecks.length ? { preconditionCheckIds: this.currentPreconditionChecks } : {}) } as UiStep)) return false;
     }
     this.record(step);
     return true;
@@ -531,12 +565,13 @@ export class BrowserSession {
   async expectValue(ref: string, value: string, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS) {
     const selected = await this.adaptRef(ref, "selected");
     if (selected !== ref) {
-      const { page, spec, role } = await this.target(selected, { avoidText: value, independent: true });
+      // Bind to the original control, not the value-dependent selected-item node.
+      const { page, spec, role } = await this.target(ref, { avoidText: value, independent: true });
       const loc = toLocator(page, spec);
-      const ok = await poll(async () => (await loc.innerText({ timeout: 1000 })).replace(/\s+/g, " ").trim() === value, timeoutMs);
+      const ok = await poll(async () => equalValue(await readValue(loc, 'selected'), [value]), timeoutMs);
       if (!ok) throw new Error(`断言不成立：下拉框选中值不等于「${value}」`);
       this.recordAssertion({ action: "expectText", target: spec, text: value, exact: true, role });
-      return { locator: spec, note: "已按组件显示值校验并录制精确文本断言" };
+      return { locator: spec, note: "已绑定原控件并验证选中值" };
     }
     const { page, spec, role } = await this.target(ref, { avoidText: value, independent: true });
     const loc = toLocator(page, spec);
@@ -544,6 +579,46 @@ export class BrowserSession {
     const ok = await poll(async () => (actual = await loc.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === value, timeoutMs);
     if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${value}」`);
     const recorded = this.recordAssertion({ action: "expectValue", target: spec, value, role });
+    return { locator: spec, ...(recorded ? {} : { note: "与已录入的断言相同，未重复录入" }) };
+  }
+
+  async observeValue(ref: string, name: string, source: ValueSource = "text") {
+    const { page, spec, role } = await this.target(ref, { independent: true });
+    const value = await readValue(toLocator(page, spec), source);
+    if (value === null || value === undefined) throw new Error("VALUE_INVALID: 没有读到值");
+    this.observed.set(name, value);
+    this.record({ action: "readValue", target: spec, name, valueSource: source, role });
+    return { value, source, role, capturedAt: new Date().toISOString() };
+  }
+  async expectObserved(ref: string, options: { name?: string; expected?: unknown; source?: ValueSource; normalize?: "exact" | "trim" | "number" | "set" }) {
+    validateObservedExpectation(options);
+    const { page, spec, role } = await this.target(ref, { independent: true });
+    if (options.name && !this.observed.has(options.name)) throw new Error("VALUE_INVALID: 尚未录制来源值");
+    const expected = options.name ? this.observed.get(options.name) : options.expected;
+    const source = options.source ?? "text";
+    const ok = await poll(async () => equalValue(await readValue(toLocator(page, spec), source), expected, options.normalize), EXPLORE_ASSERT_TIMEOUT_MS);
+    if (!ok) throw new Error("ASSERTION_FAILED: 读取值与预期不一致");
+    this.recordAssertion({ action: "expectObserved", target: spec, role, name: options.name, expected: options.expected, valueSource: source, normalize: options.normalize });
+    return { matched: true };
+  }
+  async reveal(ref: string) {
+    const { page, spec, role } = await this.target(ref);
+    const loc = toLocator(page, spec);
+    await loc.scrollIntoViewIfNeeded({ timeout: EXPLORE_ACTION_TIMEOUT_MS });
+    this.record({ action: "reveal", target: spec, role });
+    return this.snapshot();
+  }
+
+  async expectNumber(ref: string, value: number, tolerance = 0, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS) {
+    const { page, spec, role } = await this.target(ref, { independent: true });
+    const loc = toLocator(page, spec);
+    let actual = "";
+    const ok = await poll(async () => {
+      actual = (await loc.innerText({ timeout: 1000 })).replace(/\s+/g, " ").trim();
+      return numericEqual(actual, value, tolerance);
+    }, timeoutMs);
+    if (!ok) throw new Error(`断言不成立：文本「${actual.slice(0, 100)}」不是数值 ${value}`);
+    const recorded = this.recordAssertion({ action: "expectNumber", target: spec, value, tolerance, role });
     return { locator: spec, ...(recorded ? {} : { note: "与已录入的断言相同，未重复录入" }) };
   }
 
@@ -643,7 +718,11 @@ export class BrowserSession {
 
   resetRecording(): void {
     this.steps = [];
+    this.observed.clear();
     this.currentCaseStep = undefined;
+    this.currentExpected = [];
+    this.currentPreconditions = [];
+    this.currentPreconditionChecks = [];
     this.resetCaptures();
   }
 
@@ -651,6 +730,7 @@ export class BrowserSession {
   resetCaptures(): void {
     for (const c of this.captures.values()) c.off?.();
     this.captures.clear();
+    this.observed.clear();
   }
 
   /**
@@ -718,6 +798,29 @@ export class BrowserSession {
         let actual = "";
         const ok = await poll(async () => (actual = await loc!.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === step.value, timeout);
         if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${step.value}」`);
+        return {};
+      }
+      case "readValue":
+        this.observed.set(step.name, await readValue(loc!, step.valueSource));
+        return {};
+      case "expectObserved": {
+        validateObservedExpectation(step);
+        if (step.name && !this.observed.has(step.name)) throw new Error("VALUE_INVALID: 尚未录制来源值");
+        if (step.name && !this.observed.has(step.name)) throw new Error("VALUE_INVALID: 请先运行来源读取步骤");
+        const expected = step.name ? this.observed.get(step.name) : step.expected;
+        if (!await poll(async () => equalValue(await readValue(loc!, step.valueSource), expected, step.normalize), timeout)) throw new Error("ASSERTION_FAILED: 读取值与预期不一致");
+        return {};
+      }
+      case "reveal":
+        await loc!.scrollIntoViewIfNeeded({ timeout });
+        return {};
+      case "expectNumber": {
+        let actual = "";
+        const ok = await poll(async () => {
+          actual = (await loc!.innerText({ timeout: 1000 })).replace(/\s+/g, " ").trim();
+          return numericEqual(actual, step.value, step.tolerance ?? 0);
+        }, timeout);
+        if (!ok) throw new Error(`断言不成立：当前值「${actual.slice(0, 100)}」不是数值 ${step.value}`);
         return {};
       }
       case "expectUrl": {

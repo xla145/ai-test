@@ -190,6 +190,8 @@ export interface UiRunOptions {
   caseIds?: string[];
   mode?: "validate" | "regression";
   embedded?: boolean;
+  /** 内嵌试跑时，默认会话使用所选角色的现有视图；明确角色不变。 */
+  selectedRole?: string;
   /** 无头执行时并行的用例数（1–8，默认 1）；内嵌浏览器只有一个视图，始终逐条执行 */
   workers?: number;
 }
@@ -229,11 +231,15 @@ export interface UiStepView {
   description: string;
   /** 对应用例第几步（从 1 开始）；旧脚本或未声明时为空 */
   caseStep?: number;
+  expectedIndices?: number[];
+  preconditionIndices?: number[];
   role?: string;
   source?: "ai" | "user" | "pick";
 }
 
 export interface UiScriptDetail {
+  /** 生成时原始用例快照，用于检测历史映射 */
+  source?: { steps?: string[]; expected?: string[]; preconditions?: string[] };
   path: string;
   code: string;
   /** 结构化步骤；旧脚本没有 steps.json 时为空 */
@@ -276,6 +282,8 @@ export interface UiScriptState {
   hash: string;
   status: "pending" | "confirmed";
   validatedRunId?: string;
+  validationReason?: string;
+  executionRole?: string;
 }
 
 export interface AitestApi {
@@ -336,7 +344,7 @@ export interface AitestApi {
   /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
   scriptMap(framework: string): Promise<Record<string, string>>;
   caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
-  exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean; selectedRole?: string }): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean, opts?: UiRunOptions): Promise<unknown>;
   uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>>;
   /** UI 用例按「同脚本、不同参数」归组 */
@@ -403,7 +411,7 @@ export interface AitestApi {
   showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
-  openTestPage(url: string, session?: { projectId: string; env: string }): Promise<void>;
+  openTestPage(url: string, session?: { projectId: string; env: string; role?: string }): Promise<void>;
   onApprovalRequest(cb: (req: ApprovalRequest) => void): () => void;
   respondApproval(id: string, accept: boolean): void;
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;

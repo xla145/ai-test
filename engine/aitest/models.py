@@ -221,6 +221,9 @@ class RunResult:
     message: str = ""
     evidence_paths: list[str] = field(default_factory=list)
     failure_type: str | None = None
+    execution_context: dict[str, Any] = field(default_factory=dict)
+    acceptance_status: str = ""
+    reason_code: str = ""
 
 
 @dataclass

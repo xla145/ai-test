@@ -410,10 +410,12 @@ async function roleSessions(orch: Orchestrator, projectId: string): Promise<Reco
     .map((f) => [f.slice(0, -5), statSync(join(dir, f)).mtime.toISOString()]));
 }
 
-async function openTestPage(url: string, scope?: { projectId: string; env: string }): Promise<void> {
+async function openTestPage(url: string, scope?: { projectId: string; env: string; role?: string }): Promise<void> {
   if (scope) {
-    await openRoleView(scope.projectId, "default", scope.env);
-    await testViews.get(`${scope.projectId}:${scope.env}:default`)!.webContents.loadURL(url);
+    const role = scope.role ?? "default";
+    if (!ROLE_NAME.test(role)) throw new Error("角色名不合法");
+    await openRoleView(scope.projectId, role, scope.env);
+    await testViews.get(`${scope.projectId}:${scope.env}:${role}`)!.webContents.loadURL(url);
     return;
   }
   const key = "manual:default";
@@ -600,7 +602,7 @@ function registerIpc(orch: Orchestrator): void {
     getCase: (c: string) => orch.getCase(c),
     scriptMap: (framework: string) => orch.scriptMap(framework),
     caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
-    exploreUiCase: async (p: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }) => {
+    exploreUiCase: async (p: string, env: string, caseId: string, opts?: { confirmProduction?: boolean; selectedRole?: string }) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId, opts);
     },
@@ -680,7 +682,7 @@ function registerIpc(orch: Orchestrator): void {
       const r = await dialog.showOpenDialog(mainWindow!, { properties: ["openDirectory", "createDirectory"] });
       return r.canceled ? null : r.filePaths[0];
     },
-    openTestPage: (url: string, scope?: { projectId: string; env: string }) => openTestPage(url, scope),
+    openTestPage: (url: string, scope?: { projectId: string; env: string; role?: string }) => openTestPage(url, scope),
     dockTestView: (dock: ViewDock | null) => dockTestView(dock),
     openRoleLogin: (p: string, env: string, role: string) => openRoleLogin(orch, p, env, role),
     saveRoleLogin: (p: string, env: string, role: string) => saveRoleLogin(orch, p, env, role),
@@ -824,10 +826,10 @@ app.whenReady().then(async () => {
     engine,
     agent: getCodex,
     secretEnv: (projectId, env, roles) => secretEnvFor(secretStore, projectId, env, roles, projectParents.get(projectId)),
-    ui: { runUiSuite, checkData, seedData, prepareEmbedded: async (projectId, env, roles) => {
+    ui: { runUiSuite, checkData, seedData, prepareEmbedded: async (projectId, env, roles, selectedRole, show = true) => {
       const viewMarkers: Record<string, string> = {};
       for (const role of [...new Set(["default", ...roles])]) viewMarkers[role] = await openRoleView(projectId, role, env);
-      showView(testViews.get(`${projectId}:${env}:default`)!);
+      if (show) showView(testViews.get(`${projectId}:${env}:${selectedRole ?? "default"}`)!);
       return { cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, viewMarkers };
     }, createDebugBrowser: (projectId, env, opts) => new BrowserSession({
       cdpEndpoint: `http://127.0.0.1:${CDP_PORT}`, openView: (role) => openRoleView(projectId, role, env), reuseExistingSession: true, ...opts,

@@ -482,6 +482,33 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
     """保存外部执行器（Playwright 等）的结果。results 文件为 RunResult 字段组成的 JSON 数组。"""
     _leaf(store, a.project)
     items = json.loads(Path(a.results_file).read_text(encoding="utf-8"))
+    # Several Playwright tests may belong to one case. Never let a later pass overwrite an earlier failure.
+    grouped = {}
+    priority = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
+    acceptance_priority = {"verified_pass": 0, "pending_review": 1, "incomplete": 2, "blocked": 3, "failed": 4}
+    for item in items:
+        key = item["case_id"]
+        if key not in grouped:
+            grouped[key] = dict(item)
+            continue
+        row = grouped[key]
+        row["duration"] = row.get("duration", 0) + item.get("duration", 0)
+        row["evidence_paths"] = list(dict.fromkeys(row.get("evidence_paths", []) + item.get("evidence_paths", [])))
+        row["reviews"] = row.get("reviews", []) + item.get("reviews", [])
+        # A case can contain multiple Playwright tests (or role-bound shards). Keep
+        # every observed session so reports explain which role/context actually ran.
+        contexts = [
+            *(row.get("execution_context", {}).get("sessions", []) if isinstance(row.get("execution_context"), dict) else []),
+            *(item.get("execution_context", {}).get("sessions", []) if isinstance(item.get("execution_context"), dict) else []),
+        ]
+        if contexts:
+            row["execution_context"] = {"sessions": contexts}
+        if priority.get(item["status"], 3) > priority.get(row["status"], 3):
+            row.update({k: item.get(k) for k in ("status", "message", "failure_type")})
+        if acceptance_priority.get(item.get("acceptance_status", ""), -1) > acceptance_priority.get(row.get("acceptance_status", ""), -1):
+            row["acceptance_status"] = item["acceptance_status"]
+            row["reason_code"] = item.get("reason_code", "")
+    items = list(grouped.values())
     run = Run(project_id=a.project, env=a.env, mode=a.mode, started_at=datetime.now(timezone.utc).isoformat())
     results = [RunResult(run_id=run.id, **{k: v for k, v in r.items() if k in RunResult.__dataclass_fields__ and k != "run_id"})
                for r in items]
@@ -555,7 +582,19 @@ def cmd_resolve_review(store: Store, a: argparse.Namespace) -> Any:
     item.status = "confirmed_pass" if a.passed else "confirmed_fail"
     ops.log_event(store, "review_resolved", ops.project_of_case(store, item.case_id), item.case_id, item.id,
                   actor="human", data={"status": item.status})
-    return asdict(store.save_review(item))
+    saved = store.save_review(item)
+    # Reconcile acceptance only for the same run/case after all visual reviews.
+    reviews = [r for r in store.list_reviews() if r.run_id == item.run_id and r.case_id == item.case_id]
+    if item.run_id and reviews:
+        status = "failed" if any(r.status == "confirmed_fail" for r in reviews) else "verified_pass" if all(r.status == "confirmed_pass" for r in reviews) else "pending_review"
+        store.conn.execute("UPDATE run_result SET acceptance_status=? WHERE run_id=? AND case_id=? AND status='passed' AND acceptance_status IN ('pending_review','verified_pass','failed')", (status, item.run_id, item.case_id))
+        row = store.conn.execute("SELECT result FROM run WHERE id=?", (item.run_id,)).fetchone()
+        if row:
+            summary = json.loads(row["result"])
+            summary.update(runner.summarize(store.list_run_results(item.run_id)))
+            store.conn.execute("UPDATE run SET result=? WHERE id=?", (json.dumps(summary, ensure_ascii=False), item.run_id))
+        store.conn.commit()
+    return asdict(saved)
 
 
 # ---- 三期：自愈与工程化 ----

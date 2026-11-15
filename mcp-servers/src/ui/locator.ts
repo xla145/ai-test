@@ -35,7 +35,7 @@ export interface ElementInfo {
   /** 元素的简短文字（自身文字或第一段文字），配合 cssLoose 使用 */
   labelText?: string;
   /** 元素在表格行里：行选择器、能唯一确定该行的文字、行内的相对 CSS */
-  scope?: { css: string; key?: string; exactKey?: string; inner: string; within?: Within };
+  scope?: { css: string; key?: string; exactKey?: string; inner: string; within?: Within; containsRow?: boolean };
   row?: { css: string; key: string; inner: string };
 }
 
@@ -47,7 +47,25 @@ export const isPositional = (spec: LocatorSpec) => spec.kind === "css" && !spec.
  */
 export function candidates(el: ElementInfo): LocatorSpec[] {
   const out: LocatorSpec[] = [];
-  if (el.scope) out.push({ kind: "css", value: el.scope.inner, within: { css: el.scope.css, hasText: el.scope.key, hasExactText: el.scope.exactKey, within: el.scope.within } });
+  // A filtered table can make a global button unique only temporarily. Keep
+  // the row identity in every candidate; never fall back outside that row.
+  // Explicit form/panel scopes retain their existing hierarchy.
+  if (el.row?.key && !el.scope) {
+    const within: Within = { css: el.row.css, hasExactText: el.row.key };
+    return candidates({ ...el, row: undefined, css: el.row.inner }).map(spec => ({ ...spec, within }));
+  }
+  // A row can also sit inside a named panel/form scope. Keep both constraints
+  // instead of letting the broader scope erase the business identity.
+  if (el.row?.key && el.scope?.containsRow) {
+    const panelScope: Within = { css: el.scope.css, hasText: el.scope.key, hasExactText: el.scope.exactKey, within: el.scope.within };
+    const rowScope: Within = { css: el.row.css, hasExactText: el.row.key, within: panelScope };
+    const scoped = candidates({ ...el, row: undefined, scope: undefined, css: el.row.inner });
+    return scoped.map(spec => ({ ...spec, within: rowScope }));
+  }
+  if (el.scope) {
+    const within: Within = { css: el.scope.css, hasText: el.scope.key, hasExactText: el.scope.exactKey, within: el.scope.within };
+    return candidates({ ...el, scope: undefined, row: undefined, css: el.scope.inner }).map(spec => ({ ...spec, within }));
+  }
   if (el.testId) out.push({ kind: "testid", value: el.testId });
   if (el.role && el.name) out.push({ kind: "role", role: el.role, name: el.name });
   if (el.label) out.push({ kind: "label", value: el.label });
@@ -77,6 +95,18 @@ export function scopeLocator(page: Page, scope: Within): Locator {
   let loc = root.locator(scope.css, scope.hasText ? { hasText: scope.hasText } : {});
   for (const text of [scope.hasExactText ?? []].flat()) loc = loc.filter({ has: page.getByText(text, { exact: true }) });
   return loc;
+}
+
+/** Validate the shape of any replay scope without guessing its UI semantics. */
+export function validateReplayTarget(spec: LocatorSpec): void {
+  const check = (scope?: Within): void => {
+    if (!scope) return;
+    if (!scope.css.trim()) throw new Error("回放目标范围缺少 CSS 选择器，请重新探索目标");
+    if (scope.hasText !== undefined && !scope.hasText.trim()) throw new Error("回放目标范围的文本条件不能为空");
+    if ([scope.hasExactText ?? []].flat().some(text => !text.trim())) throw new Error("回放目标范围的精确文本条件不能为空");
+    check(scope.within);
+  };
+  check(spec.within);
 }
 
 export function toLocator(page: Page, spec: LocatorSpec): Locator {
@@ -237,6 +267,8 @@ export const COLLECT_SCRIPT = String.raw`(args) => {
     const texts = [];
     for (const c of r.querySelectorAll("*")) {
       if (c.children.length) continue;
+      // Action labels are not row identities, even in a one-row search result.
+      if (c.closest('button,a,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="switch"]')) continue;
       const t = clean(c.textContent);
       if (t && t.length <= 40 && !/^\d{1,3}$/.test(t) && !texts.includes(t)) texts.push(t);
       if (texts.length >= 8) break;
@@ -261,13 +293,17 @@ export const COLLECT_SCRIPT = String.raw`(args) => {
     if (key && form !== el) {
       const panel = namedPanel(form);
       const within = panel && { css: panel.css, hasExactText: panel.hasExactText };
-      return { css: ".el-form-item:visible", exactKey: key, inner: pathOf(el, form, form), within };
+      const row = el.closest("tr,[role=row]");
+      return { css: ".el-form-item:visible", exactKey: key, inner: pathOf(el, form, form), within, containsRow: !!row && form !== row && form.contains(row) };
     }
     const panel = namedPanel(el);
     // No expected/display value is used to identify a named region.
     if (panel) {
       const container = panel.element;
-      if (container && container !== el) return { css: panel.css, exactKey: panel.hasExactText, inner: pathOf(el, container, container) };
+      if (container && container !== el) {
+        const row = el.closest("tr,[role=row]");
+        return { css: panel.css, exactKey: panel.hasExactText, inner: pathOf(el, container, container), containsRow: !!row && container !== row && container.contains(row) };
+      }
     }
     return undefined;
   };

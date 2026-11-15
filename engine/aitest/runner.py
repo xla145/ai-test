@@ -128,11 +128,16 @@ def summarize(results: list[RunResult]) -> dict[str, Any]:
         if r.failure_type:
             failure_types[r.failure_type] = failure_types.get(r.failure_type, 0) + 1
     total = len(results)
+    acceptance = {}
+    for r in results:
+        if r.acceptance_status:
+            acceptance[r.acceptance_status] = acceptance.get(r.acceptance_status, 0) + 1
     return {
         "total": total,
         **counts,
         "pass_rate": round(counts["passed"] / total, 4) if total else 0.0,
         "failure_types": failure_types,
+        **({"acceptance": acceptance} if acceptance else {}),
         # 只有这些需要调 agent 做归因
         "needs_agent": [r.case_id for r in results if r.failure_type == FailureType.UNKNOWN.value],
     }
