@@ -30,6 +30,8 @@ function setup(options: { blocked?: boolean; generate?: boolean; malformed?: boo
   const runTurn = vi.fn(async (_id: string, prompt: string) => {
     if (prompt.includes("仅把 UI 用例转换")) return { threadId: "th", turnId: "convert", status: "completed", tokens: 10, message: options.malformed ? "invalid JSON" : JSON.stringify(contract()) };
     expect(prompt).toContain("已转换并缓存的执行用例");
+    expect(prompt).toContain("browser.assertion_coverage");
+    expect(prompt).toContain("name 是 read_value 保存的来源变量名");
     if (options.generate !== false) {
       const { path } = writeUiScript(workspace, { caseId: source.id, title: source.title, caseHash: caseHash(source), steps: [
         { action: "goto", url: "/list" }, { action: "expectUrl", pattern: "/list" },
@@ -122,17 +124,17 @@ describe("persisted UI conversion and script reuse", () => {
     expect(out.message).toContain("转换期间");
     expect(f.runTurn).toHaveBeenCalledTimes(1);
   });
-  it("invalidates version-1 clarification caches so old UI-detail blockers cannot persist", async () => {
+  it.each([1, 2])("invalidates version-%s clarification caches when conversion rules change", async (revision) => {
     const f = setup({ blocked: true });
     await f.make().exploreUiCase("p", "test", "tc_a");
     const folder = join(f.workspace, ".aitest/ui-contracts");
     const path = join(folder, readdirSync(folder)[0]);
     const entry = JSON.parse(readFileSync(path, "utf8"));
-    entry.revision = 1;
+    entry.revision = revision;
     writeFileSync(path, JSON.stringify(entry));
     await f.make().exploreUiCase("p", "test", "tc_a");
     expect(f.runTurn).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(readFileSync(path, "utf8")).revision).toBe(2);
+    expect(JSON.parse(readFileSync(path, "utf8")).revision).toBe(4);
   });
   it("refuses coverage loss and shares no cache across project or environment", () => {
     const f = setup();
@@ -143,4 +145,36 @@ describe("persisted UI conversion and script reuse", () => {
     expect(new UiExecutionContracts(f.workspace, "other", "test", "tc_a", f.source, ["admin"], f.project.environments.test).read()).toBeUndefined();
     expect(new UiExecutionContracts(f.workspace, "p", "prod", "tc_a", f.source, ["admin"], f.project.environments.test).read()).toBeUndefined();
   });
+});
+
+it("passes the selected session role to both stages and invalidates the cached binding when it changes", async () => {
+  const f = setup({ generate: false });
+  f.setRoles(["admin", "viewer"]);
+  await f.make().exploreUiCase("p", "test", "tc_a", { selectedRole: "admin" });
+  expect(f.runTurn.mock.calls[0][1]).toContain('用户选择的登录态角色："admin"');
+  expect(f.runTurn.mock.calls[1][1]).toContain('本次选择的登录态角色："admin"');
+  await f.make().exploreUiCase("p", "test", "tc_a", { selectedRole: "admin" });
+  expect(f.runTurn).toHaveBeenCalledTimes(3);
+  await f.make().exploreUiCase("p", "test", "tc_a", { selectedRole: "viewer" });
+  expect(f.runTurn).toHaveBeenCalledTimes(5);
+  expect(f.runTurn.mock.calls[3][1]).toContain('用户选择的登录态角色："viewer"');
+  expect(f.runTurn.mock.calls[4][1]).toContain('本次选择的登录态角色："viewer"');
+});
+
+it("rejects a removed or unknown session role before starting the model", async () => {
+  const f = setup();
+  await expect(f.make().exploreUiCase("p", "test", "tc_a", { selectedRole: "missing" })).rejects.toThrow("未配置");
+  expect(f.runTurn).not.toHaveBeenCalled();
+});
+
+it('retains fingerprinted plan history when a case changes and is restored', async () => {
+  const f = setup({generate:false});
+  await f.make().exploreUiCase('p','test','tc_a');
+  f.source.preconditions.push('第二项');
+  await f.make().exploreUiCase('p','test','tc_a');
+  f.source.preconditions.pop();
+  const result = await f.make().exploreUiCase('p','test','tc_a');
+  expect(result.contractReused).toBe(true);
+  expect(f.runTurn.mock.calls.filter(([,p])=>p.includes('仅把 UI 用例转换'))).toHaveLength(2);
+  expect(readdirSync(join(f.workspace,'.aitest/ui-contracts/versions'))).toHaveLength(2);
 });

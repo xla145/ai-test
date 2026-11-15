@@ -63,6 +63,8 @@ describe("database verification in UI tests", () => {
   it("verifies persisted data while exploring and records it into the script", async () => {
     await call("open_project", { project_id: projectId, env: "test" });
     await call("new_role_context", { role: "admin" });
+    await call("case_step", { index: 1 });
+    await call("assertion_coverage", { expected: [1] });
     await call("navigate", { url: "/tags" });
     const btn = (await call("snapshot")).elements.find((e: any) => e.testId === "disable-TAG-1001");
     await expect(call("expect_db", { sql: "SELECT status FROM tags WHERE code = :c", params: { c: "TAG-1001" }, expect: { value: "disabled" }, timeout_ms: 300 }))

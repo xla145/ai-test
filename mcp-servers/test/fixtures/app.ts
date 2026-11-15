@@ -60,7 +60,7 @@ export async function startDemoApp(): Promise<DemoApp> {
       }
       if (!role) return send(302, "", { location: "/login" });
       if (url.pathname === "/dashboard") {
-        return send(200, page("综合总览", `<h1>综合总览</h1><nav>
+        return send(200, page("综合总览", `<h1>综合总览</h1><nav role="region" aria-label="主导航" data-testid="navigation">
           ${role === "admin" ? '<a href="/tags" data-testid="menu-tags">标签管理</a>' : ""}
           <a href="/profile">个人中心</a></nav><p>当前角色：<span data-testid="current-role">${role}</span></p>
           <p>今天是 <span id="today"></span></p>

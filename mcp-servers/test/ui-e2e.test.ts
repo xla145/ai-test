@@ -84,6 +84,7 @@ describe("browser MCP server: explore → script → regression → heal input",
     expect(ctx).toMatchObject({ role: "admin", loggedIn: true });
     expect(existsSync(join(dir, "ws/scripts/ui/.auth/admin.json"))).toBe(true);
 
+    await call("case_step", { index: 1 });
     await call("navigate", { url: "/tags" });
     const snap = await call("snapshot");
     expect(snap.title).toBe("标签管理");
@@ -91,10 +92,15 @@ describe("browser MCP server: explore → script → regression → heal input",
     const status = snap.elements.find((e: any) => e.testId === "status-TAG-1001");
     expect(btn).toMatchObject({ role: "button", name: "停用" });
 
+    await call("assertion_coverage", { expected: [1] });
+    const identity = (await call("find_text", { text: "TAG-1001", exact: true })).matches[0];
+    await call("expect_visible", { ref: identity.ref });
     // 视觉定位 → 可录制的 ref（定位器仍是确定性的）
     const located = await call("ai_locate", { prompt: "搜索框" });
     await call("type", { ref: located.ref, text: "TAG" });
 
+    await call("case_step", { index: 2 });
+    await call("assertion_coverage", { expected: [2] });
     await call("start_capture", { name: "clickEvents", url_pattern: "/track" });
     await call("click", { ref: btn.ref });
     await call("expect_text", { ref: status.ref, text: "已停用" });
@@ -110,7 +116,7 @@ describe("browser MCP server: explore → script → regression → heal input",
     const spec = readFileSync(join(dir, "ws", saved.path), "utf8");
     expect(spec).toContain(`// 用例 ID：${caseId}`);
     expect(spec).toContain('test.use({ storageState: storageStateFor("admin") });');
-    expect(spec).toContain('await page.getByTestId("disable-TAG-1001").click();');
+    expect(spec).toContain('page.locator("tr").filter({ has: page.getByText("TAG-1001", { exact: true }) }).getByTestId("disable-TAG-1001").click();');
     expect(spec).toContain('await page.getByRole("textbox", { name: "搜索标签", exact: true }).fill("TAG");');
     expect(spec).toContain('await page.goto("/tags");');
     expect(spec).not.toContain("pw-admin");
@@ -119,14 +125,20 @@ describe("browser MCP server: explore → script → regression → heal input",
   }, 60_000);
 
   it("records a multi-role permission matrix", async () => {
+    await call("case_step", { index: 1 });
+    await call("assertion_coverage", { expected: [1] });
     await call("new_role_context", { role: "admin" });
     await call("navigate", { url: "/dashboard" });
     const adminMenu = (await call("snapshot")).elements.find((e: any) => e.testId === "menu-tags");
     await call("expect_visible", { ref: adminMenu.ref });
+    await call("case_step", { index: 2 });
+    await call("assertion_coverage", { expected: [2] });
     await call("new_role_context", { role: "viewer" });
     await call("navigate", { url: "/dashboard" });
     const viewerSnap = await call("snapshot");
     expect(viewerSnap.elements.find((e: any) => e.testId === "menu-tags")).toBeUndefined();
+    const navigation = viewerSnap.elements.find((e: any) => e.testId === "navigation");
+    await call("expect_no_text", { ref: navigation.ref, text: "标签管理" });
     const roleBadge = viewerSnap.elements.find((e: any) => e.testId === "current-role");
     await call("expect_text", { ref: roleBadge.ref, text: "viewer" });
     const saved = await call("save_ui_script", { case_id: matrixCaseId });
@@ -248,24 +260,28 @@ describe("browser MCP server: explore → script → regression → heal input",
       type: "ui", priority: "P1", title: "标签列表-停用第二个标签", steps: ["停用 TAG-2002"], expected: ["TAG-2002 状态为已停用", "共 3 条"] })])).id;
     await call("open_project", { project_id: projectId, env: "test" });
     await call("new_role_context", { role: "admin" });
+    await call("case_step", { index: 1 });
+    await call("assertion_coverage", { expected: [1] });
     const nav = await call("navigate", { url: "/list" });
 
     // 每行都有「停用」：限定到 TAG-2002 那一行，不用行号，也不用 el-id-* 这类生成的 id
     const btn = (await call("find_text", { text: "停用", exact: true })).matches.find((m: any) => m.context?.includes("TAG-2002"));
     const clicked = await call("click", { ref: btn.ref });
-    expect(clicked.locator).toEqual({ kind: "role", role: "button", name: "停用", within: { css: "tr", hasText: "TAG-2002" } });
+    expect(clicked.locator).toEqual({ kind: "role", role: "button", name: "停用", within: { css: "tr", hasExactText: "TAG-2002" } });
 
     // 状态单元格：按行 + 行内位置断言，而不是按「已停用」这段字找（TAG-2003 也是已停用）
     const status = (await call("find_text", { text: "已停用", exact: true })).matches.find((m: any) => m.context?.includes("TAG-2002"));
     const st = await call("expect_text", { ref: status.ref, text: "已停用" });
-    expect(st.locator).toEqual({ kind: "css", value: "span.status", within: { css: "tr", hasText: "TAG-2002" } });
+    expect(st.locator).toEqual({ kind: "css", value: "span.status", within: { css: "tr", hasExactText: "TAG-2002" } });
 
     // 断言落在整块区域上：收窄到显示这段文字的元素
     const region = nav.snapshot.elements.find((e: any) => e.role === "region");
+    await call("assertion_coverage", { expected: [2] });
     const total = await call("expect_text", { ref: region.ref, text: "共 3 条" });
     expect(total.note).toContain("已改为断言其中显示「共 3 条」的元素");
     expect(total.locator).toEqual({ kind: "css", value: "span.el-pagination__total" });
     // 「不包含」仍对整块区域断言；选择器不带生成的 id 和状态 class
+    await call("assertion_coverage", { expected: [] });
     const none = await call("expect_no_text", { ref: region.ref, text: "TAG-9999" });
     expect(none.locator).toEqual({ kind: "css", value: "div.fc-split-main" });
 
@@ -273,12 +289,12 @@ describe("browser MCP server: explore → script → regression → heal input",
     const key = (await call("find_text", { text: "TAG-2001", exact: true })).matches[0];
     const same = await call("expect_text", { ref: key.ref, text: "TAG-2001" });
     expect(same.note).toContain("已录为「可见」断言");
-    expect(same.locator).toEqual({ kind: "text", value: "TAG-2001" });
+    expect(same.locator).toEqual({ kind: "text", value: "TAG-2001", within: { css: "tr", hasExactText: "TAG-2001" } });
     expect((await call("expect_visible", { ref: key.ref })).note).toContain("未重复录入");
 
     const saved = await call("save_ui_script", { case_id: listCase });
     const spec = readFileSync(join(dir, "ws", saved.path), "utf8");
-    expect(spec).toContain('await page.locator("tr", { hasText: "TAG-2002" }).getByRole("button", { name: "停用", exact: true }).click();');
+    expect(spec).toContain('await page.locator("tr").filter({ has: page.getByText("TAG-2002", { exact: true }) }).getByRole("button", { name: "停用", exact: true }).click();');
     expect(spec).not.toMatch(/nth-of-type|el-id-|is-active|el-table_1/);
     expect(spec.match(/toBeVisible/g)).toHaveLength(1);
 

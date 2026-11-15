@@ -60,6 +60,11 @@ it.each(["default", "admin"])("MCP trial preserves the manually logged-in %s pag
     expect(await page.evaluate(() => sessionStorage.getItem("session-only"))).toBe("preserved");
     expect(sparePage.url()).toBe("about:blank"); // 不把已登录角色复制到另一个角色
     expect(host.isConnected()).toBe(true);
+    await context.clearCookies();
+    const expired: any = await tools.find(t => t.name === "run_playwright_script")!.handler({ case_ids: ["tc_session"] });
+    expect(expired.exit_code).not.toBe(0);
+    expect(JSON.stringify(expired)).toContain("登录态已失效或未登录");
+
   } finally {
     await session.close(); await context.close(); await spareContext.close(); rmSync(workspace, { recursive: true, force: true });
   }
@@ -88,4 +93,26 @@ it("blocks login-required exploration with expired state, but allows anonymous l
     await page.goto(`${app.url}/tags`);
     await expect(session.page()).rejects.toThrow("登录前置条件未满足");
   } finally { await session.close(); }
+}, 30_000);
+
+it("reuses a signed-in hash-route page instead of submitting credentials again", async () => {
+  const context = await host.newContext();
+  const page = await context.newPage();
+  const session = new BrowserSession({ cdpEndpoint: `http://127.0.0.1:${port}`, baseUrl: app.url,
+    reuseExistingSession: true, openView: async () => {
+      await page.evaluate(() => { (window as any).__aitestViewMarker = "hash-role"; });
+      return "hash-role";
+    } });
+  try {
+    await page.goto(`${app.url}/login#/workspace`);
+    await page.setContent('<main>Signed in</main>');
+    await page.evaluate(() => sessionStorage.setItem("session", "kept"));
+    const result = await session.newRoleContext("admin", {
+      login: { url: "/login#/login", username: "#absent-user", password: "#absent-password", submit: "#absent-submit" },
+      credentials: { username: "invalid", password: "invalid" },
+    });
+    expect(result.reusedState).toBe(true);
+    expect(page.url()).toBe(`${app.url}/login#/workspace`);
+    expect(await page.evaluate(() => sessionStorage.getItem("session"))).toBe("kept");
+  } finally { await session.close(); await context.close(); }
 }, 30_000);
