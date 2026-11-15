@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 .release/
 desktop/release/
+claude-cleaner
+docs/evidence
+.hypothesis
