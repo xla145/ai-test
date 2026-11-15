@@ -2,12 +2,13 @@ import { Alert, Button, Card, Input, Modal, Select, Space, Table, Tag, Typograph
 import { useEffect, useMemo, useState } from "react";
 import type { ApiTestSet } from "../../shared/ipc";
 import { api, type ApiStep, type TestCase } from "../api";
+import { CaseLink } from "./CaseLink";
 import { useAction } from "../hooks";
 
 const apiSteps = (c: TestCase): ApiStep[] => c.api_flow?.length ? c.api_flow : c.api ? [c.api] : [];
 const apiEndpoints = (c: TestCase) => apiSteps(c).map((s) => `${s.method.toUpperCase()} ${s.path}`);
 const eligibleApiCases = (cases: TestCase[]) => cases.filter((c) =>
-  c.execution_mode === "api" && c.status === "reviewed" && c.lint_status !== "blocked" && apiSteps(c).length > 0);
+  c.execution_mode === "api" && c.status === "reviewed" && c.lint_status !== "blocked" && !c.api_needs_review && apiSteps(c).length > 0);
 
 interface CaseRow {
   key: string;
@@ -110,7 +111,7 @@ export function ApiCasePicker({ projectId, selected, onSelect, onAvailable, disa
           onChange: (keys) => changeSelection(keys.map(String).filter((k) => !k.startsWith("endpoint:"))) }}
         columns={[
           { title: "接口 / 用例", dataIndex: "label", render: (label: string, row) => row.case
-            ? <><Typography.Text>{label}</Typography.Text><div><Typography.Text type="secondary">{row.case.id}</Typography.Text></div></>
+            ? <CaseLink id={row.case.id} title={label} />
             : <Typography.Text className="mono" style={{ wordBreak: "break-all" }}>{label}</Typography.Text> },
           { title: "用例数 / 等级", width: 120, render: (_, row) => row.case ? row.case.priority : `${row.children?.length} 条` },
           { title: "脚本", width: 110, render: (_, row) => row.case

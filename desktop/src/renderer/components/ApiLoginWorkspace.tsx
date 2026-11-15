@@ -1,8 +1,9 @@
-import { Button, Splitter, Typography } from "antd";
+import { Alert, Button, Splitter, Typography } from "antd";
 import { useState } from "react";
 import type { Project } from "../api";
 import { ApiBrowserLogin } from "./ApiBrowserLogin";
 import { BrowserDock } from "./BrowserDock";
+import { RoleAccounts } from "./RoleAccounts";
 
 const WIDTH_KEY = "aitest:api-login-panel-width";
 const DEFAULT_WIDTH = 35;
@@ -36,8 +37,10 @@ export function ApiLoginWorkspace({ project, env, onProtocol }: { project: Proje
     }}>
       <Splitter.Panel size={`${width}%`} min="20%" max="65%">
         <div className="api-login-settings">
+          <Alert type="info" showIcon message="前置登录：选择网页登录或接口登录" description="网页登录保存环境 token；接口登录配置账号密码与登录接口，执行前自动换取 token。" style={{ marginBottom: 16 }} />
           <ApiBrowserLogin key={`${project.id}:${env}`} project={project} env={env} />
-          <Button onClick={onProtocol}>配置接口登录与加密</Button>
+          <RoleAccounts project={project} purpose="api" />
+          <Button style={{ marginTop: 12 }} onClick={onProtocol}>配置接口登录与加密</Button>
         </div>
       </Splitter.Panel>
       <Splitter.Panel min="35%">

@@ -88,10 +88,10 @@ def plan(store, project_id, payload):
         if old and old["source"] != payload["source"]:
             raise ValueError(f"{op.method} {op.path} 已属于其他文档来源，请使用原来源更新")
         state = "added" if not old else "unchanged" if old["operation"] == asdict(op) and not old["removed"] else "updated"
-        changes.append({"method": op.method, "path": op.path, "summary": op.summary, "change": state})
+        changes.append({"method": op.method, "path": op.path, "summary": op.summary, "module": op.tags[0] if op.tags else "未分组", "change": state})
     for old in existing.values():
         if old["source"] == payload["source"] and (old["method"], old["path"]) not in keys and not old["removed"]:
-            changes.append({"method": old["method"], "path": old["path"], "summary": old["summary"], "change": "removed"})
+            changes.append({"method": old["method"], "path": old["path"], "summary": old["summary"], "module": old["module"], "change": "removed"})
     return {**payload, "title": doc.title, "version": doc.version, "changes": changes}
 
 
@@ -100,6 +100,15 @@ def import_document(store, project_id, payload):
     previewed = plan(store, project_id, payload)
     if not payload.get("source") or not isinstance(payload["source"], str):
         raise ValueError("缺少接口来源")
+    selected = None
+    if "selected_keys" in payload:
+        requested = payload["selected_keys"]
+        if not isinstance(requested, list) or not requested or any(not isinstance(k, str) for k in requested):
+            raise ValueError("请至少选择一个有效接口")
+        selected = set(requested)
+        available = {f"{c['method']}:{c['path']}" for c in previewed["changes"]}
+        if selected - available:
+            raise ValueError("选择的接口已失效，请重新预览")
     doc = openapi.parse(payload["document"])
     old = {(d["method"], d["path"]): d for d in definitions(store, project_id)}
     source_id = "src_" + hashlib.sha256(f"{project_id}:{payload['source']}".encode()).hexdigest()[:20]
@@ -108,6 +117,8 @@ def import_document(store, project_id, payload):
         store.conn.execute("INSERT OR REPLACE INTO api_source VALUES (?,?,?,?,?,?)",
                            (source_id, project_id, payload["source"], doc.title, doc.version, _json(payload["document"])))
         for op in doc.operations:
+            if selected is not None and f"{op.method}:{op.path}" not in selected:
+                continue
             previous = old.get((op.method, op.path))
             changed = not previous or previous["operation"] != asdict(op) or previous["removed"]
             revision = previous["revision"] + int(changed) if previous else 1
@@ -126,7 +137,9 @@ def import_document(store, project_id, payload):
             store.conn.execute("INSERT OR IGNORE INTO api_revision VALUES (?,?,?)", (definition_id, revision, _json(data)))
         keys = {(o.method, o.path) for o in doc.operations}
         for item in old.values():
-            if item["source"] == payload["source"] and (item["method"], item["path"]) not in keys:
+            if (item["source"] == payload["source"] and (item["method"], item["path"]) not in keys
+                    and not item["removed"]
+                    and (selected is None or f"{item['method']}:{item['path']}" in selected)):
                 store.conn.execute("UPDATE api_definition SET removed=1 WHERE id=?", (item["id"],))
                 affected.add(item["id"])
         # Invalidate affected approvals without overwriting manually edited requests.
@@ -136,7 +149,8 @@ def import_document(store, project_id, payload):
                 case.api_needs_review = True
                 case.status = "draft"
                 store.conn.execute("UPDATE testcase SET status='draft', data=? WHERE id=?", (_json(case.to_dict()), case.id))
-    return {"changes": previewed["changes"], "definitions": definitions(store, project_id)}
+    return {"changes": [c for c in previewed["changes"] if selected is None or f"{c['method']}:{c['path']}" in selected],
+            "definitions": definitions(store, project_id)}
 
 
 def validate_requests(steps, inputs=None, cleanup=None):
@@ -322,6 +336,7 @@ def debug(store, project_id, env_name, payload, confirm_production=False):
     if any(definition_map.get(s.get("definition_id"), {}).get("unsupported_body") for s in [*steps, *cleanup]):
         raise ValueError("当前仅支持 JSON 请求体，该接口需要其他请求类型")
     env = {"base_url": env_config["base_url"], "auth_header": os.environ.get("AITEST_AUTH_HEADER") or env_config.get("auth_header", "Authorization"),
+           "default_login_role": (env_config.get("api_login") or {}).get("default_role"),
            "auth_token": os.environ.get("AITEST_AUTH_TOKEN", ""), "timeout": env_config.get("timeout", 30), "api_crypto": env_config.get("api_crypto")}
     runtime_case = {"steps": steps, "cleanup": cleanup, "inputs": inputs, "variable_scope": "case"}
     hooks_path = Path(p.workspace_path) / "aitest_hooks.py"

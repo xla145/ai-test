@@ -185,3 +185,119 @@ def test_large_responses_preserve_complete_redacted_content(as_json):
     assert response['truncated'] is False
     assert payload in (response['body']['data'] if as_json else response['body'])
     assert 'private-response-token' not in json.dumps(result)
+
+
+def test_selective_import_and_module_groups(catalog):
+    store, p, preview = catalog
+    operations = ws.openapi.parse(preview["document"]).operations
+    assert len(operations) > 1
+    for change, op in zip(preview["changes"], operations):
+        assert change["module"] == (op.tags[0] if op.tags else "未分组")
+    key = lambda d: f"{d['method']}:{d['path']}"
+    chosen = preview["changes"][0]
+    result = ws.import_document(store, p.id, {**preview, "selected_keys": [key(chosen)]})
+    assert len(result["definitions"]) == 1
+    assert key(result["definitions"][0]) == key(chosen)
+    assert len(result["changes"]) == 1
+    # Importing another subset must preserve the previously imported endpoint.
+    other = preview["changes"][1]
+    result = ws.import_document(store, p.id, {**preview, "selected_keys": [key(other)]})
+    assert {key(d) for d in result["definitions"]} == {key(chosen), key(other)}
+    changed = copy.deepcopy(preview)
+    del changed["document"]["paths"][chosen["path"]][chosen["method"].lower()]
+    changed["document"]["paths"][other["path"]][other["method"].lower()]["summary"] = "更新描述"
+    # An unselected removal is not applied.
+    ws.import_document(store, p.id, {**changed, "selected_keys": [key(other)]})
+    before = next(d for d in ws.definitions(store, p.id) if key(d) == key(chosen))
+    assert not before["removed"] and before["revision"] == 1
+    removed = ws.plan(store, p.id, changed)
+    assert next(c for c in removed["changes"] if key(c) == key(chosen))["module"] == before["module"]
+    ws.import_document(store, p.id, {**changed, "selected_keys": [key(chosen)]})
+    assert next(d for d in ws.definitions(store, p.id) if key(d) == key(chosen))["removed"]
+
+
+@pytest.mark.parametrize("selection", [[], None, ["GET:/missing"], [42], "GET:/path"])
+def test_invalid_import_selection_does_not_write(catalog, selection):
+    store, p, preview = catalog
+    with pytest.raises(ValueError):
+        ws.import_document(store, p.id, {**preview, "selected_keys": selection})
+    assert ws.definitions(store, p.id) == []
+    assert store.conn.execute("SELECT count(*) FROM api_source").fetchone()[0] == 0
+
+
+def test_default_login_precedes_requests_and_caches_token():
+    from aitest.api_runtime import auth_resolver
+    calls = []
+    def handle(request):
+        calls.append(request.url.path)
+        if request.url.path == '/login':
+            assert json.loads(request.content) == {'username': 'tester', 'password': 'private-password'}
+            return httpx.Response(200, json={'data': {'token': 'Bearer private-token'}})
+        assert request.headers['Authorization'] == 'Bearer private-token'
+        return httpx.Response(200, json={})
+    env = {'default_login_role': 'tester', 'auth_token': 'old-token'}
+    login = {'path': '/login', 'prefix': 'Bearer ', 'token_path': 'data.token'}
+    accounts = [{'role': 'tester', 'username': 'tester', 'password': 'private-password'}]
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, login, accounts)
+        result = execute_case({'steps': [
+            {'method': 'GET', 'path': '/first', 'expected_status': [200]},
+            {'method': 'GET', 'path': '/second', 'expected_status': [200]},
+        ]}, client, env, {}, resolver)
+    assert result['status'] == 'passed'
+    assert calls == ['/login', '/first', '/second']
+    assert 'private-token' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('token', [None, '', 'null', 'undefined', {}, 123])
+def test_invalid_login_token_stops_business_request(token):
+    from aitest.api_runtime import auth_resolver
+    calls = []
+    def handle(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json={'data': {'token': token}})
+    env = {'default_login_role': 'tester'}
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, {'path': '/login'}, [{'role': 'tester', 'username': 'user', 'password': 'pw'}])
+        result = execute_case({'steps': [{'method': 'GET', 'path': '/business', 'expected_status': [200]}]}, client, env, {}, resolver)
+    assert calls == ['/login']
+    assert result['status'] != 'passed'
+
+
+def test_public_requests_skip_login_and_explicit_role_wins():
+    from aitest.api_runtime import auth_resolver
+    headers = []
+    def handle(request):
+        headers.append(request.headers.get('Authorization'))
+        return httpx.Response(200, json={})
+    env = {'default_login_role': 'tester', 'auth_token': 'environment-token'}
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, tokens={'tester': 'default-role-token', 'other': 'other-role-token'})
+        result = execute_case({'steps': [
+            {'method': 'GET', 'path': '/public', 'auth': False, 'expected_status': [200]},
+            {'method': 'GET', 'path': '/other', 'role': 'other', 'expected_status': [200]},
+        ]}, client, env, {}, resolver)
+    assert result['status'] == 'passed'
+    assert headers == [None, 'other-role-token']
+
+
+def test_login_client_id_follows_role_token_without_duplicate_headers():
+    from aitest.api_runtime import auth_resolver
+    calls = []
+    def handle(request):
+        calls.append(request.url.path)
+        if request.url.path == '/login':
+            body = json.loads(request.content)
+            return httpx.Response(200, json={'data': {'token': body['username'] + '-token'}})
+        assert request.headers.get_list('clientid') == ['web-client']
+        assert request.headers['Authorization'] == 'Bearer user-token'
+        return httpx.Response(200, json={'code': 200})
+    env = {'default_login_role': 'tester', 'api_crypto': {'headers': {'ClientId': 'stale-client'}}}
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, {'path': '/login', 'body': {'username': '${username}', 'password': '${password}', 'clientId': 'web-client'}},
+                                 [{'role': 'tester', 'username': 'user', 'password': 'pw'}])
+        case = {'steps': [{'method': 'GET', 'path': '/business', 'headers': {'CLIENTID': 'wrong'}, 'expected_status': [200]}]}
+        assert execute_case(case, client, env, {}, resolver)['status'] == 'passed'
+        assert execute_case(case, client, env, {}, resolver)['status'] == 'passed'
+    assert calls == ['/login', '/business', '/business']
+    assert env['api_crypto']['headers'] == {'ClientId': 'stale-client'}
