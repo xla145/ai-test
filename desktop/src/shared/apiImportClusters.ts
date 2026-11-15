@@ -72,4 +72,3 @@ export const clusterImportChanges = <T extends ModuleRow>(changes: T[]): ImportM
     rows: cluster.rows.sort((a, b) => `${a.path}${a.method}`.localeCompare(`${b.path}${b.method}`, "zh-CN")),
   })).sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
 };
-
