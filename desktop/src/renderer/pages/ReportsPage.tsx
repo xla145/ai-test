@@ -47,6 +47,7 @@ interface RunRow {
   pass_rate: number;
   html_report?: string;
   junit?: string;
+  acceptance?: Record<string, number>;
 }
 
 interface ResultRow {
@@ -62,9 +63,13 @@ interface ResultRow {
   attribution_confirmed: boolean;
   attribution_reason: string;
   evidence_paths: string[];
+  acceptance_status?: string;
+  reason_code?: string;
+  execution_context?: { sessions?: { role: string; mode: string; pageUrl: string; sessionId?: string }[] };
   reviews: { description: string; ai_verdict: string; status: string }[];
 }
 
+const ACCEPTANCE: Record<string, string> = { verified_pass: "验收通过", pending_review: "待人工复核", incomplete: "覆盖不完整", blocked: "执行阻断", failed: "验收失败" };
 const STATUS = {
   passed: { text: "通过", color: "success" },
   failed: { text: "失败", color: "error" },
@@ -129,10 +134,10 @@ export function ReportsPage({ project }: { project: Project }) {
             v === "playwright" ? <Tag icon={<ChromeOutlined />} color="geekblue" bordered={false}>UI</Tag> : <Tag icon={<ApiOutlined />} color="cyan" bordered={false}>接口</Tag> },
           { title: "环境", dataIndex: "env", width: 90 },
           { title: "模式", dataIndex: "mode", width: 70, render: (v: string) => MODE[v] ?? v },
-          { title: "通过率", dataIndex: "pass_rate", render: (v: number, r) => (
+          { title: "执行通过率", dataIndex: "pass_rate", render: (v: number, r) => (
             <Space className="report-pass-rate" style={{ width: "100%" }}>
               <Progress percent={Math.round(v * 100)} size="small" style={{ width: 140, margin: 0 }} status={r.failed ? "exception" : "success"} />
-              <Typography.Text type="secondary">{r.passed}/{r.total - r.skipped}</Typography.Text>
+              <Typography.Text type="secondary">验收 {r.acceptance?.verified_pass ?? 0} · {r.passed}/{r.total - r.skipped}</Typography.Text>
             </Space>
           ) },
           { title: "失败", dataIndex: "failed", width: 70, render: (v: number) => v ? <Typography.Text type="danger">{v}</Typography.Text> : 0 },
@@ -187,10 +192,11 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             { key: "d", label: "耗时", children: `${d.summary.duration.toFixed(1)} 秒` },
           ]} />
           <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="执行通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="执行成功" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
             <Col xs={12} md={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card></Col>
             <Col xs={12} md={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
+            <Col xs={12} md={6}><Card size="small"><Statistic title="验收通过" value={(d.summary.acceptance?.verified_pass ?? 0)} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
           </Row>
           {Object.keys(d.summary.failure_types).length > 0 && (
             <div style={{ marginBottom: 12 }}><Space wrap>
@@ -208,11 +214,13 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             dataSource={rows}
             pagination={{ pageSize: 20, size: "small", hideOnSinglePage: true }}
             expandable={{
-              rowExpandable: (x) => !!(x.message || x.evidence_paths.length || x.reviews.length),
+              rowExpandable: (x) => !!(x.message || x.evidence_paths.length || x.reviews.length || x.execution_context?.sessions?.length),
               expandedRowRender: (x) => (
                 <Space direction="vertical" style={{ width: "100%" }}>
                   {x.api_trace && <ExecutionResult result={{ ...x.api_trace, id: r.id, env: r.env, title: x.title, created_at: r.started_at }} />}
+                  {x.acceptance_status && <Typography.Text type="secondary">验收：{ACCEPTANCE[x.acceptance_status] ?? x.acceptance_status}{x.reason_code ? ` · ${x.reason_code}` : ""}</Typography.Text>}
                   {x.attribution_reason && <Typography.Text>{x.attribution_reason}</Typography.Text>}
+                  {x.execution_context?.sessions?.map((session, i) => <Typography.Text key={`session-${i}`} type="secondary">执行角色：{session.role} · {session.mode === "embedded" ? "内嵌浏览器" : "独立浏览器"} · {session.pageUrl}</Typography.Text>)}
                   {x.message && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0, maxHeight: 240, overflow: "auto" }}>{x.message}</pre>}
                   {x.evidence_paths.length > 0 && (
                     <Space wrap>
@@ -234,6 +242,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
               { title: "用例", dataIndex: "title", render: (t: string, x) => <>{t}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{x.module || x.case_id}</Typography.Text></div></> },
               { title: "等级", dataIndex: "priority", width: 60 },
               { title: "结果", dataIndex: "status", width: 70, render: (v: string) => <Tag color={STATUS[v]?.color} bordered={false}>{STATUS[v]?.text ?? v}</Tag> },
+              { title: "验收", dataIndex: "acceptance_status", width: 120, render: (v: string) => ACCEPTANCE[v] ?? "历史未验收" },
               { title: "归因", dataIndex: "failure_type", width: 150, render: (v: string, x) => ["failed", "error"].includes(x.status) && (
                 <Space size={4}><LabelTag map={FAILURE} value={v || "unknown"} />{x.attribution_confirmed && <Tag bordered={false}>已确认</Tag>}</Space>
               ) },

@@ -3,6 +3,7 @@ import { App, Button, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typogr
 import { useRef, useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { CaseDrawer, PRIORITY_COLOR } from "../components/CaseLink";
+import { CaseEditor } from "../components/CaseEditor";
 import { LabelTag, LINT, MODE, STATUS } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { useAction, useDebounced, usePaged, notifyProjectChanged } from "../hooks";
@@ -13,6 +14,7 @@ export function CasesPage({ project }: { project: Project }) {
   const [filters, setFilters] = useState<{ mode?: string; priority?: string; status?: string; lint?: string }>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<TestCase>();
+  const [editing, setEditing] = useState<TestCase>();
   const { run } = useAction();
   const [activeAction, setActiveAction] = useState<string>();
   const actionRef = useRef<string>();
@@ -137,9 +139,14 @@ export function CasesPage({ project }: { project: Project }) {
       />
       </div>
       <CaseDrawer caseId={detail?.id} data={detail} onClose={() => setDetail(undefined)}
-        extra={(c) => c.status === "draft" && (
+        extra={(c) => <Space>
+          <Button disabled={busy} onClick={() => setEditing(c)}>编辑用例</Button>
+          {c.status === "draft" && (
           <Button type="primary" loading={activeAction === `reviewed:drawer:${c.id}`} disabled={busy || c.lint_status === "blocked"} onClick={() => setStatus([c.id], "reviewed", `drawer:${c.id}`).then(() => setDetail(undefined))}>审核通过</Button>
-        )} />
+        )}</Space>} />
+      {editing && <CaseEditor key={editing.id} value={editing} onClose={() => setEditing(undefined)} onSaved={(updated) => {
+        setDetail(updated); setEditing(undefined); notifyProjectChanged(project.id); void reload();
+      }} />}
     </>
   );
 }

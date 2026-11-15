@@ -1,9 +1,10 @@
+import { readIssue, writeIssue } from "./issueHistory";
 import { useUiTasks, isUiTaskActive } from "../../components/UiTasks";
 import {
   ArrowUpOutlined, BugOutlined, CodeOutlined, CaretRightOutlined, CheckCircleFilled, CheckOutlined, CloseOutlined, ExclamationCircleFilled, LoadingOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, SearchOutlined, StepForwardOutlined, WarningFilled,
+  MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, MoreOutlined, SearchOutlined, SettingOutlined, StepForwardOutlined, WarningFilled,
 } from "@ant-design/icons";
-import { App, Button, Checkbox, Empty, Input, Progress, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Dropdown, Empty, Input, Popover, Progress, Segmented, Select, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { UiCaseGroup, UiDebugCommand, UiDebugState, UiGroupCase, UiScriptState } from "../../../shared/ipc";
 import { reviewedUiGroups } from "../../../shared/reviewedUiGroups";
@@ -12,18 +13,22 @@ import { api, type Project, type TestCase } from "../../api";
 import { BrowserDock } from "../../components/BrowserDock";
 import { CaseLink, CaseTitles } from "../../components/CaseLink";
 import { FAILURE, LabelTag } from "../../components/labels";
+import { ExecutionIssue } from "../../components/ExecutionIssue";
+import { CaseEditor } from "../../components/CaseEditor";
 import { ScriptSteps, type StepRunState } from "../../components/ScriptSteps";
 import { notifyProjectChanged, useAction, useKeyedAction, useLoad, useProjectChanged } from "../../hooks";
 
 interface UiFailure { case_id: string; status: string; failure_type: string; message: string; reason?: string }
 interface UiRunResult {
-  run: { run_id: string; total: number; passed: number; failed: number; error: number; reviews: number };
+  run: { run_id: string; total: number; passed: number; failed: number; error: number; reviews: number; acceptance?: Record<string, number> };
   heal?: { case_id: string; failure_type: string; reason?: string }[];
   /** 失败明细（规则判定 + agent 自愈结论） */
   failures?: UiFailure[];
   degraded: string[];
   missingData: string[];
   htmlReport: string;
+  sessionId?: string;
+  validationIssues?: Record<string, string>;
 }
 
 /** 脚本所处阶段：未生成 → 待校验 → 待确认（试跑通过）→ 已确认 */
@@ -36,7 +41,6 @@ const STAGES: { key: Stage; label: string; hint: string }[] = [
   { key: "confirmed", label: "已确认", hint: "可执行回归，不再调用模型" },
 ];
 const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.key, s.label])) as Record<Stage, string>;
-const FLOW = ["AI 生成", "试跑校验", "确认脚本", "执行回归"];
 const FLOW_SHORT = ["生成", "试跑", "确认", "回归"];
 const FLOW_INDEX: Record<Stage, number> = { none: 0, pending: 1, validated: 2, confirmed: 3 };
 
@@ -45,7 +49,7 @@ const WORKERS_KEY = "aitest:ui:workers";
 const pref = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const savePref = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* 仅偏好，存不了就用默认值 */ } };
 const isStopped = (error: unknown) => (error as Error)?.message?.includes("UI_TASK_STOPPED");
-const passed = (r: UiRunResult) => r.run.passed > 0 && r.run.failed + r.run.error === 0;
+const passed = (r: UiRunResult) => r.run.passed > 0 && r.run.passed === r.run.total && r.run.failed + r.run.error === 0 && !r.run.reviews && !r.degraded.length && !Object.keys(r.validationIssues ?? {}).length;
 const cleanError = (error: unknown) => String((error as Error)?.message ?? error).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
 
 type Phase = "explore" | "validate" | "derive" | "batch";
@@ -68,8 +72,39 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   onWorking: (working: boolean) => void; onUpdated: () => Promise<void>; onInbox: () => void;
 }) {
   const { modal, message } = App.useApp();
+  const benchRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const bench = benchRef.current;
+    const page = bench?.closest<HTMLElement>(".page");
+    if (!bench || !page) return;
+    const measure = () => {
+      // 使用滚动前的布局位置，滚动页面不会反过来改变面板高度。
+      const top = bench.getBoundingClientRect().top - page.getBoundingClientRect().top + page.scrollTop;
+      const available = Math.max(280, Math.floor(page.clientHeight - top - 16));
+      bench.style.setProperty("--uix-available-height", `${available}px`);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(page);
+    // 顶部提示、工具栏等高度变化时重新计算，但不监听面板自身，避免反馈循环。
+    let ancestor: HTMLElement | null = bench;
+    while (ancestor && ancestor !== page) {
+      for (let sibling = ancestor.previousElementSibling; sibling; sibling = sibling.previousElementSibling) observer.observe(sibling);
+      ancestor = ancestor.parentElement;
+    }
+    measure();
+    return () => observer.disconnect();
+  });
+
   const production = Boolean(project.environments[env]?.production);
   const baseUrl = project.environments[env]?.base_url;
+  const roles = useLoad(() => api().listRoles(project.id), [project.id]);
+  const rolePreference = `aitest:ui:role:${JSON.stringify([project.id, env])}`;
+  const [selectedRole, setSelectedRole] = useState<string | undefined>(() => pref(rolePreference) || undefined);
+  const changeRole = (role?: string) => run("session", async () => {
+    if (baseUrl) await api().openTestPage(baseUrl, { projectId: project.id, env, role });
+    setSelectedRole(role); savePref(rolePreference, role ?? "");
+  });
+  useProjectChanged(project.id, () => { void roles.reload(); });
 
   // ---- 数据：脚本状态 + 用例分组（同脚本、不同参数的用例归为一组） ----
   const [search, setSearch] = useState("");
@@ -106,10 +141,12 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
 
   // ---- 当前用例与界面状态 ----
   const [current, setCurrent] = useState<TestCase>();
+  const [editing, setEditing] = useState<TestCase>();
   const currentId = useRef<string>();
   currentId.current = current?.id;
   const [selected, setSelected] = useState<Record<string, UiGroupCase>>({});
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [compactPanel, setCompactPanel] = useState<"cases" | "steps">("cases");
   const toggleList = (collapsed: boolean) => setListCollapsed(collapsed);
   const [autoValidate, setAutoValidate] = useState(() => pref(AUTO_VALIDATE_KEY) !== "0");
   const changeAutoValidate = (on: boolean) => { setAutoValidate(on); savePref(AUTO_VALIDATE_KEY, on ? "1" : "0"); };
@@ -118,10 +155,21 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const changeWorkers = (n: number) => { setWorkers(n); savePref(WORKERS_KEY, String(n)); };
   const [feedback, setFeedback] = useState("");
   const [result, setResult] = useState<UiRunResult>();
+  const loginPromptRun = useRef<string>();
+  useEffect(() => {
+    if (!result || loginPromptRun.current === result.run.run_id || !result.failures?.some(f => /AUTH_REQUIRED|登录态失效|登录未完成/.test(f.message))) return;
+    loginPromptRun.current = result.run.run_id;
+    modal.info({ title: "请完成执行角色登录", content: "在右侧浏览器选择脚本对应的角色并完成登录，再重新试跑。本次运行已停止，不会自动重放操作。", okText: "去登录" });
+  }, [result, modal]);
   const [resultOpen, setResultOpen] = useState(false);
   const [conclusion, setConclusion] = useState("");
   /** AI 生成结束但没有保存出脚本时，结论按警告显示 */
   const [conclusionFailed, setConclusionFailed] = useState(false);
+  const [savedIssue, setSavedIssue] = useState<{ message: string; at: string }>();
+  useEffect(() => {
+    setConclusion(""); setConclusionFailed(false);
+    setSavedIssue(current ? readIssue(project.id, env, current.id) : undefined);
+  }, [project.id, env]);
   const [logs, setLogs] = useState<{ title: string; status: string; caseId?: string }[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   /** 当前用例每个脚本步骤的执行状态（来自 test.step 进度） */
@@ -143,7 +191,15 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const run = <T,>(key: string, action: () => Promise<T>, success?: string) => runAction(key, async () => {
     try { return await action(); }
     catch (error) {
-      if (!isStopped(error)) throw error;
+      if (!isStopped(error)) {
+        if (["pipeline", "validate", "regression", "revise"].includes(key) && currentId.current) {
+          const reason = cleanError(error);
+          writeIssue(project.id, env, currentId.current, reason);
+          setConclusionFailed(true); setConclusion(reason);
+          setSavedIssue(readIssue(project.id, env, currentId.current));
+        }
+        throw error;
+      }
       markStopped();
       setConclusionFailed(false);
       setConclusion("任务已停止，可继续操作。已保存的脚本会保留，请校验后再确认。");
@@ -161,7 +217,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     catch (error) { setStopping(false); throw error; }
   });
   const backgroundBusy = useUiTasks().some(isUiTaskActive);
-  const locked = busy || Boolean(debug) || backgroundBusy;
+  const locked = busy || Boolean(debug) || backgroundBusy || Boolean(editing);
   useEffect(() => { onWorking(locked); return () => onWorking(false); }, [locked, onWorking]);
 
   /** 生产环境：执行前二次确认，确认后以 confirmProduction 调用（主进程同样会拒绝未确认的执行） */
@@ -215,11 +271,14 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     setSelected((old) => Object.fromEntries(Object.entries(old).filter(([id]) => index.caseOf.has(id))));
   }, [index, locked, groupsLoad.data, current]);
 
-  const resetRunView = () => { setLogs([]); setStepStates({}); setConclusion(""); setConclusionFailed(false); };
+  const resetRunView = () => { setLogs([]); setStepStates({}); setConclusion(""); setConclusionFailed(false); setSavedIssue(undefined); };
   /** 列表里只有摘要，详情（步骤、预期、前置条件）按需读取 */
   const show = async (id: string) => {
     const c = await api().getCase(id) as TestCase | undefined;
-    if (c) { setCurrent(c); setFeedback(""); resetRunView(); }
+    if (c) {
+      setCurrent(c); setListCollapsed(true); setCompactPanel("steps"); setFeedback(""); resetRunView();
+      setSavedIssue(readIssue(project.id, env, c.id));
+    }
     return c;
   };
   const choose = (c: UiGroupCase) => { if (!locked && c.id !== current?.id) void show(c.id); };
@@ -237,7 +296,11 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     setSummary(undefined); setResult(undefined);
     const single = list.length === 1;
     const out: PipelineSummary = { total: list.length, explored: 0, derived: 0, validated: 0, failed: [], stopped: false, autoValidate };
-    const fail = (c: { id: string; title: string }, reason: string) => out.failed.push({ id: c.id, title: c.title, reason });
+    const fail = (c: { id: string; title: string }, reason: string) => {
+      out.failed.push({ id: c.id, title: c.title, reason });
+      writeIssue(project.id, env, c.id, reason);
+      if (c.id === currentId.current) setSavedIssue(readIssue(project.id, env, c.id));
+    };
     // 脚本状态在流水线内自行跟踪：setState 后的 scripts.data 要到下次渲染才更新
     let states: Record<string, UiScriptState> = { ...(scripts.data ?? {}) };
     const sync = async () => { states = await api().uiScriptStates(project.id, env); scripts.setData(states); };
@@ -255,22 +318,22 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     const explore = async (c: UiGroupCase): Promise<boolean> => {
       await show(c.id);
       setProgress({ done, total, title: c.title, phase: "explore" });
-      const gen = await api().exploreUiCase(project.id, env, c.id, { confirmProduction }) as { message?: string; scriptGenerated?: boolean };
+      const gen = await api().exploreUiCase(project.id, env, c.id, { confirmProduction, selectedRole }) as { message?: string; scriptGenerated?: boolean };
       lastMessage = gen?.message ?? "";
       await sync();
       if (gen?.scriptGenerated === false) {
-        fail(c, (gen.message ?? "AI 没有保存出脚本").split("\n")[0]);
+        fail(c, gen.message ?? "AI 没有保存出脚本");
         if (single) { setConclusionFailed(true); setConclusion(gen.message || "AI 没有保存出脚本，请补充用例步骤或登录态后重试。"); }
         return false;
       }
       out.explored++;
       if (!autoValidate) return true;
       setProgress({ done, total, title: c.title, phase: "validate" });
-      const r = await api().runUiRegression(project.id, env, true, { caseIds: [c.id], mode: "validate", embedded: true, confirmProduction }) as UiRunResult;
+      const r = await api().runUiRegression(project.id, env, true, { caseIds: [c.id], mode: "validate", embedded: true, selectedRole, confirmProduction }) as UiRunResult;
       await sync();
       if (passed(r)) { out.validated++; return true; }
       if (single) setResult(r);
-      fail(c, r.failures?.[0]?.reason || r.failures?.[0]?.message?.split("\n")[0] || "试跑未通过");
+      fail(c, Object.values(r.validationIssues ?? {})[0] || r.failures?.[0]?.reason || r.failures?.[0]?.message?.split("\n")[0] || "试跑未通过");
       return false;
     };
 
@@ -278,7 +341,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       for (const [group, targets] of byGroup) {
         if (cancelled.current) { out.stopped = true; break; }
         let rest = targets;
-        let source = opts.forceAi ? undefined : templateOf(group)?.id;
+        let source = opts.forceAi || selectedRole ? undefined : templateOf(group)?.id;
         if (!source) {
           // 组内还没有脚本：探索第一条作模板；模板没走通就不再往下复制
           const [first, ...others] = targets;
@@ -287,7 +350,13 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           if (usable) source = first.id;
           else for (const c of rest.splice(0)) fail(c, "同组模板脚本没有走通，先处理模板用例后再生成");
         }
-        if (source && rest.length) {
+        if (selectedRole && rest.length) {
+          // 所选角色属于本次执行条件，不能直接沿用其它角色的模板。
+          for (const c of rest) {
+            if (cancelled.current) break;
+            await explore(c).catch((error) => { if (isStopped(error)) throw error; fail(c, cleanError(error)); });
+          }
+        } else if (source && rest.length) {
           setProgress({ done, total, title: `${group.label}（${rest.length} 条）`, phase: "derive" });
           const d = await api().deriveUiScripts(project.id, env, source, { targetIds: rest.map((c) => c.id) })
             .catch((error) => ({ derived: [] as string[], skipped: rest.map((c) => ({ caseId: c.id, reason: cleanError(error) })) }));
@@ -309,15 +378,18 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           // 单条：和 AI 生成的一样，在内嵌浏览器里可见地试跑
           await show(derivedIds[0]);
           setProgress({ done, total, title: list[0].title, phase: "validate" });
-          const r = await api().runUiRegression(project.id, env, true, { caseIds: derivedIds, mode: "validate", embedded: true, confirmProduction }) as UiRunResult;
+          const r = await api().runUiRegression(project.id, env, true, { caseIds: derivedIds, mode: "validate", embedded: true, selectedRole, confirmProduction }) as UiRunResult;
           if (passed(r)) out.validated++;
-          else { setResult(r); fail(list[0], r.failures?.[0]?.reason || r.failures?.[0]?.message?.split("\n")[0] || "试跑未通过"); }
+          else { setResult(r); fail(list[0], Object.values(r.validationIssues ?? {})[0] || r.failures?.[0]?.reason || r.failures?.[0]?.message?.split("\n")[0] || "试跑未通过"); }
         } else {
           setProgress({ done, total, title: `${derivedIds.length} 个参数化脚本 · ${workers} 路并行`, phase: "batch" });
           const r = await api().runUiRegression(project.id, env, false, { caseIds: derivedIds, mode: "validate", workers, confirmProduction }) as UiRunResult;
-          out.validated += r.run.passed;
-          for (const f of r.failures ?? []) fail(index.caseOf.get(f.case_id) ?? { id: f.case_id, title: f.case_id }, f.reason || f.message.split("\n")[0] || "试跑未通过");
-          if (r.failures?.length) setResult(r);
+          await sync();
+          for (const id of derivedIds) {
+            if (states[id]?.validatedRunId) out.validated++;
+            else fail(index.caseOf.get(id) ?? { id, title: id }, states[id]?.validationReason || r.validationIssues?.[id] || "试跑未完整通过");
+          }
+          if (!passed(r)) setResult(r);
         }
       }
     } catch (error) {
@@ -331,7 +403,9 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
         : autoValidate ? "脚本已生成并试跑通过，核对右侧页面无误后确认脚本。" : lastMessage || "脚本已生成，请试跑校验。");
     } else if (out.explored || out.derived) {
       setConclusionFailed(true);
-      setConclusion(`脚本已生成，但试跑未通过：${out.failed[0].reason}\n可以单步调试定位、让 AI 重新探索生成，或在下方告诉 AI 哪里需要修正。`);
+      const failure = `脚本已生成，但试跑未通过：${out.failed[0].reason}\n可以单步调试定位、让 AI 重新探索生成，或在下方告诉 AI 哪里需要修正。`;
+      setConclusion(failure); writeIssue(project.id, env, out.failed[0].id, failure);
+      if (out.failed[0].id === current?.id) setSavedIssue(readIssue(project.id, env, current.id));
     }
     await refresh();
     notifyProjectChanged(project.id);
@@ -344,18 +418,26 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const exploreCount = useMemo(() => new Set(pendingGeneration.map((c) => index.groupOf.get(c.id)).filter((g) => g && !templateOf(g)).map((g) => g!.id)).size,
     [pendingGeneration, index]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const validate = (confirmProduction: boolean) => current && run("validate", async () => {
+  const validate = (confirmProduction: boolean, embedded = true) => current && run("validate", async () => {
     resetRunView(); setSummary(undefined);
-    const r = await api().runUiRegression(project.id, env, true, { caseIds: [current.id], mode: "validate", embedded: true, confirmProduction }) as UiRunResult;
+    const r = await api().runUiRegression(project.id, env, true, { caseIds: [current.id], mode: "validate", embedded, selectedRole, confirmProduction }) as UiRunResult;
     // 通过时只在用例旁提示下一步；失败才展开结果条
     if (passed(r)) { setResult(undefined); setConclusion("试跑通过，核对右侧页面无误后确认脚本。"); }
-    else setResult(r);
+    else {
+      const reason = [r.validationIssues?.[current.id], ...(r.failures ?? []).filter(f => f.case_id === current.id).map(f => f.reason || f.message)].filter(Boolean).join("\n") || "试跑未完整通过，请查看运行结果。";
+      setResult(r); setConclusionFailed(true); setConclusion(reason);
+      writeIssue(project.id, env, current.id, reason); setSavedIssue(readIssue(project.id, env, current.id));
+    }
     await refresh();
     notifyProjectChanged(project.id);
   });
   const regress = (ids: string[], confirmProduction: boolean) => run("regression", async () => {
     resetRunView(); setSummary(undefined);
-    setResult(await api().runUiRegression(project.id, env, false, { caseIds: ids, mode: "regression", workers: ids.length > 1 ? workers : 1, confirmProduction }) as UiRunResult);
+    const r = await api().runUiRegression(project.id, env, false, { caseIds: ids, mode: "regression", workers: ids.length > 1 ? workers : 1, confirmProduction }) as UiRunResult;
+    setResult(r);
+    for (const failure of r.failures ?? []) writeIssue(project.id, env, failure.case_id, failure.reason || failure.message);
+    for (const [id, reason] of Object.entries(r.validationIssues ?? {})) writeIssue(project.id, env, id, reason);
+    if (current) setSavedIssue(readIssue(project.id, env, current.id));
     await refresh();
     notifyProjectChanged(project.id);
   });
@@ -401,8 +483,10 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const currentGroup = current && index.groupOf.get(current.id);
   const currentBrief = current && index.caseOf.get(current.id);
   /** 同组里可直接复用的脚本（当前用例还没有脚本时） */
-  const reusable = currentGroup && current && !scripts.data?.[current.id] ? templateOf(currentGroup, current.id) : undefined;
+  const reusable = !selectedRole && currentGroup && current && !scripts.data?.[current.id] ? templateOf(currentGroup, current.id) : undefined;
 
+  const scriptRoles = [...new Set(detail.data?.steps?.map(step => step.role ?? "default") ?? [])];
+  const scriptRoleLabel = scriptRoles.map(role => role === "default" ? "默认会话" : role).join("、");
   const debugTip = !script ? "先生成脚本" : detail.data && (!detail.data.steps || !detail.data.synced)
     ? "脚本没有结构化步骤或已被修改，无法单步调试" : "逐步回放到内嵌浏览器，失败时停住现场；不计入校验";
   const canDebug = Boolean(detail.data?.steps && detail.data.synced) && !!current && !blocked(current);
@@ -413,19 +497,19 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     if (stage === "none") {
       const brief = currentBrief ?? { id: c.id, title: c.title, priority: c.priority, status: c.status, lint_status: c.lint_status, execution_mode: c.execution_mode, variant: "" };
       return <Tooltip title={reusable ? `同组「${reusable.variant || reusable.title}」已有脚本，按参数替换直接生成，不调用模型` : ""}>
-        <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined />} loading={activeKey === "pipeline"} disabled={locked}
+        <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined />} disabled={locked}
           onClick={() => guard((ok) => pipeline([brief], ok), "生成脚本")}>{reusable ? "按参数生成" : autoValidate ? "AI 生成并试跑" : "AI 生成脚本"}</Button>
       </Tooltip>;
     }
     if (stage === "pending") {
-      return <Button type="primary" danger={production} icon={<CaretRightOutlined />} loading={activeKey === "validate"} disabled={locked}
+      return <Button type="primary" danger={production} icon={<CaretRightOutlined />} disabled={locked}
         onClick={() => guard(validate, "试跑")}>试跑校验</Button>;
     }
     if (stage === "validated") {
-      return <Button type="primary" icon={<CheckOutlined />} loading={activeKey === "confirm"} disabled={locked} onClick={() => confirmScripts([c.id])}>确认脚本</Button>;
+      return <Button type="primary" icon={<CheckOutlined />} disabled={locked} onClick={() => confirmScripts([c.id])}>确认脚本</Button>;
     }
     return <Tooltip title={c.status !== "reviewed" ? "用例审核通过后才能加入回归" : ""}>
-      <Button type="primary" danger={production} icon={<CaretRightOutlined />} loading={activeKey === "regression"} disabled={locked || c.status !== "reviewed"}
+      <Button type="primary" danger={production} icon={<CaretRightOutlined />} disabled={locked || c.status !== "reviewed"}
         onClick={() => guard((ok) => regress([c.id], ok), "执行回归")}>执行回归</Button>
     </Tooltip>;
   };
@@ -433,13 +517,28 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const activity = activeKey === "pipeline" ? (progress?.phase === "validate" ? "正在内嵌浏览器中试跑脚本…" : progress?.phase === "derive" ? "正在按参数生成同组脚本…"
       : progress?.phase === "batch" ? "正在无头并行试跑参数化脚本…" : "AI 正在探索页面并生成脚本…")
     : activeKey === "validate" ? "正在内嵌浏览器中试跑脚本…" : activeKey === "regression" ? "正在执行回归…"
-    : activeKey === "revise" ? "AI 正在根据反馈修正脚本…" : "";
+    : activeKey === "revise" ? "AI 正在根据反馈修正脚本…" : activeKey === "confirm" ? "正在确认脚本…" : "";
   const lastLog = logs[logs.length - 1];
   const noneCount = counts?.none ?? 0;
   const failures = result ? [
     ...(result.failures ?? (result.heal ?? []).map((h) => ({ ...h, status: "failed", message: "" }))).map((f) => ({ ...f, key: `f:${f.case_id}` })),
+    ...Object.entries(result.validationIssues ?? {}).filter(([id]) => !(result.failures ?? []).some(f => f.case_id === id)).map(([id, message]) => ({ key: `v:${id}`, case_id: id, status: "incomplete", failure_type: "", message, reason: undefined as string | undefined })),
     ...result.degraded.map((id) => ({ key: `d:${id}`, case_id: id, status: "degraded", failure_type: "", message: "依赖的测试数据缺失且无法造数，本次未执行", reason: undefined as string | undefined })),
   ] : [];
+
+  const stageFilters = (
+<div className="uix-stats" role="group" aria-label="按脚本阶段筛选">
+        {STAGES.map((s) => (
+          <Tooltip key={s.key} title={s.hint} mouseEnterDelay={0.4}>
+            <button type="button" aria-pressed={filter === s.key} className={`uix-stat ${s.key} ${filter === s.key ? "active" : ""}`}
+              disabled={locked} onClick={() => setFilter(filter === s.key ? "all" : s.key)}>
+              <span className="uix-stat-value">{counts ? counts[s.key] : "–"}</span>
+              <span className="uix-stat-label"><i className={`uix-dot ${s.key}`} />{s.label}</span>
+            </button>
+          </Tooltip>
+        ))}
+      </div>
+  );
 
   return <>
     {/* 顶部：一键生成 + 四个阶段的数量（点击即筛选） */}
@@ -459,44 +558,32 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
           <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button>
         </div>
       ) : (
-        <div className="uix-hero-main">
-          <div className="uix-hero-text">
-            <Tooltip title={pendingGeneration.length
-              ? `AI 探索 ${exploreCount} 次，其余按参数生成；仅处理审核通过且未被规范检查阻断的 UI 用例`
-              : noneCount ? "剩余用例被规范检查阻断，修正后才能生成" : "选中用例可继续试跑、确认或执行回归"}>
-              <span className="uix-generation-summary">{noneCount ? `${noneCount} 条待生成` : counts?.all ? "脚本已全部生成" : "暂无可生成用例"}</span>
-            </Tooltip>
-            <div className="uix-generation-options">
-              <span className="uix-hero-switch">
-                <Switch size="small" checked={autoValidate} onChange={changeAutoValidate} disabled={locked} aria-label="生成后自动试跑" />
-                自动试跑
-              </span>
-              <Tooltip title="参数化脚本的试跑和多条回归在后台无头并行；AI 探索和内嵌试跑共用一个浏览器，逐条执行">
-                <span className="uix-hero-switch">
-                  并行
-                  <Select size="small" variant="filled" value={workers} onChange={changeWorkers} disabled={locked} aria-label="并行数" popupMatchSelectWidth={false}
-                    options={[1, 2, 3, 4, 6].map((n) => ({ value: n, label: `${n} 路` }))} />
-                </span>
-              </Tooltip>
-            </div>
+        <div className="uix-workflow-toolbar">
+          {stageFilters}
+          <div className="uix-workflow-actions">
+            <Popover trigger="click" placement="bottomRight" title="执行设置" content={
+              <div className="uix-run-settings">
+                <label><span>生成后自动试跑</span><Switch size="small" checked={autoValidate} onChange={changeAutoValidate} disabled={locked} aria-label="生成后自动试跑" /></label>
+                <label><span>后台并行数</span><Select size="small" value={workers} onChange={changeWorkers} disabled={locked} aria-label="并行数"
+                  options={[1, 2, 3, 4, 6].map(n => ({ value: n, label: `${n} 路` }))} /></label>
+                <Typography.Text type="secondary">仅后台试跑和回归并行；AI 探索与内嵌试跑逐条执行。</Typography.Text>
+              </div>
+            }>
+              <Button type="text" aria-label="执行设置" title="执行设置" icon={<SettingOutlined />} disabled={locked}><span className="uix-settings-text">执行设置</span></Button>
+            </Popover>
+            {stoppable ? <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button> :
+              <Tooltip title={pendingGeneration.length
+                ? selectedRole ? `按所选登录态逐条探索 ${pendingGeneration.length} 条用例` : `AI 探索 ${exploreCount} 次，其余按参数生成；仅处理审核通过且未被规范检查阻断的 UI 用例`
+                : noneCount ? "剩余用例被规范检查阻断，修正后才能生成" : "没有待生成的用例，可选择已有脚本试跑"}>
+                <Button type="primary" danger={production} icon={<CodeOutlined />} disabled={locked || !pendingGeneration.length}
+                  onClick={() => guard((ok) => pipeline(pendingGeneration, ok), "批量生成脚本")}>
+                  {pendingGeneration.length ? `生成 ${pendingGeneration.length} 条脚本` : "生成脚本"}
+                </Button>
+              </Tooltip>}
           </div>
-          {stoppable
-            ? <Button danger icon={<PoweroffOutlined />} loading={stopping} onClick={stop}>停止</Button>
-            : <Button type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 18 }} />}
-                disabled={locked || !pendingGeneration.length} onClick={() => guard((ok) => pipeline(pendingGeneration, ok), "批量生成脚本")}>一键生成全部</Button>}
         </div>
       )}
-      <div className="uix-stats" role="tablist" aria-label="按脚本阶段筛选">
-        {STAGES.map((s) => (
-          <Tooltip key={s.key} title={s.hint} mouseEnterDelay={0.4}>
-            <button type="button" role="tab" aria-selected={filter === s.key} className={`uix-stat ${s.key} ${filter === s.key ? "active" : ""}`}
-              disabled={locked} onClick={() => setFilter(filter === s.key ? "all" : s.key)}>
-              <span className="uix-stat-value">{counts ? counts[s.key] : "–"}</span>
-              <span className="uix-stat-label"><i className={`uix-dot ${s.key}`} />{s.label}</span>
-            </button>
-          </Tooltip>
-        ))}
-      </div>
+      {progress && stageFilters}
     </div>
 
     {/* 批量生成 / 最近一次执行的结果 */}
@@ -519,7 +606,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
         {result.run.failed + result.run.error ? <ExclamationCircleFilled className="uix-banner-icon" /> : <CheckCircleFilled className="uix-banner-icon" />}
         <div className="uix-banner-text">
           <strong>{result.run.failed + result.run.error ? "执行有失败" : "执行通过"}</strong>
-          <span>共 {result.run.total} 条 · 通过 {result.run.passed} · 失败 {result.run.failed + result.run.error}{result.run.reviews > 0 && ` · 待人工复核 ${result.run.reviews}`}</span>
+          <span>共 {result.run.total} 条 · 验收通过 {result.run.acceptance?.verified_pass ?? 0} · 执行成功 {result.run.passed} · 失败 {result.run.failed + result.run.error}{result.run.reviews > 0 && ` · 待人工复核 ${result.run.reviews}`}</span>
           {result.missingData.length > 0 && <Typography.Text type="warning" ellipsis style={{ minWidth: 0 }}>缺少测试数据：{result.missingData.join("、")}</Typography.Text>}
         </div>
         {failures.length > 0 && <Button size="small" onClick={() => setResultOpen(!resultOpen)}>{resultOpen ? "收起明细" : `查看明细（${failures.length}）`}</Button>}
@@ -547,7 +634,14 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       </div>
     )}
 
-    <div className={`uix-bench ${summary || result ? "has-banner" : ""} ${listCollapsed ? "list-collapsed" : ""}`}>
+    <div ref={benchRef} className={`uix-bench compact-${compactPanel} ${!current ? "no-current" : ""} ${summary || result ? "has-banner" : ""} ${listCollapsed ? "list-collapsed" : ""}`}>
+      <div className="uix-compact-nav">
+        <Segmented<"cases" | "steps"> value={compactPanel} onChange={(panel) => { setCompactPanel(panel); if (panel === "cases") setListCollapsed(false); }} options={[
+          { value: "cases", label: `用例 · ${visibleCount}` },
+          { value: "steps", label: "步骤与结果", disabled: !current },
+        ]} />
+        {current && <Typography.Text type="secondary" ellipsis title={current.title}>{current.title}</Typography.Text>}
+      </div>
       {/* 用例列表 */}
       {listCollapsed ? (
         <div className="uix-rail">
@@ -577,7 +671,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 onPick={pick} onChoose={choose} renderMeta={(c) => {
                   const st = stageById(c.id);
                   return <>
-                    {current?.id === c.id && activeKey === "pipeline" ? <LoadingOutlined className="uix-case-spin" /> : <i className={`uix-dot ${st}`} />}
+                    <i className={`uix-dot ${st}`} />
                     <span>{STAGE_LABEL[st]}</span><span className="uix-sep">·</span><span>{c.priority}</span>
                     {c.execution_mode === "capture" && <span>埋点</span>}
                     {blocked(c) && <Tag bordered={false} color="red">规范阻断</Tag>}
@@ -592,17 +686,17 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 <span>已选 {picked.length} 条</span>
                 <Button size="small" type="link" disabled={locked} onClick={() => setSelected({})} style={{ padding: 0 }}>清除</Button>
               </div>
-              <Space size={6} wrap>
+              <div className="uix-bulk-actions">
                 {canGenerate.length > 0 && <Button size="small" type="primary" className={production ? "" : "uix-ai-btn"} danger={production} icon={<CodeOutlined style={{ fontSize: 13 }} />} disabled={locked}
                   onClick={() => guard((ok) => { const list = canGenerate; setSelected({}); return pipeline(list, ok); }, "批量生成脚本")}>生成 {canGenerate.length}</Button>}
-                {canConfirm.length > 0 && <Button size="small" icon={<CheckOutlined />} disabled={locked} loading={activeKey === "confirm"}
+                {canConfirm.length > 0 && <Button size="small" icon={<CheckOutlined />} disabled={locked}
                   onClick={() => { const ids = canConfirm.map((c) => c.id); setSelected({}); void confirmScripts(ids); }}>确认 {canConfirm.length}</Button>}
-                {canRegress.length > 0 && <Button size="small" danger={production} icon={<CaretRightOutlined />} disabled={locked} loading={activeKey === "regression"}
+                {canRegress.length > 0 && <Button size="small" danger={production} icon={<CaretRightOutlined />} disabled={locked}
                   onClick={() => guard((ok) => regress(canRegress.map((c) => c.id), ok), "执行回归")}>回归 {canRegress.length}</Button>}
                 {!canGenerate.length && !canConfirm.length && !canRegress.length && (
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>所选用例需先单独试跑校验</Typography.Text>
                 )}
-              </Space>
+              </div>
             </div>
           ) : null}
         </section>
@@ -612,15 +706,17 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       <section className="uix-panel uix-detail">
         {!current ? (
           <div className="uix-detail-empty">
-            <div className="uix-empty-mark"><CodeOutlined style={{ fontSize: 30 }} /></div>
-            <div className="uix-empty-title">从一条用例开始</div>
-            <Typography.Text type="secondary">在左侧选一条用例查看步骤并生成脚本，<br />或直接「一键生成全部」，AI 会逐条完成。</Typography.Text>
-            <ol className="uix-flow-hint">{FLOW.map((f, i) => <li key={f}><span>{i + 1}</span>{f}</li>)}</ol>
+            <div className="uix-empty-mark"><CodeOutlined /></div>
+            <div className="uix-empty-title">选择用例，查看执行步骤</div>
+            <Typography.Text type="secondary">生成脚本、试跑和结果都在这里。</Typography.Text>
           </div>
         ) : <>
           <div className="uix-detail-head">
             <div className="uix-detail-title">
-              <Typography.Text strong ellipsis={{ tooltip: current.title }} style={{ fontSize: 15, display: "block" }}>{current.title}</Typography.Text>
+              <div className="uix-title-line"><Typography.Text strong className="uix-current-title">{current.title}</Typography.Text>
+                {((conclusionFailed && conclusion) || savedIssue) && <ExecutionIssue key={`${current.id}:${conclusionFailed ? conclusion : savedIssue?.at}`} title={conclusionFailed ? "执行未完成" : "上次执行问题（历史记录）"}
+                  message={conclusionFailed ? conclusion : `记录时间：${new Date(savedIssue!.at).toLocaleString()}\n${savedIssue!.message}`} />}
+              </div>
               <div className="uix-flow" aria-label={`当前阶段：${STAGE_LABEL[stage]}`}>
                 {FLOW_SHORT.map((f, i) => (
                   <span key={f} className={i < FLOW_INDEX[stage] ? "done" : i === FLOW_INDEX[stage] ? "now" : ""}>
@@ -629,27 +725,30 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 ))}
               </div>
             </div>
-            <Space size={4}>
-              {script && stage !== "pending" && !blocked(current) && (
-                <Tooltip title="重新在内嵌浏览器中试跑一次"><Button type="text" icon={<RedoOutlined />} aria-label="重新试跑" disabled={locked} onClick={() => guard(validate, "试跑")} /></Tooltip>
-              )}
-              {script && stage !== "confirmed" && currentBrief && !blocked(current) && (
-                <Tooltip title="让 AI 重新探索页面并生成脚本（覆盖当前脚本，会调用模型）"><Button type="text" icon={<CodeOutlined />} aria-label="AI 重新生成" disabled={locked}
-                  onClick={() => modal.confirm({
-                    title: "让 AI 重新生成这条脚本？", content: "AI 会重新探索页面并覆盖当前脚本，需要调用模型。", okText: "重新生成", cancelText: "取消",
-                    onOk: () => { guard((ok) => pipeline([currentBrief], ok, { forceAi: true }), "生成脚本"); },
-                  })} /></Tooltip>
-              )}
-              {script && (
-                <Tooltip title={debugTip}><Button type="text" icon={<BugOutlined />} aria-label="单步调试" loading={activeKey === "debug:start"} disabled={locked || !canDebug}
-                  onClick={() => guard(startDebug, "调试")} /></Tooltip>
-              )}
+            <div className="uix-detail-actions">
+              <Button disabled={locked} onClick={() => setEditing(current)}>编辑用例</Button>
               {primary(current)}
-            </Space>
+              {script && <Dropdown trigger={["click"]} menu={{ items: [
+                ...(stage !== "pending" && !blocked(current) ? [{ key: "validate", label: "重新试跑", icon: <RedoOutlined />, onClick: () => guard(validate, "试跑") }] : []),
+                ...(stage !== "confirmed" && currentBrief && !blocked(current) ? [{ key: "generate", label: "AI 重新生成", icon: <CodeOutlined />, onClick: () => modal.confirm({
+                  title: "让 AI 重新生成这条脚本？", content: "AI 会重新探索页面并覆盖当前脚本，需要调用模型。", okText: "重新生成", cancelText: "取消",
+                  onOk: () => { guard((ok) => pipeline([currentBrief], ok, { forceAi: true }), "生成脚本"); },
+                }) }] : []),
+                { key: "validate-background", label: "按回归配置后台校验", onClick: () => guard((ok) => validate(ok, false), "后台校验") },
+                { key: "debug", label: "单步调试", icon: <BugOutlined />, disabled: !canDebug, title: debugTip, onClick: () => guard(startDebug, "调试") },
+              ] }}>
+                <Button icon={<MoreOutlined />} aria-label="更多操作" title="更多操作" disabled={locked} />
+              </Dropdown>}
+            </div>
           </div>
+          {scriptRoleLabel && <div className="uix-script-session">
+            <span>脚本执行角色</span><strong>{scriptRoleLabel}</strong>{scripts.data?.[current.id]?.executionRole && scripts.data[current.id].executionRole !== scriptRoleLabel && <span>默认会话绑定：{scripts.data[current.id].executionRole}</span>}
+            {selectedRole && !scriptRoles.includes(selectedRole) && <span>{scriptRoles.includes("default") ? `默认会话本次使用「${selectedRole}」的登录态。` : "此脚本指定了角色，将使用脚本角色的登录态。"}</span>}
+          </div>}
           <div className="uix-panel-body">
-            {activity && (
-              <div className="uix-activity">
+            {scripts.data?.[current.id]?.validationReason && <Typography.Paragraph type="warning" role="status">{scripts.data[current.id].validationReason}</Typography.Paragraph>}
+            {activity && !progress && (
+              <div className="uix-activity" role="status">
                 <LoadingOutlined />
                 <span className="uix-activity-text">{activity}</span>
                 {lastLog && <Typography.Text type="secondary" className="mono" ellipsis style={{ minWidth: 0, flex: 1 }}>{lastLog.title}</Typography.Text>}
@@ -672,8 +771,8 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 <Typography.Text type="secondary" style={{ fontSize: 12, width: "100%" }}>暂停时可直接在右侧浏览器中操作核对；调试结果不计入校验，确认脚本前仍需完整试跑一次。</Typography.Text>
               </div>
             )}
-            {conclusion && (
-              <div className={`uix-note ${conclusionFailed ? "warn" : ""}`}>
+            {conclusion && !conclusionFailed && (
+              <div className="uix-note">
                 <div className="uix-note-mark">{conclusionFailed ? <ExclamationCircleFilled /> : <CodeOutlined style={{ fontSize: 14 }} />}</div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: 0 }} ellipsis={{ rows: 5, expandable: true, symbol: "展开" }}>{conclusion}</Typography.Paragraph>
@@ -700,7 +799,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
                 <span>{current.preconditions.join("；")}</span>
               </div>
             )}
-            <ScriptSteps caseSteps={current.steps} expected={current.expected} detail={detail.data}
+            <ScriptSteps key={current.id} caseSteps={current.steps} expected={current.expected} preconditions={current.preconditions} detail={detail.data}
               states={debugging ? debugging.statuses : stepStates}
               debug={debugging && {
                 cursor: debugging.phase === "finished" ? undefined : debugging.cursor, breakpoints: debugging.breakpoints, running: debugRunning || busy,
@@ -720,13 +819,13 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
             )}
           </div>
           <div className={`uix-composer ${script ? "" : "off"}`}>
-            <Input.TextArea variant="borderless" autoSize={{ minRows: 1, maxRows: 5 }} maxLength={8000} value={feedback} disabled={locked || !script}
+            <Input.TextArea aria-label="脚本修正说明" variant="borderless" autoSize={{ minRows: 1, maxRows: 5 }} maxLength={8000} value={feedback} disabled={locked || !script}
               onChange={(e) => setFeedback(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); guard(revise, "修正脚本"); } }}
-              placeholder={script ? "告诉 AI 哪里需要修正，例如：S3 应点击「近 30 日」，并断言趋势图重新加载" : "生成脚本后，可以在这里用一句话让 AI 修正"} />
+              placeholder={script ? "描述需要修正的步骤，交给 AI 调整…" : "生成脚本后，可以在这里用一句话让 AI 修正"} />
             <Tooltip title={script ? "发送给 AI（Enter 发送，Shift + Enter 换行）" : ""}>
               <Button type="primary" shape="circle" className="uix-ai-btn" icon={<ArrowUpOutlined />} aria-label="让 AI 修正"
-                loading={activeKey === "revise"} disabled={locked || !script || !feedback.trim()} onClick={() => guard(revise, "修正脚本")} />
+                disabled={locked || !script || !feedback.trim()} onClick={() => guard(revise, "修正脚本")} />
             </Tooltip>
           </div>
         </>}
@@ -734,11 +833,27 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
 
       {/* 内嵌浏览器 */}
       <div className="uix-browser">
-        <BrowserDock url={baseUrl} session={{ projectId: project.id, env }} />
+        <BrowserDock url={baseUrl} session={{ projectId: project.id, env, role: selectedRole }} controls={
+          <div className="uix-session-controls">
+            <span>登录角色</span>
+            <Select aria-label="浏览器登录态角色" placeholder="按用例选择" allowClear
+              value={selectedRole} disabled={locked} loading={roles.loading}
+              onChange={changeRole} options={(roles.data ?? []).map(r => ({ value: r.role_name, label: r.role_name }))} />
+            <Tooltip title="选择后打开对应会话，生成和内嵌试跑复用其登录态。试跑中默认会话使用所选角色，脚本明确指定的角色不变；确认后，默认会话的角色绑定会随脚本用于无头回归。">
+              <Button type="text" size="small" aria-label="登录态使用说明" icon={<ExclamationCircleFilled />} />
+            </Tooltip>
+          </div>
+        } />
         {((busy && (activeKey === "validate" || activeKey === "pipeline")) || debugRunning) && (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>执行中请勿操作浏览器，等待结束后再手动核对页面。</Typography.Text>
         )}
       </div>
     </div>
+    {editing && <CaseEditor key={editing.id} value={editing} onClose={() => setEditing(undefined)} onSaved={(updated) => {
+      setCurrent(updated); setEditing(undefined); resetRunView();
+      notifyProjectChanged(project.id);
+      void refresh();
+      message.success("用例已保存");
+    }} />}
   </>;
 }
