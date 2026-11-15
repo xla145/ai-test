@@ -1,3 +1,4 @@
+import { browserPanelBounds } from "../shared/browserPanel.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
@@ -27,7 +28,7 @@ import { readEvidenceImage } from "./evidence.js";
 import { browserClientHeaders, browserToken, requestToken } from "./browserToken.js";
 import { Orchestrator } from "./orchestrator.js";
 import { Updater } from "./updater.js";
-import { SecretStore, secretEnvFor, startSecretBroker, type Broker } from "./secrets.js";
+import { SecretStore, secretEnvFor, saveBrowserEnvSecret, startSecretBroker, type Broker } from "./secrets.js";
 import { CHANNELS, type ApprovalRequest, type RuntimeCheck, type RuntimeInfo, type UserInfo, type UiDebugCommand, type ViewDock } from "../shared/ipc.js";
 import type { UiRunOptions } from "../shared/ipc.js";
 
@@ -296,9 +297,10 @@ function layoutTestView(): void {
     visibleView.setBounds({ x, y, width, height });
     applyZoom(visibleView, width);
   } else {
-    viewShown = true;
-    visibleView.setBounds({ x: Math.floor(w * 0.5), y: 0, width: Math.ceil(w * 0.5), height: h });
-    applyZoom(visibleView, Math.ceil(w * 0.5));
+    const bounds = browserPanelBounds(w, h);
+    viewShown = bounds.width >= 120 && bounds.height >= 80;
+    visibleView.setBounds(bounds);
+    applyZoom(visibleView, bounds.width);
   }
   visibleView.setVisible(viewShown);
   if (before !== viewShown) notifyView();
@@ -530,17 +532,27 @@ function registerIpc(orch: Orchestrator): void {
       const header = options.header?.trim() || "Authorization";
       if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header)) throw new Error("鉴权请求头名称不合法");
       const storage = JSON.parse(await view.webContents.executeJavaScript("JSON.stringify([...Object.entries(localStorage), ...Object.entries(sessionStorage)])")) as [string, string][];
-      const cookies = await view.webContents.session.cookies.get({ url });
+      // 登录页与 API 常在不同子域；读取两个域名下的 Cookie，避免只保存前端会话而漏掉 API 会话。
+      const baseUrl = project.environments[env].base_url;
+      const cookieUrls = [...new Set([url, baseUrl])];
+      const cookieLists = await Promise.all(cookieUrls.map((cookieUrl) => view.webContents.session.cookies.get({ url: cookieUrl })));
+      const cookies = [...new Map(cookieLists.flat().map((cookie) => [cookie.name + "|" + cookie.domain + "|" + cookie.path, cookie])).values()];
       const captured = apiLoginTokens.get(`${p}:${env}:api-login`);
       const fromRequest = !options.key?.trim() && captured?.header.toLowerCase() === header.toLowerCase() ? captured.value : undefined;
       const authToken = fromRequest ?? browserToken([...storage, ...cookies.map((c): [string, string] => [c.name, c.value])], options.key?.trim(), options.prefix ?? "Bearer ");
       const owner = project.inherited_environments?.[env] ?? p;
       const { envCfg } = await orch.environmentOwner(p, env);
       const clientHeaders = browserClientHeaders(authToken, fromRequest ? captured?.clientHeaders : undefined);
-      if (Object.keys(clientHeaders).length) {
-        await orch.setEnvironment(owner, env, { ...envCfg, api_crypto: { ...envCfg.api_crypto, headers: { ...envCfg.api_crypto?.headers, ...clientHeaders } } });
+      const login = (envCfg as unknown as { api_login?: Record<string, unknown> }).api_login;
+      if (Object.keys(clientHeaders).length || login?.default_role) {
+        const apiLogin = login ? { ...login } : undefined;
+        if (apiLogin) delete apiLogin.default_role;
+        await orch.setEnvironment(owner, env, { ...envCfg,
+          ...(apiLogin ? { api_login: apiLogin } : {}),
+          api_crypto: { ...envCfg.api_crypto, headers: { ...envCfg.api_crypto?.headers, ...clientHeaders } },
+        });
       }
-      secretStore.set(SecretStore.ref(owner, env), { authToken, authHeader: header });
+      saveBrowserEnvSecret(secretStore, p, owner, env, { authToken, authHeader: header });
       return { savedAt: new Date().toISOString() };
     },
     // 留空的字段保留原值：只补接口 token 时不必重新输入账号密码
@@ -612,6 +624,7 @@ function registerIpc(orch: Orchestrator): void {
     uiDebugStart: (p: string, env: string, id: string, opts?: { confirmProduction?: boolean }) => orch.uiDebugStart(p, env, id, opts),
     uiDebugCommand: (command: UiDebugCommand) => orch.uiDebugCommand(command),
     uiDebugState: () => orch.uiDebugState(),
+    uiTasks: () => orch.uiTasks(),
     stopUiTask: (p: string, env: string) => orch.stopUiTask(p, env),
     reviseUiScript: async (p: string, env: string, id: string, feedback: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);

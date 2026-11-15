@@ -27,7 +27,7 @@ import {
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
-import type { UiRunOptions, UiScriptState } from "../shared/ipc.js";
+import type { UiTaskRecord, UiRunOptions, UiScriptState } from "../shared/ipc.js";
 import { UiWorkflow } from "./uiWorkflow.js";
 import { UiExecutionContracts } from "./uiExecutionContract.js";
 import { caseHash, sha256, writeUiScript } from "@ai-test/mcp-servers";
@@ -179,20 +179,34 @@ export interface AppDeps {
 
 export class Orchestrator extends EventEmitter {
   private uiTaskActive = false;
+  private uiTaskSeq = 0;
+  private taskRecords: UiTaskRecord[] = [];
+  uiTasks(): UiTaskRecord[] { return structuredClone(this.taskRecords); }
   private uiAbort?: { projectId: string; env: string; controller: AbortController };
   private uiDebug?: UiDebugSession;
-  private async withUiTask<T>(projectId: string, env: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  private async withUiTask<T>(projectId: string, env: string, fn: (signal: AbortSignal) => Promise<T>, kind = "UI 执行", caseIds: string[] = []): Promise<T> {
     if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再操作");
     if (this.uiDebug) throw new Error("单步调试进行中，请先结束调试");
     this.uiTaskActive = true;
     const controller = new AbortController();
+    const taskId = `ui-${Date.now()}-${++this.uiTaskSeq}`;
     this.uiAbort = { projectId, env, controller };
+    const task: UiTaskRecord = { id: taskId, projectId, env, kind, caseIds, status: "running", stage: "准备执行", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    this.emit("progress", { projectId, env, stage: "ui-task", taskId, status: "running" });
     try {
       const result = await fn(controller.signal);
       controller.signal.throwIfAborted();
+      const out = result as { status?: string; scriptGenerated?: boolean; message?: string; run?: { run_id: string; failed: number; error: number } };
+      const failed = out?.scriptGenerated === false || (out?.status !== undefined && out.status !== "completed") || Boolean(out?.run && out.run.failed + out.run.error > 0);
+      task.runId = out?.run?.run_id;
+      task.detail = out?.message?.slice(0, 2000);
+      this.emit("progress", { projectId, env, stage: "ui-task", taskId, status: failed ? "failed" : "completed" });
       return result;
     } catch (error) {
-      if (controller.signal.aborted) throw new Error("UI_TASK_STOPPED");
+      const stopped = controller.signal.aborted;
+      this.emit("progress", { projectId, env, stage: "ui-task", taskId, status: stopped ? "stopped" : "failed", error: stopped ? undefined : String((error as Error)?.message ?? error).slice(0, 300) });
+      if (stopped) throw new Error("UI_TASK_STOPPED");
       throw error;
     } finally { this.uiTaskActive = false; this.uiAbort = undefined; }
   }
@@ -202,9 +216,25 @@ export class Orchestrator extends EventEmitter {
     if (!task) return;
     if (task.projectId !== projectId || task.env !== env) throw new Error("当前执行的 UI 任务不属于此项目或环境");
     task.controller.abort();
+    const record = this.taskRecords.find(t => t.status === "running");
+    if (record) this.emit("progress", { projectId, env, stage: "ui-task", taskId: record.id, status: "stopping" });
   }
   constructor(private readonly deps: OrchestratorDeps) {
     super();
+    this.on("progress", (p) => {
+      const task = p.taskId ? this.taskRecords.find(t => t.id === p.taskId)
+        : this.taskRecords.find(t => ["running", "stopping"].includes(t.status) && t.projectId === p.projectId && (!p.env || t.env === p.env));
+      if (!task) return;
+      task.updatedAt = new Date().toISOString();
+      if (p.stage === "ui-task") {
+        task.status = p.status;
+        if (p.error) task.detail = p.error;
+        if (!["running", "stopping"].includes(task.status)) task.finishedAt = task.updatedAt;
+      } else {
+        task.stage = ({ ui_contract: "整理执行计划", explore: "探索并生成脚本", "ui-run": "执行脚本", "ui-step": "执行脚本步骤", revise: "修正脚本", heal: "分析失败原因" } as Record<string, string>)[p.stage] ?? task.stage;
+        if (p.title) task.detail = p.title;
+      }
+    });
   }
 
   listProjects(): Promise<ProjectInfo[]> {
@@ -434,7 +464,7 @@ export class Orchestrator extends EventEmitter {
       if (scriptGenerated && result.status === "completed") contracts.save(contract, after);
       return { ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated, contractReused: Boolean(cached),
         message: scriptGenerated ? result.message : [unchanged ? "未生成当前版本的新脚本。" : "用例或环境配置已变化，未复用本次脚本。", result.message].join("\n") };
-    });
+    }, "生成脚本", [caseId]);
   }
 
   // ------------------------------------------------------------------ App 测试
@@ -518,7 +548,7 @@ export class Orchestrator extends EventEmitter {
   /** UI 回归直接执行脚本；只有显式 autoHeal=true 时才调用模型。 */
   async runUiRegression(projectId: string, env: string,
     opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean } = {}) {
-    return this.withUiTask(projectId, env, (signal) => this.executeUiRegression(projectId, env, opts, signal));
+    return this.withUiTask(projectId, env, (signal) => this.executeUiRegression(projectId, env, opts, signal), opts.mode === "validate" ? "试跑校验" : "UI 回归", opts.caseIds);
   }
 
   private async executeUiRegression(projectId: string, env: string,
@@ -748,7 +778,7 @@ export class Orchestrator extends EventEmitter {
         `用户反馈：${feedback}`,
         "不要直接覆盖现有脚本。只使用 report.propose_script_fix 提交该用例完整的新脚本，等待用户审核差异并应用。不要降低断言来掩盖产品缺陷。",
       ].join("\n"), signal);
-    });
+    }, "修正脚本", [caseId]);
   }
 
   private async uiCase(projectId: string, env: string, caseId: string, confirmProduction?: boolean) {

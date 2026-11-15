@@ -1,3 +1,4 @@
+import { UiTaskBanner, UiTaskList } from "../components/UiTasks";
 import { CheckOutlined, EyeOutlined, LoginOutlined, QuestionCircleOutlined } from "@ant-design/icons";
 import { Alert, Badge, Button, Card, Col, Form, Input, Row, Popover, Segmented, Select, Space, Tag, Tooltip, Typography, theme } from "antd";
 import { useEffect, useState, type CSSProperties } from "react";
@@ -10,7 +11,7 @@ import { useAction, useKeyedAction, useLoad, usePaged, useProjectChanged } from 
 import { UiInbox, type Proposal, type Review } from "./ui/UiInbox";
 import { UiWorkbench } from "./ui/UiWorkbench";
 
-type View = "workspace" | "inbox" | "roles";
+type View = "workspace" | "inbox" | "roles" | "tasks";
 
 /**
  * UI 测试：工作台（AI 生成 → 试跑 → 确认 → 回归）、待处理（修正建议与人工复核）、角色与登录。
@@ -54,7 +55,7 @@ export function UiPage({ project }: { project: Project }) {
           <li>确认脚本：人工确认后加入日常回归</li>
           <li>执行回归：直接执行脚本，不调用模型</li>
         </ol>}>
-          <Button type="text" icon={<QuestionCircleOutlined />} aria-label="查看 UI 测试流程">流程说明</Button>
+          <Button type="text" icon={<QuestionCircleOutlined />} aria-label="查看 UI 测试流程" title="操作流程" />
         </Popover>
         <div className="uix-heading-settings">
           {modelView && (
@@ -67,8 +68,10 @@ export function UiPage({ project }: { project: Project }) {
           <EnvSelect project={project} value={env} onChange={setEnv} disabled={working} showUrl width={260} />
         </div>
       </header>
-      <Segmented<View> className="uix-nav" value={view} disabled={working} onChange={setView} options={[
+      <UiTaskBanner projectId={project.id} env={env} />
+      <Segmented<View> className="uix-nav" value={view} onChange={setView} options={[
         { value: "workspace", label: "工作台" },
+        { value: "tasks", label: "任务列表" },
         { value: "inbox", label: <span className="uix-nav-item">待处理<Badge count={todo} size="small" /></span> },
         { value: "roles", label: "角色与登录" },
       ]} />
@@ -78,6 +81,7 @@ export function UiPage({ project }: { project: Project }) {
           onWorking={setWorking} onUpdated={async () => { await Promise.all([proposals.reload(), reviews.reload()]); }}
           onInbox={() => setView("inbox")} />
       </div>
+      {view === "tasks" && <UiTaskList projectId={project.id} />}
       {view === "inbox" && <UiInbox project={project} proposals={proposals} reviews={reviews} />}
       {view === "roles" && <Roles project={project} env={env} />}
     </div>

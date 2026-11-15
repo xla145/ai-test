@@ -115,25 +115,22 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       name: "new_role_context",
       description: "以某个角色打开独立会话（只传角色名，账号由客户端注入；登录态保存为 storageState 复用）。不传角色为匿名会话。"
         + "角色名必须与项目配置完全一致；缺失时阻塞，不自动使用相近角色",
-      input: { role: z.string().optional() },
-      handler: async ({ role }) => {
+      input: { role: z.string().optional(), require_login: z.boolean().optional().describe("用例前置条件要求已登录时必须为 true；只检查现有登录态，未登录立即停止") },
+      handler: async ({ role, require_login }) => {
         const { project, env } = active(ctx);
-        if (!role || role === "default") return s.newRoleContext("default");
+        if (!role || role === "default") return s.newRoleContext("default", { requireLogin: require_login, login: project.environments[env].login as any });
         const roles = (await ctx.engine<{ role_name: string }[]>(["list-roles", "--project", project.id])).map((r) => r.role_name);
         const name = resolveRole(role, roles);
         const envCfg = project.environments[env];
         const secretEnv = await ctx.secrets.resolve(project.id, env, { roles: [name] });
         const cred = rolesFromEnv(secretEnv).find((r) => r.role === name);
         const out = await s.newRoleContext(name, {
+          requireLogin: require_login,
           storageStatePath: join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`),
           login: envCfg.login as any,
           credentials: cred ? { username: cred.username, password: cred.password } : undefined,
         });
         if (out.loggedIn || out.reusedState) return out;
-        // 用户在「角色与登录」里手动登录过：内嵌浏览器沿用该角色的登录态（验证码、扫码等无法自动登录的场景）
-        if (existsSync(join(project.workspace_path, "scripts", "ui", ".auth", `${name}.json`))) {
-          return { ...out, manualSession: true, note: "使用在「角色与登录」中手动登录保存的登录态" };
-        }
         // 说明为什么没有登录，让 agent 停下来请用户配置，而不是去代码库里找账号
         const missing = [
           ...(envCfg.login ? [] : [`环境「${env}」没有配置登录方式`]),

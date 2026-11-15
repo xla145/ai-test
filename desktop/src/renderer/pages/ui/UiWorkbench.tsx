@@ -1,3 +1,4 @@
+import { useUiTasks, isUiTaskActive } from "../../components/UiTasks";
 import {
   ArrowUpOutlined, BugOutlined, CodeOutlined, CaretRightOutlined, CheckCircleFilled, CheckOutlined, CloseOutlined, ExclamationCircleFilled, LoadingOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, PauseOutlined, BranchesOutlined, PoweroffOutlined, RedoOutlined, SearchOutlined, StepForwardOutlined, WarningFilled,
@@ -159,7 +160,8 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
     try { await api().stopUiTask(project.id, env); }
     catch (error) { setStopping(false); throw error; }
   });
-  const locked = busy || Boolean(debug);
+  const backgroundBusy = useUiTasks().some(isUiTaskActive);
+  const locked = busy || Boolean(debug) || backgroundBusy;
   useEffect(() => { onWorking(locked); return () => onWorking(false); }, [locked, onWorking]);
 
   /** 生产环境：执行前二次确认，确认后以 confirmProduction 调用（主进程同样会拒绝未确认的执行） */

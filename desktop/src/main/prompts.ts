@@ -68,8 +68,9 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
     `任务：探索模式。为项目 ${projectId} 的 UI 用例 ${caseId} 在内嵌浏览器中生成确定性 Playwright 脚本。执行环境：${env}。`,
     ...(contract ? ["已转换并缓存的执行用例（直接复用，不重新整理原用例；运行时仍检查数据、会话和页面状态）：", JSON.stringify(contract), "已绑定数据：" + JSON.stringify(brief?.data_refs ?? [])] : caseBlock),
     `1. ${dataLine}`,
-    `2. browser.open_project（project_id=${projectId}, env=${env}）；需要登录时 browser.new_role_context 只传角色名。`,
+    `2. browser.open_project（project_id=${projectId}, env=${env}）；前置条件要求已登录时，必须先调用 browser.new_role_context，传角色名和 require_login=true；检查通过前禁止执行用例步骤。`,
     `   已配置的角色：${roles.length ? roles.join("、") : "（无）"}。角色必须精确匹配；缺少用例要求的角色就报告阻塞，不按名称相近替代；不需要登录的页面不用建角色会话。`,
+    "   登录前置条件检查失败时立即停止，提示当前用例不能执行、请先完成登录，不自动尝试账号密码，不调用 Midscene、保存脚本或试跑。匿名用例和测试登录操作本身不设置 require_login。",
     "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
     "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始），再逐步操作并把该步的预期结果落成 expect_* 断言；埋点用 start_capture + expect_request；视觉类预期用 visual_check。",
     contract

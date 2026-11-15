@@ -64,3 +64,28 @@ it.each(["default", "admin"])("MCP trial preserves the manually logged-in %s pag
     await session.close(); await context.close(); await spareContext.close(); rmSync(workspace, { recursive: true, force: true });
   }
 }, 60_000);
+
+
+it("blocks login-required exploration with expired state, but allows anonymous login tests", async () => {
+  const session = new BrowserSession({ baseUrl: app.url, executablePath: chooseBrowser().executablePath });
+  const recipe = { url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" };
+  try {
+    // 即使有可用账号也不偷偷自动登录。
+    await expect(session.newRoleContext("admin", { requireLogin: true, login: recipe,
+      credentials: { username: "alice", password: "pw-admin" } })).rejects.toThrow("登录前置条件未满足");
+    await expect(session.page()).rejects.toThrow("当前用例不能执行");
+    await session.newRoleContext("default");
+    const page = await session.page();
+    await page.goto(`${app.url}/login`);
+    await page.locator("#username").fill("alice");
+    await page.locator("#password").fill("pw-admin");
+    await page.locator("#login").click();
+    await page.waitForURL("**/dashboard");
+    await expect(session.newRoleContext("default", { requireLogin: true, login: recipe })).resolves.toMatchObject({ loggedIn: true });
+    await (await session.page()).goto(`${app.url}/tags`);
+    await expect(session.page()).resolves.toBe(page);
+    await page.context().clearCookies();
+    await page.goto(`${app.url}/tags`);
+    await expect(session.page()).rejects.toThrow("登录前置条件未满足");
+  } finally { await session.close(); }
+}, 30_000);
