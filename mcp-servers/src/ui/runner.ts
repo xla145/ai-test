@@ -49,7 +49,7 @@ export interface UiCaseResult {
   environment_hint?: string;
   acceptance_status?: "verified_pass" | "failed" | "blocked" | "pending_review" | "incomplete";
   reason_code?: string;
-  execution_context?: { sessions: unknown[] };
+  execution_context?: { sessions: unknown[]; artifact?: Record<string, unknown> };
   reviews: { kind: string; description: string; evidence_paths: string[] }[];
 }
 

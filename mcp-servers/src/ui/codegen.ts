@@ -10,7 +10,7 @@ import { toCode, validateReplayTarget, type LocatorSpec } from "./locator.js";
  */
 export const DEFAULT_ROLE = "default";
 
-import { validateObservedExpectation, type ValueSource } from "./components.js";
+import { validateObservedExpectation, type ValueSource, type CollectionRule } from "./components.js";
 type Base = { role?: string };
 export type Step = Base &
   (
@@ -26,6 +26,7 @@ export type Step = Base &
     | { action: "expectNoText"; target: LocatorSpec; text: string }
     | { action: "expectValue"; target: LocatorSpec; value: string }
     | { action: "expectNumber"; target: LocatorSpec; value: string | number; tolerance?: string | number }
+    | { action: "expectCollection"; target: LocatorSpec; rule: CollectionRule }
     | { action: "readValue"; target: LocatorSpec; name: string; valueSource: ValueSource }
     | { action: "expectObserved"; target: LocatorSpec; name?: string; expected?: unknown; valueSource: ValueSource; normalize?: "exact" | "trim" | "number" | "set" }
     | { action: "reveal"; target: LocatorSpec }
@@ -170,6 +171,10 @@ export function generateSpec(input: SpecInput): string {
       case "expectValue":
         wrap(`await expect(${loc}).toHaveValue(${s(st.value)});`);
         break;
+      case "expectCollection":
+        helpers.add('expectCollection');
+        wrap(`await expectCollection(${loc}, ${s(st.rule)});`);
+        break;
       case "readValue":
         helpers.add("readValue");
         wrap(`observed.set(${s(st.name)}, await readValue(${loc}, ${s(st.valueSource)}));`);
@@ -295,6 +300,7 @@ export function describeStep(st: Step): string {
     case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;
     case "expectValue": return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
+    case "expectCollection": return `验证 ${describeTarget(st.target)} 内集合规则 ${JSON.stringify(st.rule)}`;
     case "readValue": return `读取 ${describeTarget(st.target)} 到 ${st.name}`;
     case "expectObserved": return `比较 ${describeTarget(st.target)}（读取 ${st.valueSource}，${st.normalize ?? "exact"}）与 ${st.name ? `来源变量「${st.name}」` : JSON.stringify(st.expected)}`;
     case "reveal": return `滚动显示 ${describeTarget(st.target)}`;

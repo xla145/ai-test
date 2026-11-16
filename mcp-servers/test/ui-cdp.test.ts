@@ -20,8 +20,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await host?.close();
-  await app?.close();
+  await Promise.race([
+    Promise.allSettled([host?.close(), app?.close()]),
+    new Promise<void>(r => setTimeout(() => { try { host?.process()?.kill("SIGKILL"); } catch {} r(); }, 5000)),
+  ]);
 });
 
 describe("CDP mode (embedded browser)", () => {

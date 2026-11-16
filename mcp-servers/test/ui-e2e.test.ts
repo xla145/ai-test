@@ -194,7 +194,7 @@ describe("browser MCP server: explore → script → regression → heal input",
     // 连续按键一次完成，每个按键各录一步；返回操作后的快照
     await call("click", { ref: search.ref });
     const pressed = await call("press", { key: ["Tab", "Tab"] });
-    expect(pressed.snapshot.elements.length).toBeGreaterThan(0);
+    expect(pressed.snapshot).toMatchObject({ unchanged: true, elements: [] });
     // 旧 ref 在新快照后仍可用
     await call("expect_text", { ref: found.matches[0].ref, text: "TAG-1001" });
 

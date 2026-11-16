@@ -16,7 +16,12 @@ beforeAll(async () => {
   app = await startDemoApp();
   host = await chromium.launch({ executablePath: chooseBrowser().executablePath, args: [`--remote-debugging-port=${port}`] });
 });
-afterAll(async () => { await host?.close(); await app?.close(); });
+afterAll(async () => {
+  await Promise.race([
+    Promise.allSettled([host?.close(), app?.close()]),
+    new Promise<void>(r => setTimeout(() => { try { host?.process()?.kill("SIGKILL"); } catch {} r(); }, 5000)),
+  ]);
+});
 
 it.each(["default", "admin"])("MCP trial preserves the manually logged-in %s page without storageState or valid credentials", async role => {
   const workspace = mkdtempSync(join(tmpdir(), "aitest-session-replay-"));

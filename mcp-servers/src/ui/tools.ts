@@ -51,6 +51,7 @@ interface ActiveProject {
   project: Project;
   env: string;
   guard?: ExecutionGuard;
+  sourceHash?: string;
 }
 
 const states = new WeakMap<UiToolContext, ActiveProject>();
@@ -106,20 +107,25 @@ function browserTools(ctx: UiToolContext): UiTool[] {
     }
     try {
       const out = await tool.handler(input);
+      if (guard && key && controlled) {
+        guard.resolved(key);
+        if (input.ref) guard.resolved(`locate:${ctx.session.currentCaseStep ?? 'preconditions'}`);
+      }
       if (guard && controlled) guard.assertActive();
+      // 断言成功后清除覆盖声明（失败时保留，允许重试同一断言）
+      if (assertion || tool.name === 'visual_check') {
+        ctx.session.currentExpected = []; ctx.session.currentPreconditions = []; ctx.session.currentPreconditionChecks = [];
+      }
       return out;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (guard && controlled) {
         if (/UI_ENVIRONMENT_BLOCKED|UI_RESULT_NOT_READY/.test(reason)) guard.blocked = reason;
-        else if (assertion && checkIds.length && /断言不成立/.test(reason)) guard.failChecks(checkIds, reason);
+        else if (assertion && checkIds.length && /断言不成立|ASSERTION_FAILED/.test(reason)) guard.failChecks(checkIds, reason);
         else if (key) guard.failedAttempt(key, tool.name);
       }
       throw error;
     } finally {
-      if (assertion || tool.name === 'visual_check') {
-        ctx.session.currentExpected = []; ctx.session.currentPreconditions = []; ctx.session.currentPreconditionChecks = [];
-      }
       const current = states.get(ctx)?.guard;
       current?.persist(ctx.session.recording().length ? ctx.session.recording() : savedSteps.get(ctx)?.steps ?? []);
     }
@@ -137,17 +143,19 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
         const { project, envCfg } = await loadProject(ctx, project_id, env);
         if (states.get(ctx)?.guard) throw new Error('本次会话已绑定执行计划；请结束任务后启动新的探索，不能重置门禁');
         let guard: ExecutionGuard | undefined;
+        let sourceHash: string | undefined;
         if (case_id) {
           const source = await ctx.engine<{ title: string; steps: string[]; expected: string[]; preconditions: string[] }>(['get-case', '--case', case_id]);
           const path = join(project.workspace_path, '.aitest', 'ui-contracts', `${sha256(JSON.stringify([project_id, env, case_id]))}.json`);
           const entry = JSON.parse(readFileSync(path, 'utf8'));
           if (entry.sourceHash !== caseHash(source)) throw new Error('EXECUTION_PLAN_STALE: 用例已变化，请重新生成计划');
+          sourceHash = entry.sourceHash;
           const roles = await ctx.engine<{ role_name: string }[]>(['list-roles', '--project', project_id]);
           const plan = validateExecutionContract(entry.contract, source, roles.map(r => r.role_name));
           if (plan.status !== 'ready' || (source.preconditions.length && !plan.preconditionChecks?.length)) throw new Error('EXECUTION_PLAN_INCOMPLETE: 缺少原子前置检查计划');
           guard = new ExecutionGuard(case_id, plan.preconditionChecks ?? [], join(project.workspace_path, '.aitest', 'ui-executions', `${randomUUID()}.json`));
         }
-        states.set(ctx, { project, env, guard });
+        states.set(ctx, { project, env, guard, sourceHash });
         savedSteps.delete(ctx);
         s.configure({
           baseUrl: envCfg.base_url,
@@ -200,9 +208,9 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     {
       name: "snapshot",
       description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本。navigate / click / select / press 的返回值已带操作后的快照，"
-        + "只有页面还在变化或需要更长文本时才单独调用。表格单元格、状态徽标等非交互文字不在元素列表里，用 find_text 取 ref",
-      input: { max_text: z.number().int().optional() },
-      handler: ({ max_text }) => s.snapshot({ maxText: max_text }),
+        + "unchanged=true 时复用上次快照与 ref；默认返回前90个元素，有 next_offset 时传 offset 继续，limit 最多300。只有页面还在变化或需要更多内容时才单独调用。表格单元格、状态徽标等非交互文字不在元素列表里，用 find_text 取 ref",
+      input: { max_text: z.number().int().min(0).max(12000).optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(300).optional() },
+      handler: ({ max_text, offset, limit }) => s.snapshot({ maxText: max_text, offset, maxElements: limit }),
     },
     {
       name: "find_text",
@@ -251,6 +259,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     { name: "expect_observed", description: "比较字段与来源变量或明确预期。name 是 read_value 的来源变量名，不是标题；name 与 expected 必须且只能传一个。不要读当前结果再与自身比较。调用前先用 assertion_coverage 声明覆盖序号", input: { ref, name: z.string().optional(), expected: z.union([z.string(),z.number(),z.boolean(),z.array(z.string())]).optional(), source: z.enum(["text", "input", "checked", "selected", "texts"]).default("text"), normalize: z.enum(["exact", "trim", "number", "set"]).default("exact") }, handler: ({ ref, ...options }) => s.expectObserved(ref, options) },
     { name: "reveal", description: "把已定位区域滚动到可见位置并录入回放，不点击或变更业务状态", input: { ref }, handler: ({ ref }) => s.reveal(ref) },
     { name: "expect_number", description: "严格断言元素显示的十进制数值；调用前先用 assertion_coverage 声明覆盖序号；空值、单位混杂或无法解析时失败", input: { ref, value: z.number(), tolerance: z.number().nonnegative().optional() }, handler: ({ ref, value, tolerance }) => s.expectNumber(ref, value, tolerance) },
+    { name: 'expect_collection', description: '验证当前已加载结果集合：数量范围、每项包含关键词或等于指定值。ref 必须是稳定结果容器；selector 为观察到的相对 CSS 字段选择器，不得按预期值过滤。默认至少一项，不以空集冒充通过；只验证当前已加载项，不代表其它分页。', input: { ref, selector: z.string().min(1), min_count: z.number().int().nonnegative().optional(), max_count: z.number().int().nonnegative().optional(), contains: z.string().min(1).optional(), equals: z.string().min(1).optional() }, handler: ({ ref, selector, min_count, max_count, contains, equals }) => s.expectCollection(ref, { selector, minCount: min_count, maxCount: max_count, contains, equals }) },
     {
       name: "expect_value",
       description: "断言输入框 / 下拉框的当前值。调用前先用 assertion_coverage 声明覆盖序号（原生下拉框比较 option 的 value；Element Plus 下拉框比较展示文字，包括空选时的提示文字；清空的输入框为空字符串）",
@@ -317,7 +326,8 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       handler: async ({ index }) => { states.get(ctx)?.guard?.assertReady(s.recording()); s.currentCaseStep = index; return { case_step: index }; },
     },
     { name: "assertion_coverage", description: "声明下一条断言覆盖的原始预期/前置条件序号；原子前置检查使用 check_ids（一次一个），断言后自动清除。", input: { expected: z.array(z.number().int().min(1)), preconditions: z.array(z.number().int().min(1)).optional(), check_ids: z.array(z.string()).max(1).optional() }, handler: async ({ expected, preconditions, check_ids = [] }) => {
-    const guard = states.get(ctx)?.guard;
+      const guard = states.get(ctx)?.guard;
+      if (guard && (expected.length || preconditions?.length || check_ids.length) && (s.currentExpected.length || s.currentPreconditions.length || s.currentPreconditionChecks.length)) throw new Error('COVERAGE_PENDING: 上一条覆盖声明尚未执行断言，不能被另一声明覆盖');
       guard?.select(check_ids, s.recording());
       if (check_ids.length && !guard) throw new Error('请在 open_project 中绑定 case_id');
       if (guard && preconditions?.length && !check_ids.length) throw new Error('原子前置检查必须指定 check_ids，不能仅声明整条原文已覆盖');
@@ -356,6 +366,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           throw new Error("脚本没有任何断言：每个预期结果都要落成 expect_* 断言");
         }
         const c = await ctx.engine<{ id: string; title: string; steps: string[]; expected: string[]; preconditions?: string[] }>(["get-case", "--case", case_id]);
+        if (guard && active(ctx).sourceHash !== caseHash(c)) throw new Error('EXECUTION_PLAN_STALE: 执行期间用例发生变化，不能保存旧计划脚本');
         const issues = coverageIssues(steps, { ...c, preconditionChecks: guard?.checks });
         if (issues.length) throw new Error(`COVERAGE_INCOMPLETE: ${issues.join("；")}`);
         const { path: rel } = writeUiScript(project.workspace_path, { caseId: c.id, title: c.title, steps, baseUrl: s.baseUrl, caseSteps: c.steps, expected: c.expected, preconditions: c.preconditions, preconditionChecks: guard?.checks, caseHash: caseHash(c) });

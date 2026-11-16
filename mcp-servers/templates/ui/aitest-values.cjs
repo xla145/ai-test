@@ -57,3 +57,22 @@ function equalValue(a, b, normalize = 'exact') {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 module.exports.equalValue = equalValue;
+
+function validateCollectionRule(rule) {
+  if (!rule || typeof rule.selector !== 'string' || !rule.selector.trim()) throw new Error('VALUE_INVALID: collection CSS selector required');
+  for (const key of ['minCount', 'maxCount']) if (rule[key] !== undefined && (!Number.isSafeInteger(rule[key]) || rule[key] < 0)) throw new Error('VALUE_INVALID: invalid count bound');
+  if (rule.maxCount !== undefined && rule.maxCount < (rule.minCount ?? 1)) throw new Error('VALUE_INVALID: contradictory count bounds');
+  for (const key of ['contains', 'equals']) if (rule[key] !== undefined && (typeof rule[key] !== 'string' || !rule[key].trim())) throw new Error('VALUE_INVALID: nonempty matching value required');
+}
+async function checkCollection(locator, rule) {
+  validateCollectionRule(rule);
+  // CSS queries remain within this stable container; result text never selects the rows.
+  const values = await locator.evaluate((root, selector) => [...root.querySelectorAll(selector)]
+    .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none')
+    .map(el => el.innerText.trim()), rule.selector);
+  return { count: values.length, matched: values.length >= (rule.minCount ?? 1)
+    && (rule.maxCount === undefined || values.length <= rule.maxCount)
+    && values.every(value => (rule.contains === undefined || value.includes(rule.contains)) && (rule.equals === undefined || value === rule.equals)) };
+}
+module.exports.validateCollectionRule = validateCollectionRule;
+module.exports.checkCollection = checkCollection;

@@ -44,6 +44,7 @@ export class ExecutionGuard {
     this.attempts.set(key, { count, method });
     if (count >= 2) this.blocked = 'RECOVERY_EXHAUSTED: 同一目标恢复失败，本次执行已阻断，请保留证据后结束';
   }
+  resolved(key: string) { this.attempts.delete(key); }
   snapshot(steps: UiStep[]) {
     return { caseId: this.caseId, blocked: this.blocked, checks: this.checks.map(c => ({ ...c,
       status: this.failures.has(c.id) ? 'blocked' : this.passed(c.id, steps) ? 'passed' : 'pending',

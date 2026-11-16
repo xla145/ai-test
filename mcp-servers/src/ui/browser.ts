@@ -1,4 +1,4 @@
-import { numericEqual, readValue, equalValue, validateObservedExpectation, type ValueSource } from "./components.js";
+import { numericEqual, readValue, equalValue, validateObservedExpectation, checkCollection, validateCollectionRule, type CollectionRule, type ValueSource } from "./components.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
@@ -94,6 +94,8 @@ export class BrowserSession {
   private browser?: Browser;
   private readonly pages = new Map<string, Page>();
   private readonly readiness = new WeakMap<Page, UiReadiness>();
+  private readonly snapshotSignatures = new WeakMap<Page, string>();
+  private readonly snapshotRefs = new WeakMap<Page, Map<string, string>>();
   private readonly contexts = new Map<string, BrowserContext>();
   private requiredLogin = new Map<string, LoginRecipe | undefined>();
   private refs = new Map<string, RefEntry>();
@@ -121,13 +123,22 @@ export class BrowserSession {
   }
 
   async close(): Promise<void> {
-    if (this.opts.cdpEndpoint) {
-      // 不关闭内嵌浏览器，只断开连接
-      await this.browser?.close().catch(() => undefined);
-    } else {
-      for (const c of this.contexts.values()) await c.close().catch(() => undefined);
-      await this.browser?.close().catch(() => undefined);
-    }
+    const doClose = async () => {
+      if (this.opts.cdpEndpoint) {
+        // 不关闭内嵌浏览器，只断开连接
+        await this.browser?.close().catch(() => undefined);
+      } else {
+        for (const c of this.contexts.values()) await c.close().catch(() => undefined);
+        await this.browser?.close().catch(() => undefined);
+      }
+    };
+    await Promise.race([
+      doClose(),
+      new Promise<void>(resolve => setTimeout(() => {
+        // Playwright Browser 不提供 process()；超时仅解除关闭等待，不假定底层进程已退出。
+        resolve();
+      }, 5000)),
+    ]);
     this.browser = undefined;
     this.pages.clear();
     this.contexts.clear();
@@ -260,20 +271,43 @@ export class BrowserSession {
   }
 
   /** 页面快照：可交互元素（带 ref）与可见文本摘要，供 agent 规划下一步 */
-  async snapshot(opts: { maxText?: number } = {}) {
+  async snapshot(opts: { maxText?: number; maxElements?: number; offset?: number; omitUnchanged?: boolean } = {}) {
     const page = await this.page();
     const infos = (await page.evaluate(
       `(${COLLECT_SCRIPT})(${JSON.stringify({ testIdAttribute: this.testIdAttr() })})`,
     )) as (ElementInfo & Omit<SnapshotElement, "ref">)[];
-    const elements: SnapshotElement[] = infos.map((info) => this.addRef(info));
+    const previousRefs = this.snapshotRefs.get(page);
+    const nextRefs = new Map<string, string>();
+    const elements: SnapshotElement[] = infos.map((info) => {
+      const previousRef = info.nodeId && previousRefs?.get(info.nodeId);
+      const entry = previousRef ? this.refs.get(previousRef) : undefined;
+      // 同一 DOM 节点复用 ref，页面重载后的 nodeId 会改变，不能串用旧引用。
+      const element = previousRef && entry && entry.role === this.currentRole && !entry.scope
+        && JSON.stringify(candidates(entry.info)) === JSON.stringify(candidates(info))
+        ? (entry.info = info, this.describeRef(previousRef, info)) : this.addRef(info);
+      if (info.nodeId) nextRefs.set(info.nodeId, element.ref);
+      return element;
+    });
+    this.snapshotRefs.set(page, nextRefs);
     const text = (await page.evaluate("document.body ? document.body.innerText : ''")) as string;
-    return {
+    const offset = Math.max(0, opts.offset ?? 0);
+    const limit = Math.max(1, Math.min(opts.maxElements ?? 90, 300));
+    const result = {
       role: this.currentRole,
       url: page.url(),
       title: await page.title(),
-      elements,
+      elements: elements.slice(offset, offset + limit),
+      total_elements: elements.length,
+      ...(offset + limit < elements.length ? { next_offset: offset + limit, note: "元素列表已分页，需要其它元素时用 snapshot(offset=next_offset) 或 find_text。" } : {}),
       text: text.replace(/\n{3,}/g, "\n\n").slice(0, opts.maxText ?? 3000),
     };
+    // 比较包含 ref 的快照：新文档即使内容相同也必须重新返回引用。
+    const signature = JSON.stringify(result);
+    const unchanged = this.snapshotSignatures.get(page) === signature;
+    this.snapshotSignatures.set(page, signature);
+    return opts.omitUnchanged && unchanged
+      ? { ...result, elements: [], text: "", unchanged: true, note: "页面快照未变化，复用上次快照和 ref；需要完整内容时调用 snapshot。" }
+      : result;
   }
 
   /** 登记一个元素并返回带 ref 的描述。旧 ref 不随新快照失效：定位器在使用时重新解析 */
@@ -284,6 +318,10 @@ export class BrowserSession {
       if (this.refs.size <= MAX_REFS) break;
       this.refs.delete(old);
     }
+    return this.describeRef(ref, info);
+  }
+
+  private describeRef(ref: string, info: ElementInfo): SnapshotElement {
     const { nodeId: _node, css: _css, tag: _tag, cssLoose: _loose, labelText: _label, row: _row, scope: _scope, ...rest } = info;
     return { ref, ...rest };
   }
@@ -298,7 +336,7 @@ export class BrowserSession {
       await page.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => undefined);
       await this.readiness.get(page)?.wait();
       try {
-        return await this.snapshot({ maxText: 1500 });
+        return await this.snapshot({ maxText: 900, maxElements: 90, omitUnchanged: true });
       } catch {
         // 执行上下文被跳转销毁：再等一次
       }
@@ -570,7 +608,7 @@ export class BrowserSession {
       const loc = toLocator(page, spec);
       const ok = await poll(async () => equalValue(await readValue(loc, 'selected'), [value]), timeoutMs);
       if (!ok) throw new Error(`断言不成立：下拉框选中值不等于「${value}」`);
-      this.recordAssertion({ action: "expectText", target: spec, text: value, exact: true, role });
+      this.recordAssertion({ action: "expectObserved", target: spec, expected: [value], valueSource: 'selected', normalize: 'exact', role });
       return { locator: spec, note: "已绑定原控件并验证选中值" };
     }
     const { page, spec, role } = await this.target(ref, { avoidText: value, independent: true });
@@ -589,6 +627,18 @@ export class BrowserSession {
     this.observed.set(name, value);
     this.record({ action: "readValue", target: spec, name, valueSource: source, role });
     return { value, source, role, capturedAt: new Date().toISOString() };
+  }
+  async expectCollection(ref: string, rule: CollectionRule) {
+    validateCollectionRule(rule);
+    const { page, spec, role } = await this.target(ref, { independent: true });
+    // Reject value-dependent scopes as well as value-dependent child selectors.
+    for (const value of [rule.contains, rule.equals].filter((x): x is string => Boolean(x))) {
+      if (specTexts(spec).some(text => text.includes(value)) || rule.selector.includes(value)) throw new Error('VALUE_INVALID: 集合目标不能按预期值先过滤；请定位整个结果区域');
+    }
+    const locator = toLocator(page, spec);
+    if (!await poll(async () => (await checkCollection(locator, rule)).matched, EXPLORE_ASSERT_TIMEOUT_MS)) throw new Error('ASSERTION_FAILED: 集合不满足用例规则');
+    this.recordAssertion({ action: 'expectCollection', target: spec, rule, role });
+    return checkCollection(locator, rule);
   }
   async expectObserved(ref: string, options: { name?: string; expected?: unknown; source?: ValueSource; normalize?: "exact" | "trim" | "number" | "set" }) {
     validateObservedExpectation(options);
@@ -798,6 +848,11 @@ export class BrowserSession {
         let actual = "";
         const ok = await poll(async () => (actual = await loc!.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === step.value, timeout);
         if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${step.value}」`);
+        return {};
+      }
+      case 'expectCollection': {
+        validateCollectionRule(step.rule);
+        if (!await poll(async () => (await checkCollection(loc!, step.rule)).matched, timeout)) throw new Error('ASSERTION_FAILED: 集合不满足用例规则');
         return {};
       }
       case "readValue":

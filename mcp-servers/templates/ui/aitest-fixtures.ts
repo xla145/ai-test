@@ -58,6 +58,10 @@ export function prepareSessionPage(page: Page) {
 
 const { numericEqual, equalValue } = valueTools;
 export const readValue = valueTools.readValue;
+export async function expectCollection(locator: import("@playwright/test").Locator, rule: { selector: string; minCount?: number; maxCount?: number; contains?: string; equals?: string }) {
+  valueTools.validateCollectionRule(rule);
+  await expect.poll(async () => (await valueTools.checkCollection(locator, rule)).matched, { message: 'ASSERTION_FAILED: 集合不满足用例规则' }).toBe(true);
+}
 export async function expectObserved(locator: import("@playwright/test").Locator, expected: unknown, source: string, normalize: string) {
   await expect.poll(async () => equalValue(await readValue(locator, source), expected, normalize), { message: "ASSERTION_FAILED: 读取值与预期不一致" }).toBe(true);
 }

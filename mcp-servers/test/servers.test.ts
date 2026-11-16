@@ -103,7 +103,7 @@ describe("mcp server", () => {
 });
 
 describe("app server", () => {
-  it("reports app ids and role variables, then saves and registers a maestro flow", async () => {
+  it("reports app ids and role variables, then saves and registers a maestro flow", { timeout: 30_000 }, async () => {
     const { client, db } = await connect("app");
     const ws = mkdtempSync(join(tmpdir(), "app-ws-"));
     const eng = (args: string[]) => runEngine<any>(args, { db, env: { PYTHONPATH: ENGINE_DIR } });

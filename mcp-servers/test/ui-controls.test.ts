@@ -30,14 +30,14 @@ it("clicks the select wrapper and records exact selected text, scoped away from 
   expect(await page.locator(".el-select__wrapper:visible").getAttribute("data-open")).toBe("yes");
   await session.expectValue(ref, "阿里云源");
   const steps = session.recording();
-  expect(steps.at(-1)).toMatchObject({ action: "expectText", exact: true, text: "阿里云源" });
+  expect(steps.at(-1)).toMatchObject({ action: "expectObserved", valueSource: "selected", expected: ["阿里云源"] });
   const spec = generateSpec({ caseId: "tc_controls", title: "选择渠道", steps });
-  expect(spec).toContain("toHaveText");
+  expect(spec).toContain("expectObserved");
   expect(spec).toContain("scrollIntoView({ block: \"center\"");
   expect(steps[0]).toMatchObject({ scroll: "center" });
   for (const step of steps) await session.runStep(step);
   await page.locator(".el-select__selected-item:visible").evaluate(el => { el.textContent = "阿里云源备份"; });
-  await expect(session.runStep(steps.at(-1)!, { timeoutMs: 150 })).rejects.toThrow("断言不成立");
+  await expect(session.runStep(steps.at(-1)!, { timeoutMs: 150 })).rejects.toThrow("ASSERTION_FAILED");
 }, 20_000);
 
 it("resolves a switch label to its checkbox and records a state-setting action", async () => {

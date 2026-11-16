@@ -137,11 +137,11 @@ it("keeps selected-value assertions on their original field when expected text m
   const ref = (await session.locateAt(...await center('section[aria-label="故障切换配置"] input'))).element!.ref;
   await session.expectValue(ref, "阿里云源");
   const step = session.recording().at(-1)!;
-  expect(step).toMatchObject({ action: "expectText", exact: true });
+  expect(step).toMatchObject({ action: "expectObserved", valueSource: "selected", expected: ["阿里云源"] });
   expect(JSON.stringify((step as any).target)).not.toContain("阿里云源");
   expect(generateSpec({ caseId: "tc_value", title: "字段身份", steps: [step] })).toContain("故障切换配置");
   await page.setContent(selects(true));
-  await expect(session.runStep(step, { timeoutMs: 200 })).rejects.toThrow("断言不成立");
+  await expect(session.runStep(step, { timeoutMs: 200 })).rejects.toThrow("ASSERTION_FAILED");
 });
 
 it("replays the generated spec in a fresh browser and fails when only another field has the expected value", async () => {
@@ -161,7 +161,7 @@ it("replays the generated spec in a fresh browser and fails when only another fi
     wrong = true;
     const failed = (await run()).results[0];
     expect(failed.status).toBe("failed");
-    expect(failed.message).toContain("错误渠道");
+    expect(failed.message).toContain("ASSERTION_FAILED");
   } finally {
     server.closeAllConnections();
     await new Promise<void>(r => server.close(() => r()));
