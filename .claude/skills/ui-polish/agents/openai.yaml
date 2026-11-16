@@ -1,0 +1,3 @@
+interface:
+  display_name: "页面整体美化"
+  short_description: "根据页面与批注精简重复信息和导航，统一视觉与交互并验证效果"
