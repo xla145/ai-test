@@ -301,3 +301,44 @@ def test_login_client_id_follows_role_token_without_duplicate_headers():
         assert execute_case(case, client, env, {}, resolver)['status'] == 'passed'
     assert calls == ['/login', '/business', '/business']
     assert env['api_crypto']['headers'] == {'ClientId': 'stale-client'}
+
+
+def test_batch_generation_limits_scope_and_deduplicates(catalog):
+    store, p, preview = catalog
+    definitions = ws.import_document(store, p.id, preview)["definitions"]
+    chosen = definitions[:2]
+    assert len(chosen) == 2 and len(definitions) > 2
+    ids = [d["id"] for d in chosen]
+    result = ws.generate_cases(store, p.id, ids + ids)
+    generated = [store.get_case(i) for i in result["case_ids"]]
+    assert result["generated"] == len(generated) > 0
+    assert {c.api.definition_id for c in generated} == set(ids)
+    assert all(c.status == "draft" for c in generated)
+    again = ws.generate_cases(store, p.id, ids)
+    assert again["generated"] == 0 and again["skipped"] == len(generated)
+    before = len(store.list_cases(p.id))
+    with pytest.raises(ValueError, match="有效的接口"):
+        ws.generate_cases(store, p.id, ids + ["missing"])
+    assert len(store.list_cases(p.id)) == before
+
+
+def test_batch_selected_identity_authenticates_unbound_requests_and_keeps_explicit_roles():
+    from aitest.api_runtime import auth_resolver
+    headers = []
+    def handle(request):
+        headers.append(request.headers.get('Authorization'))
+        return httpx.Response(200, json={})
+    env = {'selected_role': 'operator', 'default_login_role': 'tester', 'auth_token': 'environment-token'}
+    steps = [
+        {'method': 'GET', 'path': '/generated', 'auth': False, 'expected_status': [200]},
+        {'method': 'GET', 'path': '/default', 'expected_status': [200]},
+        {'method': 'GET', 'path': '/explicit', 'role': 'other', 'expected_status': [200]},
+    ]
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, tokens={'operator': 'selected-token', 'other': 'other-token'})
+        result = execute_case({'steps': steps}, client, env, {}, resolver)
+    assert result['status'] == 'passed'
+    assert headers == ['selected-token', 'selected-token', 'other-token']
+    assert [step['role'] for step in result['steps']] == ['operator', 'operator', 'other']
+    assert steps[0]['auth'] is False and 'role' not in steps[0]
+    assert 'selected-token' not in json.dumps(result)

@@ -23,7 +23,7 @@ from .store import Store
 
 ACCEPTANCE_LABEL = {"verified_pass": "验收通过", "pending_review": "待人工复核", "incomplete": "覆盖不完整", "blocked": "执行阻断", "failed": "验收失败"}
 STATUS_LABEL = {"passed": "通过", "failed": "失败", "error": "错误", "skipped": "跳过"}
-FAILURE_LABEL = {"product_bug": "产品缺陷", "script_error": "脚本 / 页面改版", "environment": "环境问题", "unknown": "待归因"}
+FAILURE_LABEL = {"product_bug": "产品缺陷", "script_error": "脚本 / 页面改版", "environment": "环境问题", "data": "测试数据", "auth": "认证 / 权限", "model": "模型 / Agent", "unknown": "待归因"}
 FRAMEWORK_LABEL = {"pytest": "接口", "playwright": "UI"}
 MODE_LABEL = {"regression": "回归", "explore": "探索", "heal": "自愈"}
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -88,6 +88,8 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
                     except (OSError, ValueError):
                         pass
         results.append({
+            # 执行前快照；历史记录不得读取当前脚本来补写旧 hash。
+            "artifact": rr.execution_context.get("artifact") or None,
             "api_trace": api_trace,
             "case_id": rr.case_id,
             "title": case.title if case else rr.case_id,
@@ -320,8 +322,8 @@ def render_xlsx(details: list[dict[str, Any]], out: Path) -> Path:
 
 def export_report(store: Store, run_ids: list[str], fmt: str = "html", out: str | Path | None = None) -> dict[str, Any]:
     details = [run_detail(store, rid) for rid in run_ids]
-    if fmt not in ("html", "xlsx"):
-        raise ValueError("格式只支持 html / xlsx")
+    if fmt not in ("html", "xlsx", "json"):
+        raise ValueError("格式只支持 html / xlsx / json")
     if out is None:
         ws = (details[0]["project"] or {}).get("workspace_path") or "."
         name = run_ids[0] if len(run_ids) == 1 else f"{run_ids[0]}-{len(run_ids)}runs"
@@ -330,6 +332,8 @@ def export_report(store: Store, run_ids: list[str], fmt: str = "html", out: str 
     out.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "html":
         out.write_text(render_html(details), encoding="utf-8")
+    elif fmt == "json":
+        out.write_text(json.dumps({"schema_version": 1, "runs": details}, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         render_xlsx(details, out)
     s = _summary([r for d in details for r in d["results"]])

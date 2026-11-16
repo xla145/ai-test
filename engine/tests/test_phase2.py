@@ -118,3 +118,15 @@ def test_save_run_with_reviews(cli, tmp_path):
     assert reviews[0]["description"] == "缺失值显示灰色" and reviews[0]["run_id"] == run["run_id"]
     assert cli("resolve-review", "--id", reviews[0]["id"], "--passed")["status"] == "confirmed_pass"
     assert {r["case_id"] for r in cli("list-run-results", "--run", run["run_id"])} == {"tc_a", "tc_b", "tc_c"}
+
+
+def test_heal_risk_blocks_semantic_changes(cli, tmp_path):
+    pid = _project(cli, tmp_path)["id"]
+    case = _case(cli, pid)
+    spec = tmp_path / "ws" / "scripts" / "ui" / "risk.spec.ts"
+    spec.write_text("await page.getByTestId('save').click();\n", encoding="utf-8")
+    proposal = tmp_path / "proposal.ts"
+    proposal.write_text("await page.getByTestId('save').click();\nexpect(page).toHaveText('done');\n", encoding="utf-8")
+    p = cli("propose-fix", "--project", pid, "--case", case["id"], "--script", "scripts/ui/risk.spec.ts", "--content-file", str(proposal))
+    assert p["risk_level"] == "high"
+    assert "高风险" in cli("resolve-proposal", "--project", pid, "--id", p["id"], "--accept", ok=False)

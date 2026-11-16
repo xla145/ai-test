@@ -54,9 +54,20 @@ def prepare(env, request, kwargs):
 def response_body(env, response):
     config = env.get("api_crypto") or {}
     wrapped = response.headers.get("encrypt-key")
+    # A proxy/filter can retain the envelope header on a plain JSON response.
+    # Inspect the actual body before requiring encryption configuration.
+    payload = None
+    if response.content and (wrapped or "json" in response.headers.get("content-type", "").lower()):
+        try:
+            payload = response.json()
+        except ValueError:
+            pass
+        else:
+            if not wrapped or isinstance(payload, (dict, list)):
+                return payload
     if wrapped:
         if config.get("protocol") != "ruoyi":
-            raise ValueError("响应已加密，请配置环境的 RuoYi AES/RSA 协议")
+            raise ValueError("响应已加密，请配置环境的 RuoYi AES/RSA 协议：在「接口测试 → 登录与加密」选择 RuoYi，并填写响应解密私钥文件；保存网页登录 token 不会配置解密密钥")
         from cryptography.hazmat.primitives import padding
         from cryptography.hazmat.primitives.asymmetric import padding as rsa_padding
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -64,7 +75,8 @@ def response_body(env, response):
         try:
             key = base64.b64decode(private.decrypt(base64.b64decode(wrapped, validate=True), rsa_padding.PKCS1v15()), validate=True)
             dec = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
-            padded = dec.update(base64.b64decode(response.text, validate=True)) + dec.finalize()
+            ciphertext = payload if isinstance(payload, str) else response.text
+            padded = dec.update(base64.b64decode(ciphertext, validate=True)) + dec.finalize()
             unpad = padding.PKCS7(128).unpadder()
             return json.loads((unpad.update(padded) + unpad.finalize()).decode())
         except Exception:

@@ -283,6 +283,9 @@ class Store:
         case = self.get_case(case_id)
         if case is None:
             raise KeyError(case_id)
+        requirement = self.conn.execute("SELECT project_id FROM requirement WHERE id=?", (requirement_id,)).fetchone()
+        if not requirement or requirement["project_id"] != case.project_id:
+            raise ValueError("需求必须存在且属于当前项目")
         if requirement_id not in case.requirement_ids:
             case.requirement_ids.append(requirement_id)
         return self.upsert_case(case)
@@ -381,8 +384,10 @@ class Store:
 
     @staticmethod
     def _proposal(r: sqlite3.Row) -> HealProposal:
+        from .heal_risk import assess
         d = dict(r)
         d["commit"] = d.pop("commit_hash") or ""
+        d["risk_level"], d["risk_reasons"] = assess(d["original"], d["proposed"])
         return HealProposal(**d)
 
     def get_proposal(self, proposal_id: str) -> HealProposal | None:

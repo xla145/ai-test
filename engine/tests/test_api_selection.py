@@ -1,4 +1,5 @@
 import json
+import hashlib
 
 import pytest
 
@@ -72,6 +73,14 @@ def test_cli_selected_run_and_persistent_test_sets(tmp_path, demo_server, capsys
     result = call("run-api-suite", "--project", p, "--env", "test", "--case-ids", ids)
     assert result["total"] == result["passed"] == 1
     assert handler.next_id == 2 and not handler.users
+    detail = call("run-detail", "--run", result["run_id"])
+    artifact = detail["results"][0]["artifact"]
+    assert artifact["case_id"] == flow["id"] and artifact["env"] == "test"
+    script = tmp_path / "ws" / artifact["script_path"]
+    assert artifact["script_hash"] == hashlib.sha256(script.read_bytes()).hexdigest()
+    assert len(artifact["case_revision"]) == len(artifact["environment_fingerprint"]) == 64
+    script.write_text("# 新版本脚本\n", encoding="utf-8")
+    assert call("run-detail", "--run", result["run_id"])["results"][0]["artifact"] == artifact
     assert call("list-api-test-sets", "--project", p) == []
     saved = call("save-api-test-set", "--project", p, "--name", "订单冒烟", "--case-ids", ids)
     assert saved == {"name": "订单冒烟", "case_ids": [flow["id"]]}
@@ -85,3 +94,18 @@ def test_cli_selected_run_and_persistent_test_sets(tmp_path, demo_server, capsys
     assert "至少选择" in call("run-api-suite", "--project", p, "--env", "test", "--case-ids", "[]", ok=False)
     foreign = call("init-project", "--name", "其它项目", "--workspace", str(tmp_path / "other"))["id"]
     assert "不属于当前项目" in call("save-api-test-set", "--project", foreign, "--name", "错误引用", "--case-ids", ids, ok=False)
+
+
+def test_generated_suite_uses_selected_identity_without_changing_case_auth(tmp_path, demo_server):
+    url, handler = demo_server
+    _, case = cases()
+    case.api.auth = False  # Generated definitions may not declare OpenAPI security.
+    write_pytest_suite([case], tmp_path)
+    run, results = run_pytest(tmp_path, EnvConfig(url), case_ids=[case.id], extra_env={
+        'AITEST_API_SELECTED_ROLE': 'operator',
+        'AITEST_ROLE_TOKENS': json.dumps({'operator': TOKEN}),
+    })
+    assert run.result['passed'] == 1
+    assert [(r.case_id, r.status) for r in results] == [(case.id, 'passed')]
+    assert handler.next_id == 2
+    assert case.api.auth is False

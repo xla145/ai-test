@@ -15,7 +15,7 @@
      定位输入框传 `intent=fill`，开关传 `intent=check`，点击传 `intent=click`；`text` 不得填写参照物文字，工具不会自动从引号推断目标。目标上有文字或 placeholder 时传 `text`（该元素应包含的文字）让它校验结果；报「视觉定位不准」时按提示改用 `find_text`，不要换说法反复重试。不要用 `browser.ai_act`（无法生成确定性脚本）。
    - `ai_locate` 优先传结构化 `target`：`page`、由外到内的 `scope[{kind,name,key?}]`、`control`、`name/label/placeholder/text`。kind 支持 region/dialog/row/form_item/listbox，row 必须提供实际业务 key。每次只定位一个目标；下拉框展开、选项选择分步执行；开关调用 `check` 设置明确布尔状态。
    - scope 校验失败不能通过移除范围、改成全局 prompt 绕过。取值断言使用原字段 ref，禁止按预期值重新寻找另一个元素；区域和表单项身份必须持续保留到录制和回放。
-   - 看页面优先用 snapshot；截图默认只截可见区域，确有必要再传 full_page=true。
+   - 看页面优先用 snapshot；截图默认只截可见区域，确有必要再传 full_page=true。截图主要用于证据留档；不要为了确认普通控件调用 screenshot 后再读取整张图片，只有视觉类预期或 DOM 无法判断时才读取截图。
 4. 每个预期结果都要落成断言：`browser.expect_visible` / `browser.expect_text` / `browser.expect_no_text` / `browser.expect_value` / `browser.expect_url`。
    - 断言要落在显示结果的那个元素上：某一行的状态、数量文字用 `find_text` 取该单元格 / 文字的 ref（按 context 挑对的行）再 `expect_text`，不要对整个列表区、整页主体断言「包含」；对整块区域断言时会自动收窄到显示该文字的元素。
    - 不要对「按这段文字找到的元素」再断言包含这段文字（如对按钮「全部 19」断言包含「全部 19」）：它等于断言可见，会被录成 `expect_visible`。同一断言不要重复做。

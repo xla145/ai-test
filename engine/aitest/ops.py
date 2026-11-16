@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS project_setting (
 
 # 人工介入的事件种类（第 17 节「人工介入次数」）
 INTERVENTIONS = {"fix_applied", "proposal_resolved", "review_resolved", "case_edited", "attribution_confirmed"}
-FAILURE_TYPES = {"product_bug", "script_error", "environment"}
+FAILURE_TYPES = {"product_bug", "script_error", "environment", "data", "auth", "model", "unknown"}
 SETTING_KEYS = {
     "monthly_token_budget": int,  # 项目月度 token 上限，0 / 不设表示不限
     "per_task_token_limit": int,  # 单次 agent 任务上限
@@ -341,7 +341,7 @@ def metrics(store: Store, project_id: str) -> dict[str, Any]:
     ).fetchall()
     correct = sum(1 for r in rows if r["auto_type"] == r["human_type"])
 
-    interventions = events(store, project_id, INTERVENTIONS)
+    interventions = [e for e in events(store, project_id, INTERVENTIONS) if e["kind"] != "case_edited" or e["actor"] == "human"]
     per_case: dict[str, int] = defaultdict(int)
     for e in interventions:
         if e["case_id"]:

@@ -21,6 +21,8 @@ from .models import PROJECT_TYPES, AgentSession, Project, ReviewItem, RoleAccoun
 from .schema import validate_case
 from .store import CaseValidationError, Store
 from . import api_workspace
+from .artifacts import api_snapshot
+from .traceability import coverage
 
 DEFAULT_DB = os.environ.get("AITEST_DB", str(Path.home() / ".aitest" / "aitest.db"))
 
@@ -207,9 +209,16 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
     if case is None:
         raise KeyError(a.case)
     patch = json.loads(a.json)
+    review_comment = patch.pop("review_comment", "")
+    if not isinstance(review_comment, str):
+        raise ValueError("审核意见必须为文本")
+    if "requirement_ids" in patch:
+        known = {r.id for r in store.list_requirements(case.project_id)}
+        if not isinstance(patch["requirement_ids"], list) or any(not isinstance(r, str) or r not in known for r in patch["requirement_ids"]):
+            raise ValueError("关联需求必须存在且属于当前项目")
     merged = {**case.to_dict(), **patch, "id": case.id, "project_id": case.project_id}
     if case.is_api_executable and case.api_variable_scope == "case":
-        execution_changed = bool(set(patch) - {"status", "owner", "title", "priority", "module_path"})
+        execution_changed = bool(set(patch) - {"status", "owner", "title", "priority", "module_path", "coverage_links", "requirement_ids"})
         if execution_changed:
             merged["status"] = "draft"
             merged["api_revision"] = case.api_revision + 1
@@ -237,8 +246,7 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
         keep = [i for i in store.list_lint_issues(case.id) if i.rule in ("group_not_subdivided", "p0_ratio")]
         store.replace_lint_issues([case.id], [*report.issues, *keep])
     out = store.upsert_case(updated, validate=False).to_dict()
-    if a.actor == "human":
-        ops.log_event(store, "case_edited", case.project_id, case.id, actor="human", data={"fields": sorted(patch)})
+    ops.log_event(store, "case_edited", case.project_id, case.id, actor=a.actor, data={"fields": sorted(patch), "before": {k: case.to_dict().get(k) for k in patch}, "after": {k: out.get(k) for k in patch}, "comment": review_comment})
     return out
 
 
@@ -325,8 +333,12 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
     db_env = db.runtime_env(db.configs_for_env(env_cfg))
     if expected_revisions:
         db_env["AITEST_API_REVISIONS"] = json.dumps(expected_revisions)
+    snapshots = api_snapshot(store, p, a.env, env_cfg, selected_ids)
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
                                      report_dir=Path(p.workspace_path) / "reports", extra_env=db_env, case_ids=case_ids)
+    for result in results:
+        if result.case_id in snapshots:
+            result.execution_context["artifact"] = snapshots[result.case_id]
     store.save_run(run, results)
     return {"run_id": run.id, **run.result}
 
@@ -502,7 +514,7 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
             *(item.get("execution_context", {}).get("sessions", []) if isinstance(item.get("execution_context"), dict) else []),
         ]
         if contexts:
-            row["execution_context"] = {"sessions": contexts}
+            row["execution_context"] = {**(row.get("execution_context") or {}), "sessions": contexts}
         if priority.get(item["status"], 3) > priority.get(row["status"], 3):
             row.update({k: item.get(k) for k in ("status", "message", "failure_type")})
         if acceptance_priority.get(item.get("acceptance_status", ""), -1) > acceptance_priority.get(row.get("acceptance_status", ""), -1):
@@ -555,6 +567,10 @@ def cmd_list_proposals(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_resolve_proposal(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
+    proposal = store.get_proposal(a.id)
+    case = store.get_case(proposal.case_id) if proposal else None
+    if not case or case.project_id != p.id:
+        raise ValueError("修改建议不存在或不属于当前项目")
     d = asdict(heal.resolve(store, p.workspace_path, a.id, a.accept))
     d.pop("original"), d.pop("proposed")
     ops.log_event(store, "proposal_resolved", p.id, d["case_id"], a.id, actor="human", data={"status": d["status"]})
@@ -632,6 +648,17 @@ def cmd_list_attributions(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_metrics(store: Store, a: argparse.Namespace) -> Any:
     return ops.metrics(store, a.project)
+
+
+def cmd_case_history(store: Store, a: argparse.Namespace) -> Any:
+    case = store.get_case(a.case)
+    if not case:
+        raise ValueError("用例不存在")
+    return [e for e in ops.events(store, case.project_id, {"case_edited", "fix_applied"}) if e["case_id"] == case.id][-100:][::-1]
+
+
+def cmd_coverage(store: Store, a: argparse.Namespace) -> Any:
+    return coverage(store, a.project, a.env or "")
 
 
 def cmd_stability(store: Store, a: argparse.Namespace) -> Any:
@@ -829,6 +856,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("confirm-attribution", cmd_confirm_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types))
     add("list-attributions", cmd_list_attributions, (("--project",), req), (("--pending",), flag), *paging)
     add("metrics", cmd_metrics, (("--project",), req))
+    add("case-history", cmd_case_history, (("--case",), req))
+    add("coverage", cmd_coverage, (("--project",), req), (("--env",), {}))
     add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
     add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))
     add("import-workspace", cmd_import_workspace, (("--workspace",), req), (("--name",), {}))
@@ -847,7 +876,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("db-exec", cmd_db_exec, *dbargs, (("--sql",), req), (("--params",), {}))
     add("db-runtime-env", cmd_db_runtime_env, (("--project",), req), (("--env",), req))
     add("export-report", cmd_export_report, (("--run",), {"action": "append", "required": True}),
-        (("--format",), {"choices": ["html", "xlsx"], "default": "html"}), (("--out",), {}))
+        (("--format",), {"choices": ["html", "xlsx", "json"], "default": "html"}), (("--out",), {}))
     return ap
 
 

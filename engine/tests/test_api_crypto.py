@@ -74,6 +74,44 @@ def test_plain_requests_and_fail_closed(protocol):
         response_body(env, httpx.Response(200, headers={'encrypt-key': 'broken'}, text='broken'))
 
 
+def test_encrypted_response_requires_protocol_even_with_browser_token(protocol):
+    _, private = protocol
+    for env in ({'auth_token': 'Bearer browser-token'}, {'api_crypto': {'headers': {'clientid': 'web'}}}):
+        with pytest.raises(ValueError, match='接口测试 → 登录与加密') as error:
+            response_body(env, encrypted_response(private))
+        assert 'browser-token' not in str(error.value)
+    with pytest.raises(ValueError, match='未配置 RSA private'):
+        response_body({'api_crypto': {'protocol': 'ruoyi'}}, encrypted_response(private))
+
+
+@pytest.mark.parametrize('payload', [{'code': 200, 'data': {'ok': True}}, [{'id': 1}]])
+def test_plain_json_with_stale_encryption_header_does_not_require_keys(payload):
+    response = httpx.Response(200, headers={'encrypt-key': 'stale-envelope-header'}, json=payload)
+    assert response_body({}, response) == payload
+    assert response_body({'api_crypto': {'protocol': 'ruoyi'}}, response) == payload
+
+
+def test_json_quoted_ciphertext_still_requires_and_uses_decryption(protocol):
+    env, private = protocol
+    original = encrypted_response(private)
+    response = httpx.Response(200, headers=original.headers, json=original.text)
+    assert response_body(env, response)['code'] == 200
+    with pytest.raises(ValueError, match='响应已加密'):
+        response_body({}, response)
+
+
+@pytest.mark.parametrize('env', [{}, {'api_crypto': {'protocol': 'ruoyi'}}])
+def test_plain_request_is_not_encrypted_and_plain_response_assertions_still_run(env):
+    def handle(request):
+        assert 'encrypt-key' not in request.headers
+        assert json.loads(request.content) == {'name': 'plain'}
+        return httpx.Response(200, headers={'encrypt-key': 'stale'}, json={'code': 200})
+    with httpx.Client(base_url='https://test', transport=httpx.MockTransport(handle)) as client:
+        result = execute_case({'steps': [{'method': 'POST', 'path': '/plain', 'auth': False,
+                                         'body': {'name': 'plain'}, 'expected_fields': {'code': 200}}]}, client, env, {}, lambda _: '')
+    assert result['status'] == 'passed'
+
+
 def test_export_preserves_encryption_and_carries_runtime(tmp_path, protocol, monkeypatch):
     from aitest.apigen import write_pytest_suite
     from aitest.models import TestCase, ApiSpec
@@ -88,6 +126,7 @@ def test_export_preserves_encryption_and_carries_runtime(tmp_path, protocol, mon
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.response_body(env, encrypted_response(private))['code'] == 200
+    assert module.response_body({}, httpx.Response(200, headers={'encrypt-key': 'stale'}, json={'code': 200})) == {'code': 200}
 
 
 def test_environment_token_and_clientid_reach_the_wire_and_request_trace():

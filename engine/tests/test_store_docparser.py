@@ -1,7 +1,7 @@
 import pytest
 
 from aitest.docparser import parse_requirement, split_sections
-from aitest.models import AgentSession, Project, TestCase
+from aitest.models import AgentSession, Project, Requirement, TestCase
 from aitest.store import CaseValidationError, Store
 
 MD = """# 特征中心
@@ -38,6 +38,7 @@ def test_store_roundtrip_and_validation():
     assert s.get_project(p.id).environments["test"]["base_url"] == "x"
     c = TestCase(title="模块-场景", project_id=p.id, steps=["a"], expected=["b"], priority="P1")
     s.upsert_case(c)
+    s.add_requirements([Requirement(id="req_1", project_id=p.id, source_file="requirements.md", section="模块", content="场景要求")])
     s.link_requirement(c.id, "req_1")
     assert s.get_case(c.id).requirement_ids == ["req_1"]
     assert len(s.list_cases(p.id, priority="P1")) == 1

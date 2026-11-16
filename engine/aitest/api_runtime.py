@@ -120,8 +120,9 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
     """Execute one request. Trace always records the failure before it propagates."""
     where = f"{label}：" if label else ""
     entry = trace if trace is not None else {}
+    selected_role = env.get("selected_role") if not step.get("role") else None
     entry.update({"name": step.get("name") or f"{step['method']} {step['path']}",
-                  "role": step.get("role", ""), "status": "running", "assertions": []})
+                  "role": step.get("role") or selected_role or "", "status": "running", "assertions": []})
     start = time.monotonic()
     secrets = [env.get("auth_token", ""), *sensitive_values((env.get("api_crypto") or {}).get("headers", {}))]
     secrets.extend(str(v) for k, v in variables.items() if _SENSITIVE.search(k))
@@ -140,8 +141,8 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
         if not path.startswith("/") or path.startswith("//") or "://" in path:
             raise ValueError("接口路径必须为当前环境的相对路径")
         headers = {k: str(v) for k, v in (resolved.get("headers") or {}).items()}
-        if resolved.get("auth", True):
-            role = resolved.get("role") or env.get("default_login_role")
+        if selected_role or resolved.get("auth", True):
+            role = resolved.get("role") or selected_role or env.get("default_login_role")
             token = auth_for(role) if role else env.get("auth_token", "")
             if token:
                 auth_header = env.get("auth_header", "Authorization")
