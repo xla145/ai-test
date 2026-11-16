@@ -33,6 +33,9 @@ export const FAILURE = {
   product_bug: { text: "产品缺陷", color: "red" },
   script_error: { text: "脚本 / 页面改版", color: "orange" },
   environment: { text: "环境问题", color: "default" },
+  data: { text: "测试数据", color: "gold" },
+  auth: { text: "认证 / 权限", color: "volcano" },
+  model: { text: "模型 / Agent", color: "purple" },
   unknown: { text: "待归因", color: "purple" },
 } as Record<string, { text: string; color: string }>;
 

@@ -6,6 +6,7 @@ import { api } from "../api";
 
 /** 会盖在停靠区上的浮层：与停靠区相交时暂时隐藏原生视图（WebContentsView 总在 DOM 之上） */
 const OVERLAYS = [
+  ".agent-process-panel",
   ".ant-modal-wrap", ".ant-drawer-content-wrapper", ".ant-image-preview-wrap",
   ".ant-select-dropdown:not(.ant-select-dropdown-hidden)", ".ant-dropdown:not(.ant-dropdown-hidden)",
   ".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)", ".ant-popover:not(.ant-popover-hidden)",

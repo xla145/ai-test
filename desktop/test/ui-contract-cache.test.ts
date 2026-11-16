@@ -14,7 +14,7 @@ function setup(options: { blocked?: boolean; generate?: boolean; malformed?: boo
   const source = { id: "tc_a", title: "列表可见", execution_mode: "ui", status: "reviewed", preconditions: ["服务可用"], data_refs: [] as string[], steps: ["打开列表"], expected: ["列表可见"] };
   let roles = ["admin"];
   const contract = (): ExecutionContract => ({ version: 1, status: options.blocked ? "needs_clarification" : "ready", issues: options.blocked ? ["缺少列表地址"] : [],
-    preconditions: [...source.preconditions], steps: [{ index: 1, source: source.steps[0], actions: [{ action: "navigate", instruction: "打开 /list", value: "/list" }], expected: [...source.expected] }] });
+    preconditions: [...source.preconditions], preconditionChecks: source.preconditions.map((text, i) => ({ id: `P${i + 1}.1`, sourceIndices: [i + 1], sourceQuotes: [text], statement: text, expected: text, method: 'ui', dependsOn: [] })), steps: [{ index: 1, source: source.steps[0], actions: [{ action: "navigate", instruction: "打开 /list", value: "/list" }], expected: [...source.expected] }] });
   let scripts: { case_id: string; framework: string; path: string }[] = [];
   const engine = vi.fn(async (args: string[]) => {
     switch (args[0]) {
@@ -33,8 +33,10 @@ function setup(options: { blocked?: boolean; generate?: boolean; malformed?: boo
     expect(prompt).toContain("browser.assertion_coverage");
     expect(prompt).toContain("name 是 read_value 保存的来源变量名");
     if (options.generate !== false) {
-      const { path } = writeUiScript(workspace, { caseId: source.id, title: source.title, caseHash: caseHash(source), steps: [
-        { action: "goto", url: "/list" }, { action: "expectUrl", pattern: "/list" },
+      const { path } = writeUiScript(workspace, { caseId: source.id, title: source.title, caseHash: caseHash(source), preconditionChecks: contract().preconditionChecks, steps: [
+        { action: "goto", url: "/list" },
+        ...source.preconditions.map((_, i) => ({ action: 'expectUrl' as const, pattern: '/list', preconditionIndices: [i + 1], preconditionCheckIds: [`P${i + 1}.1`] })),
+        ...source.expected.map((_, i) => ({ action: 'expectUrl' as const, pattern: '/list', caseStep: 1, expectedIndices: [i + 1] })),
       ] });
       scripts = [{ case_id: source.id, framework: "playwright", path }];
     }
@@ -49,7 +51,8 @@ describe("persisted UI conversion and script reuse", () => {
     const f = setup();
     const first = await f.make().exploreUiCase("p", "test", "tc_a");
     expect(first).toMatchObject({ scriptGenerated: true, tokens: 30 });
-    expect(f.startThread.mock.calls[0][0]).toMatchObject({ sandbox: "read-only" });
+    expect(f.startThread.mock.calls[0][0]).toMatchObject({ sandbox: "read-only", config: { "mcp_servers.browser.enabled": false, "mcp_servers.case-store.enabled": false, "mcp_servers.pinky.enabled": false } });
+    expect(f.startThread.mock.calls[1][0]).not.toHaveProperty("config");
     expect(f.runTurn).toHaveBeenCalledTimes(2);
     expect(await f.make().exploreUiCase("p", "test", "tc_a")).toMatchObject({ scriptGenerated: true, reused: true, tokens: 0 });
     expect(f.runTurn).toHaveBeenCalledTimes(2);

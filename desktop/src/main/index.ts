@@ -118,6 +118,7 @@ let viewDock: ViewDock | null = null;
 let viewShown = false;
 let broker: Broker | undefined;
 let codex: CodexAppServer | undefined;
+let executionOrchestrator: Orchestrator | undefined;
 let secretStore: SecretStore;
 let approvalContext: ApprovalContext = { workspace: "", allowedHosts: [], productionHosts: [] };
 const pendingApprovals = new Map<string, (accept: boolean) => void>();
@@ -240,7 +241,10 @@ async function getCodex(): Promise<CodexAppServer> {
       mcpElicitation: (p) => decide("mcp", evaluateMcpElicitation(p, new Set(servers)), { 服务: p.serverName, 说明: p.message ?? p.url ?? "" }),
     },
   });
-  codex.on("event", (evt) => mainWindow?.webContents.send(CHANNELS.event, evt));
+  codex.on("event", (evt) => {
+    const taskId = executionOrchestrator?.recordAgentEvent(evt);
+    mainWindow?.webContents.send(CHANNELS.event, { ...evt, params: { ...evt.params, ...(taskId ? { taskId } : {}) } });
+  });
   codex.on("exit", () => (codex = undefined));
   await codex.start();
   return codex;
@@ -627,6 +631,7 @@ function registerIpc(orch: Orchestrator): void {
     uiDebugCommand: (command: UiDebugCommand) => orch.uiDebugCommand(command),
     uiDebugState: () => orch.uiDebugState(),
     uiTasks: () => orch.uiTasks(),
+    stopExecutionTask: (id: string) => orch.stopExecutionTask(id),
     stopUiTask: (p: string, env: string) => orch.stopUiTask(p, env),
     reviseUiScript: async (p: string, env: string, id: string, feedback: string, opts?: { confirmProduction?: boolean }) => {
       await setApprovalContext(orch, p);
@@ -639,6 +644,10 @@ function registerIpc(orch: Orchestrator): void {
     getSettings: (p: string) => orch.getSettings(p),
     setSettings: (p: string, settings) => orch.setSettings(p, settings),
     metrics: (p: string) => orch.metrics(p),
+    runPerformance: (p: string, env: string, options) => orch.runPerformance(p, env, options),
+    performanceHistory: (p: string) => orch.performanceHistory(p),
+    caseHistory: (id: string) => orch.caseHistory(id),
+    coverage: (p: string, env?: string) => orch.coverage(p, env),
     stability: (p: string) => orch.stability(p),
     listAttributions: (p: string, pendingOnly?: boolean) => orch.listAttributions(p, pendingOnly ?? true),
     confirmAttribution: (runId: string, caseId: string, type: string) => orch.confirmAttribution(runId, caseId, type),
@@ -707,9 +716,9 @@ function registerIpc(orch: Orchestrator): void {
     // ---- 测试报告 ----
     listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
     runDetail: (runId: string) => orch.runDetail(runId),
-    exportReport: async (runIds: string[], format: "html" | "xlsx") => {
-      const ext = format === "html" ? "html" : "xlsx";
-      const out = await saveAs(`测试报告-${runIds[0]}.${ext}`, [{ name: format === "html" ? "HTML 报告" : "Excel", extensions: [ext] }]);
+    exportReport: async (runIds: string[], format: "html" | "xlsx" | "json") => {
+      const ext = format === "html" ? "html" : format === "json" ? "json" : "xlsx";
+      const out = await saveAs(`测试报告-${runIds[0]}.${ext}`, [{ name: format === "html" ? "HTML 报告" : format === "json" ? "JSON 报告" : "Excel", extensions: [ext] }]);
       return out ? orch.exportReport(runIds, format, out) : null;
     },
     exportCasesExcel: async (p: string, name: string) => {
@@ -843,7 +852,9 @@ app.whenReady().then(async () => {
     get tokenLimit() {
       return taskTokenLimit().value;
     },
+    taskFile: join(paths.data(), "execution-tasks.json"),
   });
+  executionOrchestrator = orch;
   await refreshParents(orch).catch(() => undefined);
   orch.on("progress", (p) => {
     if ((p.stage === "ui-step" || p.stage === "ui-debug") && p.role) {

@@ -51,6 +51,7 @@ interface RunRow {
 }
 
 interface ResultRow {
+  artifact?: { case_revision?: string; script_hash?: string; environment_fingerprint?: string; script_path?: string };
   api_trace?: ApiDebugResult;
   case_id: string;
   title: string;
@@ -88,7 +89,7 @@ export function ReportsPage({ project }: { project: Project }) {
   const [open, setOpen] = useState<RunRow>();
   const { busy, run } = useAction();
 
-  const exportRuns = (ids: string[], format: "html" | "xlsx") => run(async () => {
+  const exportRuns = (ids: string[], format: "html" | "xlsx" | "json") => run(async () => {
     const out = await api().exportReport(ids, format);
     if (out) await api().showInFolder(out.path).catch(() => undefined);
     return out;
@@ -97,9 +98,10 @@ export function ReportsPage({ project }: { project: Project }) {
   const exportMenu = (ids: string[]) => ({
     items: [
       { key: "html", icon: <FileTextOutlined />, label: "HTML 汇总报告（单文件，含截图）" },
+      { key: "json", icon: <FileTextOutlined />, label: "JSON 机器可读报告" },
       { key: "xlsx", icon: <FileExcelOutlined />, label: "Excel 结果明细" },
     ],
-    onClick: ({ key }: { key: string }) => exportRuns(ids, key as "html" | "xlsx"),
+    onClick: ({ key }: { key: string }) => exportRuns(ids, key as "html" | "xlsx" | "json"),
   });
 
   return (
@@ -160,7 +162,7 @@ export function ReportsPage({ project }: { project: Project }) {
 }
 
 function RunDrawer({ project, run: r, onClose, onExport, busy }: {
-  project: Project; run: RunRow; onClose: () => void; onExport: (f: "html" | "xlsx") => void; busy: boolean;
+  project: Project; run: RunRow; onClose: () => void; onExport: (f: "html" | "xlsx" | "json") => void; busy: boolean;
 }) {
   const detail = useLoad(() => api().runDetail(r.id), [r.id]);
   const { run } = useAction();
@@ -214,9 +216,14 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             dataSource={rows}
             pagination={{ pageSize: 20, size: "small", hideOnSinglePage: true }}
             expandable={{
-              rowExpandable: (x) => !!(x.message || x.evidence_paths.length || x.reviews.length || x.execution_context?.sessions?.length),
+              rowExpandable: (x) => !!(x.artifact || x.message || x.evidence_paths.length || x.reviews.length || x.execution_context?.sessions?.length),
               expandedRowRender: (x) => (
                 <Space direction="vertical" style={{ width: "100%" }}>
+                  {x.artifact ? <Descriptions size="small" column={1} title="执行版本" items={[
+                    { key: "case", label: "用例指纹", children: x.artifact.case_revision ? <Typography.Text code copyable>{x.artifact.case_revision}</Typography.Text> : "未记录" },
+                    { key: "script", label: "脚本指纹", children: x.artifact.script_hash ? <Typography.Text code copyable>{x.artifact.script_hash}</Typography.Text> : "未记录" },
+                    { key: "env", label: "环境指纹", children: x.artifact.environment_fingerprint ? <Typography.Text code copyable>{x.artifact.environment_fingerprint}</Typography.Text> : "未记录" },
+                  ]} /> : <Typography.Text type="secondary">历史记录未保存执行版本快照</Typography.Text>}
                   {x.api_trace && <ExecutionResult result={{ ...x.api_trace, id: r.id, env: r.env, title: x.title, created_at: r.started_at }} />}
                   {x.acceptance_status && <Typography.Text type="secondary">验收：{ACCEPTANCE[x.acceptance_status] ?? x.acceptance_status}{x.reason_code ? ` · ${x.reason_code}` : ""}</Typography.Text>}
                   {x.attribution_reason && <Typography.Text>{x.attribution_reason}</Typography.Text>}

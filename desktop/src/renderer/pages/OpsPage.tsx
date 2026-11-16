@@ -33,6 +33,7 @@ import { PageHeader } from "../components/PageHeader";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { useProjects } from "../components/ProjectSettings";
 import { useAction, useLoad, usePaged } from "../hooks";
+import { CoveragePanel } from "./CoveragePanel";
 
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
@@ -44,6 +45,8 @@ export function OpsPage({ project }: { project: Project }) {
         tabPosition="top"
         items={[
           { key: "metrics", label: "验证指标", children: <Metrics project={project} /> },
+          { key: "coverage", label: "需求与断言覆盖", children: <CoveragePanel project={project} /> },
+          { key: "performance", label: "性能测试", children: <PerformancePanel project={project} /> },
           { key: "attribution", label: "失败归因", children: <Attributions project={project} /> },
           { key: "usage", label: "用量与预算", children: <Usage project={project} /> },
           { key: "share", label: "团队共享与 CI", children: <Share project={project} /> },
@@ -51,6 +54,38 @@ export function OpsPage({ project }: { project: Project }) {
       />
     </div>
   );
+}
+
+function PerformancePanel({ project }: { project: Project }) {
+  const envs = Object.keys(project.environments);
+  const [env, setEnv] = useState(envs[0]);
+  const [path, setPath] = useState("/");
+  const [vus, setVus] = useState(5);
+  const [seconds, setSeconds] = useState(10);
+  const [p95Ms, setP95Ms] = useState(1000);
+  const [maxFailureRate, setMaxFailureRate] = useState(0.01);
+  const history = useLoad(() => api().performanceHistory(project.id), [project.id]);
+  const { busy, run } = useAction();
+  return <Space direction="vertical" style={{ width: "100%" }}>
+    <Alert showIcon type="info" message="性能测试使用本地 k6 运行确定性 GET 负载，Agent 只显示任务状态，不参与请求执行。" description="仅允许测试环境；结果包含真实请求数、失败率、P95 与门槛判定。" />
+    <Card size="small" title="新建性能任务">
+      <Space wrap>
+        <Select value={env} onChange={setEnv} options={envs.map(v => ({ value: v, label: v }))} style={{ width: 140 }} />
+        <Input value={path} onChange={e => setPath(e.target.value)} addonBefore="路径" style={{ width: 220 }} />
+        <InputNumber min={1} max={100} value={vus} onChange={v => setVus(v ?? 1)} addonBefore="VU" />
+        <InputNumber min={1} max={300} value={seconds} onChange={v => setSeconds(v ?? 1)} addonBefore="秒" />
+        <InputNumber min={1} value={p95Ms} onChange={v => setP95Ms(v ?? 1000)} addonBefore="P95 ms" />
+        <InputNumber min={0} max={0.99} step={0.01} precision={2} value={maxFailureRate} onChange={v => setMaxFailureRate(v ?? 0.01)} addonBefore="失败率 (0–1)" />
+        <Button type="primary" loading={busy} onClick={() => run(async () => { try { return await api().runPerformance(project.id, env, { path, vus, seconds, p95Ms, maxFailureRate }); } finally { await history.reload(); } }, "性能任务已结束")}>开始测试</Button>
+      </Space>
+    </Card>
+    <Card size="small" title="历史结果" loading={history.loading}>
+      <Table size="small" rowKey="id" pagination={{ pageSize: 8 }} dataSource={history.data ?? []} locale={{ emptyText: "尚无性能执行记录" }} columns={[
+        { title: "环境", dataIndex: "env" }, { title: "状态", dataIndex: "status", render: (v: string) => <Tag color={v === "passed" ? "green" : v === "stopped" ? "default" : "red"}>{v}</Tag> },
+        { title: "请求", dataIndex: "requests" }, { title: "请求/秒", dataIndex: "requestsPerSecond", render: (v: number | null) => v == null ? "—" : v.toFixed(2) }, { title: "失败率", dataIndex: "failureRate", render: (v: number | null) => v == null ? "—" : `${(v * 100).toFixed(2)}%` }, { title: "P95", dataIndex: "p95Ms", render: (v: number | null) => v == null ? "—" : `${v.toFixed(1)} ms` }, { title: "报告", dataIndex: "reportPath", ellipsis: true },
+      ]} />
+    </Card>
+  </Space>;
 }
 
 function Metrics({ project }: { project: Project }) {
@@ -118,7 +153,7 @@ function Attributions({ project }: { project: Project }) {
           { title: "人工确认", width: 280, render: (_: unknown, r: any) => (
             <Radio.Group size="small" optionType="button" disabled={busy}
               onChange={(e) => run(async () => { await api().confirmAttribution(r.run_id, r.case_id, e.target.value); await reload(); }, "已确认")}
-              options={["product_bug", "script_error", "environment"].map((k) => ({ value: k, label: FAILURE[k].text }))} />
+              options={["product_bug", "script_error", "environment", "data", "auth", "model", "unknown"].map((k) => ({ value: k, label: FAILURE[k].text }))} />
           ) },
         ]}
       />

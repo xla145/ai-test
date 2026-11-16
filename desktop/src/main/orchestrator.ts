@@ -1,8 +1,10 @@
+import { listPerformance, performancePlan, runPerformance as executePerformance } from "./performance.js";
+import type { PerformanceOptions } from "../shared/performance.js";
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "../shared/apiWorkspace.js";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   checkData as CheckData,
   LoginRecipe,
@@ -26,6 +28,7 @@ import {
 } from "./prompts.js";
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
+import { uiContractThreadConfig } from "./codex/config.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 import type { UiTaskRecord, UiRunOptions, UiScriptState } from "../shared/ipc.js";
 import { UiWorkflow, type WorkflowReview } from "./uiWorkflow.js";
@@ -170,6 +173,8 @@ export interface OrchestratorDeps {
   /** 单次 agent 任务的 token 上限 */
   tokenLimit?: number;
   uiLocateStrategy?: "dom-first" | "midscene-first";
+  /** 可选的本地任务快照；未提供时保持测试/临时编排器的内存行为。 */
+  taskFile?: string;
 }
 
 export interface AppDeps {
@@ -184,8 +189,21 @@ export class Orchestrator extends EventEmitter {
   private uiTaskActive = false;
   private uiTaskSeq = 0;
   private taskRecords: UiTaskRecord[] = [];
+  private agentControllers = new Map<string, AbortController>();
   uiTasks(): UiTaskRecord[] { return structuredClone(this.taskRecords); }
-  private uiAbort?: { projectId: string; env: string; controller: AbortController };
+  private persistTasks() {
+    const file = this.deps.taskFile;
+    if (!file) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.taskRecords, null, 2));
+      renameSync(tmp, file);
+    } catch {
+      for (const task of this.taskRecords) task.persistenceError = "任务历史保存失败；当前状态仅保留在内存中";
+    }
+  }
+  private uiAbort?: { projectId: string; env: string; controller: AbortController; taskId: string };
   private uiDebug?: UiDebugSession;
   private async withUiTask<T>(projectId: string, env: string, fn: (signal: AbortSignal) => Promise<T>, kind = "UI 执行", caseIds: string[] = []): Promise<T> {
     if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再操作");
@@ -193,9 +211,10 @@ export class Orchestrator extends EventEmitter {
     this.uiTaskActive = true;
     const controller = new AbortController();
     const taskId = `ui-${Date.now()}-${++this.uiTaskSeq}`;
-    this.uiAbort = { projectId, env, controller };
-    const task: UiTaskRecord = { id: taskId, projectId, env, kind, caseIds, status: "running", stage: "准备执行", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    this.uiAbort = { projectId, env, controller, taskId };
+    const task: UiTaskRecord = { id: taskId, projectId, env, kind, caseIds, status: "running", stage: "准备执行", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: "ui", canStop: true };
     this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    this.persistTasks();
     this.emit("progress", { projectId, env, stage: "ui-task", taskId, status: "running" });
     try {
       const result = await fn(controller.signal);
@@ -219,8 +238,34 @@ export class Orchestrator extends EventEmitter {
     if (!task) return;
     if (task.projectId !== projectId || task.env !== env) throw new Error("当前执行的 UI 任务不属于此项目或环境");
     task.controller.abort();
-    const record = this.taskRecords.find(t => t.status === "running");
+    const record = this.taskRecords.find(t => (t.source ?? "ui") === "ui" && t.projectId === projectId && t.env === env && t.status === "running");
     if (record) this.emit("progress", { projectId, env, stage: "ui-task", taskId: record.id, status: "stopping" });
+  }
+  stopExecutionTask(taskId: string): void {
+    const task = this.taskRecords.find(t => t.id === taskId);
+    if (!task) throw new Error("任务不存在");
+    if (!["running", "stopping"].includes(task.status)) return;
+    const controller = this.agentControllers.get(taskId);
+    if (controller) {
+      task.status = "stopping";
+      controller.abort();
+      this.emit("progress", { projectId: task.projectId, env: task.env, stage: "agent-task", taskId, status: "stopping" });
+    } else if (this.uiAbort?.taskId === taskId) this.stopUiTask(task.projectId, task.env);
+    else throw new Error("当前任务不支持停止");
+  }
+  recordAgentEvent(event: { method: string; params?: any }): string | undefined {
+    if (typeof event.params?.threadId !== "string") return;
+    const task = this.taskRecords.find(t => t.threadId === event.params.threadId);
+    if (!task) return;
+    const item = event.params?.item;
+    const detail = item?.type === "mcpToolCall" && ["item/started", "item/completed"].includes(event.method)
+      ? `${event.method === "item/started" ? "调用工具" : item.status === "failed" || item.error ? "工具失败" : "工具完成"} ${item.server ?? ""}.${item.tool ?? ""}`
+      : item?.type === "contextCompaction" ? event.method === "item/completed" ? "上下文压缩完成" : "正在压缩上下文" : undefined;
+    if (detail) {
+      task.events = [...(task.events ?? []), { time: new Date().toISOString(), detail }].slice(-100);
+      this.persistTasks();
+    }
+    return task.id;
   }
   constructor(private readonly deps: OrchestratorDeps) {
     super();
@@ -233,11 +278,26 @@ export class Orchestrator extends EventEmitter {
         task.status = p.status;
         if (p.error) task.detail = p.error;
         if (!["running", "stopping"].includes(task.status)) task.finishedAt = task.updatedAt;
+      } else if (p.stage === "agent-task") {
+        task.status = p.status ?? task.status;
+        if (p.error) task.detail = p.error;
+        if (!["running", "stopping"].includes(task.status)) task.finishedAt = task.updatedAt;
       } else {
-        task.stage = ({ ui_contract: "整理执行计划", explore: "探索并生成脚本", "ui-run": "执行脚本", "ui-step": "执行脚本步骤", revise: "修正脚本", heal: "分析失败原因" } as Record<string, string>)[p.stage] ?? task.stage;
+        task.stage = ({ ui_contract: "整理执行计划", case_gen: "生成测试用例", api_script: "补充接口脚本", explore: "探索并生成脚本", "ui-run": "执行脚本", "ui-step": "执行脚本步骤", revise: "修正脚本", heal: "分析失败原因", triage: "分析失败原因", app_explore: "探索 App 用例", performance: "准备性能测试" } as Record<string, string>)[p.stage] ?? task.stage;
         if (p.title) task.detail = p.title;
       }
+      this.persistTasks();
     });
+    if (deps.taskFile && existsSync(deps.taskFile)) {
+      try {
+        const previous = JSON.parse(readFileSync(deps.taskFile, "utf8")) as UiTaskRecord[];
+        this.taskRecords = Array.isArray(previous) ? previous.slice(0, 100).map(task =>
+          ["running", "stopping"].includes(task.status)
+            ? { ...task, status: "failed", detail: "应用重启时任务未确认完成（PROCESS_RESTARTED）", finishedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+            : task) : [];
+      } catch { this.taskRecords = []; }
+      this.persistTasks();
+    }
   }
 
   listProjects(): Promise<ProjectInfo[]> {
@@ -380,7 +440,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 回归直接执行脚本；只有原因不明的失败才调 agent 归因。 */
-  async runRegression(projectId: string, env: string, opts: ApiRunOptions & { autoTriage?: boolean } = {}) {
+  async runRegression(projectId: string, env: string, opts: ApiRunOptions = {}) {
     if (opts.caseIds !== undefined && !opts.caseIds.length) throw new Error("请至少选择一条接口用例");
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
@@ -391,16 +451,24 @@ export class Orchestrator extends EventEmitter {
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env,
         ...opt("--case-ids", opts.caseIds === undefined ? undefined : JSON.stringify(opts.caseIds))],
-      this.deps.secretEnv(projectId, env, ["*"]),
+      { ...this.deps.secretEnv(projectId, env, ["*"]), ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}) },
     );
     let triage: TriageItem[] | undefined;
+    let analysis: { status: "completed" | "failed"; error?: string } | undefined;
     if (opts.autoTriage !== false && run.needs_agent.length) {
-      triage = await this.triage(projectId, run.run_id);
+      try {
+        triage = await this.triage(projectId, run.run_id, env);
+        analysis = { status: "completed" };
+      } catch (error) {
+        // AI 分析失败不能覆盖已经完成的确定性接口报告；调用方仍应看到原始 run。
+        analysis = { status: "failed", error: String((error as Error)?.message ?? error).slice(0, 300) };
+        this.emit("progress", { projectId, env, stage: "analysis", status: "failed", error: analysis.error, runId: run.run_id });
+      }
     }
-    return { run, triage };
+    return { run, triage, analysis };
   }
 
-  async triage(projectId: string, runId: string): Promise<TriageItem[]> {
+  async triage(projectId: string, runId: string, env?: string): Promise<TriageItem[]> {
     const failures = await this.deps.engine<FailureBrief[]>(["summarize-failures", "--run", runId]);
     const unknown = failures.filter((f) => f.failure_type === "unknown");
     const settled: TriageItem[] = failures
@@ -408,8 +476,16 @@ export class Orchestrator extends EventEmitter {
       .map((f) => ({ case_id: f.case_id, failure_type: f.failure_type ?? "unknown", reason: "确定性规则判定" }));
     await this.recordAttributions(runId, settled, "rule");
     if (!unknown.length) return settled;
-    const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown));
-    const judged = parseTriage(turn.message);
+    const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown), undefined, 0, { env, caseIds: unknown.map(c => c.case_id), runId });
+    if (turn.status !== "completed") throw new Error(`AI 归因未完成：${turn.status}`);
+    const wanted = new Set(unknown.map(f => f.case_id));
+    const parsed = parseTriage(turn.message).filter(item => wanted.has(item.case_id));
+    if (!parsed.length) throw new Error("AI 未返回有效的失败归因，原始失败仍待分析");
+    // 同一用例只接受一个结论；冲突或缺失保留 unknown，不能污染其他运行的用例。
+    const judged = unknown.map(failure => {
+      const matches = parsed.filter(item => item.case_id === failure.case_id);
+      return matches.length === 1 ? matches[0] : { case_id: failure.case_id, failure_type: "unknown", reason: matches.length ? "AI 返回了重复或冲突结论，需人工核对" : "AI 未提供此用例的归因" };
+    });
     await this.recordAttributions(runId, judged, "agent");
     return [...settled, ...judged];
   }
@@ -437,7 +513,8 @@ export class Orchestrator extends EventEmitter {
       };
       const before = binding(existing);
       const cached = contracts.read();
-      if (cached?.contract.status === "ready" && before && JSON.stringify(cached.script) === JSON.stringify(before)) {
+      const covered = (path: string, plan: NonNullable<typeof cached>["contract"]) => !coverageIssues(workflow.stepsFile(path).steps, { ...brief, preconditionChecks: plan.preconditionChecks }).length;
+      if (cached?.contract.status === "ready" && before && covered(before.path, cached.contract) && JSON.stringify(cached.script) === JSON.stringify(before)) {
         return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。\n中间计划：${contracts.artifactPath}`, scriptGenerated: true, reused: true };
       }
       let contract = cached?.contract;
@@ -466,7 +543,7 @@ export class Orchestrator extends EventEmitter {
       // 保存发生在浏览器工具中，只有本次生成、内容仍匹配的脚本才能绑定缓存。
       const after = binding((await this.uiScriptStates(projectId, env))[caseId]);
       const unchanged = await stillCurrent();
-      const scriptGenerated = Boolean(unchanged && after && after.stepsHash !== before?.stepsHash);
+      const scriptGenerated = Boolean(unchanged && after && covered(after.path, contract) && after.stepsHash !== before?.stepsHash);
       if (scriptGenerated && result.status === "completed") contracts.save(contract, after);
       return { ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated, contractReused: Boolean(cached),
         message: [cached ? "中间计划命中缓存，本次未重复 AI 转换。" : `中间计划已转换并持久化（${contracts.cacheReason}）。`, `计划产物：${contracts.artifactPath}`,
@@ -481,7 +558,7 @@ export class Orchestrator extends EventEmitter {
     const app = this.requireApp();
     if (!app.pinkyEnabled?.()) throw new Error("未启用 Pinky：请先安装 Pinky，并在「全局设置 → 运行环境」中启用");
     const envCfg = await this.appEnv(projectId, env, platform, opts.confirmProduction);
-    return this.agentTask(projectId, "app_explore", appExplorePrompt(projectId, env, platform, caseId, envCfg.app![platform]!));
+    return this.agentTask(projectId, "app_explore", appExplorePrompt(projectId, env, platform, caseId, envCfg.app![platform]!), undefined, 0, { env, caseIds: [caseId] });
   }
 
   /** App 回归：Maestro 直接执行脚本，不调用模型；失败按规则归因，等待人工确认 */
@@ -618,6 +695,14 @@ export class Orchestrator extends EventEmitter {
       : {};
     this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
     signal.throwIfAborted();
+    const artifacts = new Map(runnable.map(c => {
+      let scriptHash: string | null = null;
+      try { scriptHash = workflow.hash(uiScripts.get(c.id)!); } catch { /* 缺失版本明确保留为空。 */ }
+      return [c.id, { schema_version: 1, project_id: projectId, case_id: c.id, env,
+        case_revision: caseHash(c), source_revision: null, script_hash: scriptHash,
+        script_path: uiScripts.get(c.id), environment_fingerprint: sha256(JSON.stringify(envCfg)),
+        role: roleBindings[c.id] ?? null, session_policy: opts.mode === "validate" ? "isolated" : opts.embedded ? "embedded" : "isolated" }];
+    }));
     const out = caseIds.length ? await ui.runUiSuite({
       signal,
       workspace: project.workspace_path,
@@ -625,10 +710,10 @@ export class Orchestrator extends EventEmitter {
       caseIds,
       headed: opts.headed,
       ...(!opts.embedded && opts.workers && opts.workers > 1 ? { workers: Math.min(8, Math.floor(opts.workers)) } : {}),
-      ...embedded,
+      ...(opts.mode === "validate" ? {} : embedded),
       defaultRole: opts.selectedRole,
       roleBindings,
-      ...(sessionSource ? { sessionSource } : {}),
+      ...(opts.mode === "validate" ? {} : sessionSource ? { sessionSource } : {}),
       onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     }) : { exitCode: 0, results: [] as UiCaseResult[], errors: [], stderr: "", htmlReport: "", reportJson: "" };
@@ -667,6 +752,9 @@ export class Orchestrator extends EventEmitter {
       }
     }
     for (const result of out.results) {
+      if (artifacts.has(result.case_id)) result.execution_context = {
+        ...result.execution_context, sessions: result.execution_context?.sessions ?? [], artifact: artifacts.get(result.case_id),
+      };
       if (validationIssues[result.case_id] && result.status === "passed") {
         result.acceptance_status = "incomplete";
         result.reason_code = "incomplete";
@@ -751,11 +839,14 @@ export class Orchestrator extends EventEmitter {
     for (const c of group.cases) {
       if (c.id === sourceCaseId || states[c.id] || (wanted && !wanted.has(c.id))) continue;
       if (c.lint_status === "blocked") { out.skipped.push({ caseId: c.id, reason: "用例被规范检查阻断" }); continue; }
+      if (file.preconditionChecks?.length && JSON.stringify(c.preconditions) !== JSON.stringify(file.source?.preconditions)) {
+        out.skipped.push({ caseId: c.id, reason: "前置条件不同，需绑定目标用例的原子检查计划" }); continue;
+      }
       const derived = deriveSteps(file.steps, scriptParams(group, sourceCaseId), scriptParams(group, c.id));
       if (!derived.ok) { out.skipped.push({ caseId: c.id, reason: derived.reason }); continue; }
       const { path } = writeUiScript(p.workspace_path, {
         caseId: c.id, title: c.title, steps: derived.steps, baseUrl: file.baseUrl,
-        caseSteps: c.steps, expected: c.expected, preconditions: c.preconditions, caseHash: caseHash(c), derivedFrom: sourceCaseId,
+        caseSteps: c.steps, expected: c.expected, preconditions: c.preconditions, preconditionChecks: file.preconditionChecks, caseHash: caseHash(c), derivedFrom: sourceCaseId,
       });
       await this.deps.engine(["register-script", "--project", projectId, "--case", c.id, "--path", path]);
       out.derived.push(c.id);
@@ -877,7 +968,7 @@ export class Orchestrator extends EventEmitter {
     const briefs: UiFailureBrief[] = pending.map((r) => ({
       case_id: r.case_id, message: r.message, script: scriptMap.get(r.case_id), evidence_paths: r.evidence_paths ?? [],
     }));
-    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs), signal);
+    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs), signal, 0, { env, caseIds: pending.map(c => c.case_id), runId });
     const judged = parseTriage(turn.message);
     await this.recordAttributions(runId, judged, "agent");
     return judged;
@@ -1010,6 +1101,41 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["metrics", "--project", projectId]);
   }
 
+  caseHistory(caseId: string) { return this.deps.engine<any[]>(["case-history", "--case", caseId]); }
+
+  coverage(projectId: string, env?: string) {
+    return this.deps.engine(["coverage", "--project", projectId, ...(env ? ["--env", env] : [])]);
+  }
+
+  async performanceHistory(projectId: string) {
+    return listPerformance((await this.project(projectId)).workspace_path);
+  }
+
+  async runPerformance(projectId: string, env: string, options: PerformanceOptions) {
+    const p = await this.project(projectId);
+    const config = p.environments[env];
+    if (!config) throw new Error("未配置环境");
+    if (config.production) throw new Error("性能测试不允许在生产环境执行");
+    performancePlan(config.base_url, options);
+    if (this.taskRecords.some(t => t.source === "performance" && ["running", "stopping"].includes(t.status))) throw new Error("已有性能任务执行中，请先等待或停止");
+    const now = new Date().toISOString(), taskId = `performance-${Date.now()}-${++this.uiTaskSeq}`;
+    const controller = new AbortController();
+    const task: UiTaskRecord = { id: taskId, projectId, env, caseIds: [], kind: "k6 性能测试", source: "performance", status: "running", stage: "执行 GET 压测", canStop: true, startedAt: now, updatedAt: now };
+    this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    this.agentControllers.set(taskId, controller);
+    this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: "running" });
+    try {
+      const result = await executePerformance(p.workspace_path, env, config.base_url, options, controller.signal);
+      task.runId = result.id;
+      task.detail = result.message ?? `请求 ${result.requests ?? "—"} · P95 ${result.p95Ms ?? "—"} ms`;
+      this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: result.status === "passed" ? "completed" : result.status === "stopped" ? "stopped" : "failed" });
+      return result;
+    } catch (error) {
+      this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: controller.signal.aborted ? "stopped" : "failed", error: String((error as Error).message) });
+      throw error;
+    } finally { this.agentControllers.delete(taskId); this.persistTasks(); }
+  }
+
   stability(projectId: string) {
     return this.deps.engine(["stability", "--project", projectId]);
   }
@@ -1073,7 +1199,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 导出单文件 HTML 汇总报告或 Excel 明细；可合并多次执行 */
-  exportReport(runIds: string[], format: "html" | "xlsx", out?: string) {
+  exportReport(runIds: string[], format: "html" | "xlsx" | "json", out?: string) {
     if (!runIds.length) throw new Error("请选择要导出的执行记录");
     return this.deps.engine<{ path: string }>([
       "export-report", ...runIds.flatMap((id) => ["--run", id]), "--format", format, ...(out ? ["--out", out] : []),
@@ -1095,7 +1221,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
-  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0): Promise<TurnResult> {
+  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0, metadata: { env?: string; caseIds?: string[]; runId?: string } = {}): Promise<TurnResult> {
     const project = await this.project(projectId);
     const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
       ["check-budget", "--project", projectId],
@@ -1104,29 +1230,56 @@ export class Orchestrator extends EventEmitter {
       throw new BudgetExceededError(`本月模型预算已用完（${budget.month_used}/${budget.monthly_budget} tokens），日常回归不受影响`);
     }
     const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
-    const tokenLimit = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    const taskRemaining = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    const monthRemaining = budget.monthly_budget ? budget.monthly_budget - budget.month_used : undefined;
+    const remaining = [taskRemaining, monthRemaining].filter((value): value is number => value !== undefined);
+    const tokenLimit = remaining.length ? Math.min(...remaining) : undefined;
     if (tokenLimit !== undefined && tokenLimit <= 0) throw new BudgetExceededError("用例转换已达到单任务 token 上限；转换结果已缓存，下次可直接执行");
     signal?.throwIfAborted();
-    const agent = await this.deps.agent();
-    const threadId = await agent.startThread({
-      cwd: project.workspace_path,
-      approvalPolicy: "on-request",
-      sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
-    });
-    const session = await this.deps.engine<{ id: string }>([
-      "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
-    ]);
-    this.emit("progress", { projectId, stage: purpose, threadId });
-    signal?.throwIfAborted();
-    const result = await agent.runTurn(threadId, prompt, { tokenLimit, ...(signal ? { signal } : {}) });
-    await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
-    return result;
+    const now = new Date().toISOString();
+    const taskId = `agent-${Date.now()}-${++this.uiTaskSeq}`;
+    const task: UiTaskRecord = { id: taskId, projectId, env: "", kind: ({ case_gen: "生成测试用例", api_script: "生成接口脚本", ui_contract: "整理 UI 执行计划", explore: "探索 UI 用例", triage: "分析失败原因", heal: "修正失败脚本", revise: "修正脚本", app_explore: "探索 App 用例", performance: "性能测试 Agent" } as Record<string, string>)[purpose] ?? `Agent：${purpose}`, caseIds: [], status: "running", stage: "准备 Agent 任务", startedAt: now, updatedAt: now, source: purpose === "performance" ? "performance" : "agent", canStop: false };
+    this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    const controller = new AbortController();
+    this.agentControllers.set(taskId, controller);
+    const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    task.canStop = true;
+    task.purpose = purpose;
+    task.env = metadata.env ?? ""; task.caseIds = metadata.caseIds ?? []; task.runId = metadata.runId;
+    const parent = signal && this.uiAbort?.controller.signal === signal ? this.taskRecords.find(t => t.id === this.uiAbort?.taskId) : undefined;
+    if (parent) { task.parentTaskId = parent.id; task.env = parent.env; task.caseIds = parent.caseIds; }
+    this.emit("progress", { projectId, env: "", stage: "agent-task", taskId, status: "running" });
+    try {
+      const agent = await this.deps.agent();
+      const threadId = await agent.startThread({
+        cwd: project.workspace_path,
+        approvalPolicy: "on-request",
+        sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
+        ...(purpose === "ui_contract" ? { config: uiContractThreadConfig() } : {}),
+      });
+      task.threadId = threadId;
+      const session = await this.deps.engine<{ id: string }>([
+        "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
+      ]);
+      this.emit("progress", { projectId, env: "", stage: purpose, taskId, threadId });
+      combinedSignal.throwIfAborted();
+      const result = await agent.runTurn(threadId, prompt, { tokenLimit, signal: combinedSignal });
+      task.tokens = result.tokens;
+      task.detail = result.message?.slice(0, 2000);
+      await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
+      this.emit("progress", { projectId, env: task.env, stage: "agent-task", taskId, status: combinedSignal.aborted ? "stopped" : result.status === "completed" ? "completed" : "failed", ...(result.status !== "completed" ? { error: result.status } : {}) });
+      combinedSignal.throwIfAborted();
+      return result;
+    } catch (error) {
+      this.emit("progress", { projectId, env: task.env, stage: "agent-task", taskId, status: combinedSignal.aborted ? "stopped" : "failed", error: String((error as Error)?.message ?? error).slice(0, 300) });
+      throw error;
+    } finally { this.agentControllers.delete(taskId); this.persistTasks(); }
   }
 }
 
 export class BudgetExceededError extends Error {}
 
-const ATTRIBUTION_TYPES = new Set(["product_bug", "script_error", "environment"]);
+const ATTRIBUTION_TYPES = new Set(["product_bug", "script_error", "environment", "data", "auth", "model"]);
 
 /** 从 agent 最终回复中取出 JSON 数组 */
 export function parseTriage(message: string): TriageItem[] {
@@ -1134,7 +1287,10 @@ export function parseTriage(message: string): TriageItem[] {
   const raw = fenced?.[1] ?? message.slice(message.indexOf("["), message.lastIndexOf("]") + 1);
   try {
     const items = JSON.parse(raw) as TriageItem[];
-    return Array.isArray(items) ? items.filter((i) => i && typeof i.case_id === "string") : [];
+    return Array.isArray(items) ? items.filter((i) => i && typeof i.case_id === "string" && i.case_id.trim()
+      && (ATTRIBUTION_TYPES.has(i.failure_type) || i.failure_type === "unknown")
+      && (i.reason === undefined || typeof i.reason === "string")
+      && (i.suggestion === undefined || typeof i.suggestion === "string")) : [];
   } catch {
     return [];
   }

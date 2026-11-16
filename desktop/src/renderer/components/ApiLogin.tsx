@@ -43,6 +43,7 @@ const DEFAULT_BODY = '{"username": "${username}", "password": "${password}"}';
  */
 export function ApiLoginCard({ project, env }: { project: Project; env: string }) {
   const [form] = Form.useForm<ApiLoginForm>();
+  const protocol = Form.useWatch("protocol", form);
   const { busy, run } = useAction();
   const roles = useLoad(() => api().listRoles(project.id), [project.id]);
   useProjectChanged(project.id, () => { void roles.reload(); });
@@ -75,7 +76,7 @@ export function ApiLoginCard({ project, env }: { project: Project; env: string }
     }
     await api().setEnvironment(owner, env, next);
     await reload();
-  }, v.path?.trim() ? (ownerName ? `已保存到大项目「${ownerName}」` : "接口登录已保存") : "已清除接口登录");
+  }, ownerName ? `登录与加密配置已保存到大项目「${ownerName}」` : "登录与加密配置已保存");
 
   return (
     <Card size="small" title={`接口登录（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`}
@@ -86,7 +87,7 @@ export function ApiLoginCard({ project, env }: { project: Project; env: string }
         </Form.Item>
         <Form.Item name="protocol" label="接口传输协议"><Select options={[{ value: "none", label: "普通 JSON" }, { value: "ruoyi", label: "RuoYi · AES-256-ECB + RSA" }]} /></Form.Item>
         <Form.Item name="public_key_file" label="请求加密公钥文件" extra="填写引擎所在机器的 PEM 文件绝对路径"><Input placeholder="/path/to/request-public.pem" /></Form.Item>
-        <Form.Item name="private_key_file" label="响应解密私钥文件" extra="密钥不写入用例；服务端响应带 encrypt-key 时自动解密"><Input placeholder="/path/to/response-private.pem" /></Form.Item>
+        <Form.Item name="private_key_file" label="响应解密私钥文件" rules={protocol === "ruoyi" ? [{ required: true, whitespace: true, message: "RuoYi 响应解密需要客户端私钥 PEM 文件路径" }] : []} extra="对应前端 VITE_APP_RSA_PRIVATE_KEY；网页登录 token 无法替代私钥。服务端响应带 encrypt-key 时自动解密，密钥不写入用例。"><Input placeholder="/path/to/response-private.pem" /></Form.Item>
         <Form.Item name="common_headers" label="公共请求头（JSON）" rules={[jsonObjectRule]} extra='例如 {"clientid":"你的客户端 ID"}，应用于登录及业务接口'><Input.TextArea rows={2} /></Form.Item>
         <Button type="link" onClick={() => form.setFieldsValue({ protocol: "ruoyi", method: "POST", path: "/auth/login", encrypt: true, token_path: "data.access_token", body: JSON.stringify({ username: "${username}", password: "${password}", clientId: "请填写客户端 ID", grantType: "password", tenantId: "000000" }) })}>填入 RuoYi 登录模板</Button>
         <Row gutter={8}>

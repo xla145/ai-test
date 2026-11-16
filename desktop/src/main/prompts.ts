@@ -35,7 +35,7 @@ export function triagePrompt(projectId: string, runId: string, failures: Failure
   return [
     `任务：对项目 ${projectId} 的执行 ${runId} 中的失败用例做归因，按 .agents/skills/failure-triage.md 判断。`,
     "可用 case-store.list_cases 查看用例定义。产品缺陷不要修改脚本；脚本或用例错误给出修改建议，不要直接改。",
-    "最后输出一个 JSON 数组：[{\"case_id\": \"...\", \"failure_type\": \"product_bug|script_error|environment\", \"reason\": \"...\", \"suggestion\": \"...\"}]",
+    "最后输出一个 JSON 数组：[{\"case_id\": \"...\", \"failure_type\": \"product_bug|script_error|environment|data|auth|model|unknown\", \"reason\": \"...\", \"suggestion\": \"...\"}]。证据不足时必须使用 unknown，不要强行归因。",
     "",
     body,
   ].join("\n");
@@ -75,20 +75,23 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
     `   已配置的角色：${roles.length ? roles.join("、") : "（无）"}。角色必须精确匹配；缺少用例要求的角色就报告阻塞，不按名称相近替代；不需要登录的页面不用建角色会话。`,
     "   登录前置条件检查失败时立即停止，提示当前用例不能执行、请先完成登录，不自动尝试账号密码，不调用 Midscene、保存脚本或试跑。匿名用例和测试登录操作本身不设置 require_login。",
     "   new_role_context 返回 loggedIn=false 且带 hint 时，说明登录未配置：立即停止，结论中写明 hint，不要在代码库或文件里查找账号。",
-    "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始）。每个预期或前置条件都必须先调用 browser.assertion_coverage，传入它覆盖的原文序号（expected / preconditions 从 1 开始），紧接着调用 expect_visible、expect_text、expect_value、expect_number、expect_observed、expect_no_text 或 visual_check；没有对应断言时不要声明覆盖。埋点用 start_capture + expect_request。一次断言只声明它实际证明的序号，不要把同一映射留到后续步骤。前置条件是硬门禁：任一原子检查不满足、无法验证或证据不足，立即停止并报告阻塞，不进入正式 case_step，不继续补充探索，不保存脚本，不用相近数据替代。database 检查没有可用连接时只能报告无法验证，不能改用 UI 结果冒充数据库证据。",
+    "3. 每开始一个用例步骤先调用 browser.case_step（index 从 1 开始）。每个预期或前置条件都必须先调用 browser.assertion_coverage，传入它覆盖的原文序号（expected / preconditions 从 1 开始），紧接着调用 expect_visible、expect_text、expect_value、expect_number、expect_observed、expect_no_text 或 visual_check；没有对应断言时不要声明覆盖。埋点用 start_capture + expect_request。一次断言只声明它实际证明的序号，不要把同一映射留到后续步骤。前置条件是硬门禁：任一原子检查不满足、无法验证或证据不足，立即停止并报告阻塞，不进入正式 case_step，不继续补充探索，不保存脚本，不用相近数据替代。检查方法以当前可用能力和原文要求为准：配置字段可用能直接证明同一事实的 UI/API/数据库证据；原文明确要求数据库或后台行为时不能用界面展示替代。没有等价验证能力才报告无法验证，不因计划建议 database 而机械要求配置数据库。",
     contract
       ? "   用例已完成转换，按 index/actions/expected 执行。targetHint 是待页面确认的业务定位描述：先观察页面，再解析实际控件、区域和唯一性，生成 target 或使用快照 ref。这属于定位，不是重新转换用例；不要因未提前提供页面标题、DOM 控件类型或抽屉结构而停止。无法确定业务对象或页面确实不匹配时停止并报告。"
       : "   执行前检查每个步骤是否能触发对应预期。按页面、区域、业务对象、控件、单个动作、输入/目标状态、结果证据整理；步骤与预期错位或运行时结果缺少触发和观察方式时停止，列出待澄清项，不自行重排或减少覆盖。下拉选择拆成打开下拉框、选择关联选项两次操作；开关使用 check 设置明确状态。",
     "   按条件解析业务对象：在任何修改操作前，用页面证据核对全部条件和候选范围；无法核实条件时停止。唯一匹配时记录实际稳定标识并限定后续定位；多个匹配时仅当原用例明确允许任选，才在允许范围内选定一个并固定标识，否则列出候选的非敏感标识并报告待澄清。无匹配时报告数据阻塞，不创建或替换未声明的数据。不得把当前页唯一当作整个候选范围唯一，不用第一行、行号或全局同名按钮替代身份。后续操作、断言和生成的脚本始终绑定选定对象；回放时对象缺失或不唯一应失败，不能重新任选。",
-    "   少走往返：navigate / click / select / press 的返回值已带操作后的页面快照，不要每次操作后再调 snapshot；连续按键用 press 一次传数组；互不依赖的断言在同一轮里一起发出。",
+    "   少走往返：navigate / click / select / press 的返回值已带紧凑的操作后快照；普通控件优先使用其中信息，不要每次操作后再调完整 snapshot。只有需要查找未出现在紧凑快照中的元素时才调用 snapshot；连续按键用 press 一次传数组。assertion_coverage 与其下一条断言必须串行调用，不能并行覆盖映射。",
+    "   截图主要用于证据留档；不要为了确认普通控件调用 screenshot 后再读取整张图片，只有视觉类预期或 DOM 无法判断时才读取截图。",
+    "   数据可变性：仅用例明确指定的输入和预期允许固定。不得把探索时看到的总条数、页数、其它记录名称、当前账号名称或默认选中值固化为额外通过条件。搜索正确应验证结果满足关键词规则，不等于固定只返回一条；多个对象应验证数量范围，不指定偶然看到的第二个对象；分页按运行时总数、页容量和边界验证，不固定第2页就是末页。跨步骤一致性用 read_value + expect_observed(name) 读取独立来源，不将现场观察值写死。缺少规则断言能力时报告未验证，不用固定快照断言冒充。",
     locateStrategy === "midscene-first"
       ? "   定位策略：优先 Midscene。需要定位新的操作目标时先调用 browser.ai_locate，描述目标及所在区域，再用返回的 ref 调用 click / type / press 等可录制操作；已有定位结果可复用。不要先尝试 DOM 定位。视觉工具未提供或定位失败时才回退 snapshot / browser.find_text。"
       : "   定位策略：优先 DOM。可交互元素用快照里的 ref；表格单元格、状态徽标、统计文字等非交互文字用 browser.find_text 取 ref。snapshot 与 find_text 都找不到时再用 browser.ai_locate。",
     "   断言落在显示结果的那个元素上：某行的状态、数量文字用 find_text 取该单元格（按 context 挑对的行）再 expect_text，不要对整个列表区断言「包含」；不要对按某段文字找到的元素再断言包含同一段文字（等于断言可见），同一断言不要重复做。",
     "   ai_locate（若提供）返回可录制的 ref；目标上有文字时传 text 让它校验结果；text 只填目标自身文字或 placeholder，不填旁边参照物文字；输入框传 intent=fill，开关传 intent=check，点击传 intent=click；报「视觉定位不准」时按提示改用 find_text，不要换说法反复重试；不要用 ai_act。",
     '   ai_locate 优先传 target，例如 {"page":"模型管理","scope":[{"kind":"region","name":"平台模型"},{"kind":"row","name":"模型记录","key":"实际模型编号"}],"control":"button","text":"编辑"}。按当前页面实际名称填写，不照抄示例数据。scope 从外到内，支持 region/dialog/row/form_item/listbox；关联标签放 label，placeholder 单列。工具会编译描述并校验范围与身份；不要在范围校验失败后删除 target 改成全局定位来绕过检查。',
-    "   expect_value 必须绑定 snapshot 中 role 为 textbox/combobox 的原控件 ref，不能用 find_text 返回的文字节点或预期值寻找另一元素；目标变化后重新限定同一业务对象。下拉框必须使用页面实际的 label/name/placeholder，不能把业务概念改写成未在页面出现的标签；预期值只用于比较，不要作为 ai_locate 的 text。多处同名控件须带区域和表单项。",
+    "   expect_value 必须绑定 snapshot 中 role 为 textbox/combobox 的原控件 ref，不能用 find_text 返回的文字节点，不能先按预期值寻找另一元素；目标变化后重新限定同一业务对象。下拉框必须使用页面实际的 label/name/placeholder，不能把业务概念改写成未在页面出现的标签；预期值只用于比较，不要作为 ai_locate 的 text。多处同名控件须带区域和表单项。",
     '   expect_observed 的 name 是 read_value 保存的来源变量名，不是断言标题。常量比较只传 expected（例如 {ref:"结果字段",expected:false,source:"checked"}）；跨页面比较只传 name。两者互斥；不要先读取待验证字段再与其自身比较。',
+    '   对已加载列表使用 expect_collection：先定位稳定的整个结果容器，selector 指向实际 DOM 中每条记录要检查的字段；contains/equals 检查每条结果，min_count/max_count 检查原文要求的数量范围。不要填写探索时偶然看到的条数，不要只定位匹配关键词的行来排除错误结果；默认非空。该工具只证明当前加载的集合，分页/虚拟列表未加载记录不能据此声称全量通过。',
     '   预期覆盖示例：先 assertion_coverage({expected:[2]})，再录制能证明预期 2 的断言。case_step 不能代替 assertion_coverage。若预期包含后台行为、路由或请求效果，仅状态文字变化不能证明这些要求，缺少证据就报告未验证，不把可见状态断言映射为全部通过。',
     "   入口或指定数据缺失时只做一次有依据的补充检查，仍缺失则停止并报告阻塞，不遍历系统管理菜单、不替换测试数据或削弱断言。同一目标同类操作失败后只允许一次不同方法的恢复，仍失败就停止该步骤。",
     "   页面显示系统接口502异常、服务不可用或回到登录页时，先报告环境或会话阻塞，不重复定位缺失控件。",
@@ -140,7 +143,7 @@ export function healPrompt(projectId: string, env: string, runId: string, failur
     `先 browser.open_project（project_id=${projectId}, env=${env}）在内嵌浏览器里复现到失败步骤。`,
     "页面改版（script_error）：用 report.propose_script_fix 提交完整的新脚本，只改失败相关的行，等待用户审核 diff。",
     "产品缺陷（product_bug）不修改脚本；环境问题（environment）说明原因。",
-    "最后输出一个 JSON 数组：[{\"case_id\": \"...\", \"failure_type\": \"product_bug|script_error|environment\", \"reason\": \"...\", \"suggestion\": \"...\"}]",
+    "最后输出一个 JSON 数组：[{\"case_id\": \"...\", \"failure_type\": \"product_bug|script_error|environment|data|auth|model|unknown\", \"reason\": \"...\", \"suggestion\": \"...\"}]。证据不足时必须使用 unknown，不要强行归因。",
     "",
     body,
   ].join("\n");
@@ -160,6 +163,6 @@ export function uiContractPrompt(brief: ExploreCaseBrief, roles: string[], selec
     "对象条件与对象标识分阶段处理：原文给出可在页面核对的筛选条件时，用 targetHint 原样保留条件，并在动作说明中要求先观察候选、确认身份再操作；不能仅因缺少名称或 ID、尚不知道匹配数量而标记 needs_clarification。不要虚构标识或将条件改成任意对象。原文指定对象时保留该限制；原文明确允许任选时保留该选择范围；未声明任选时不推定允许任选。实际无匹配或多匹配的处理留到探索阶段。",
     "原始预期明确允许 A 或 B 时保留这个验收规则，不强迫用户事先选一种 UI 实现。计划可 observe 当前状态，按实际状态验证对应分支，最终仍覆盖原始预期，不强点禁用按钮。",
     "导航菜单、创建表单及其内部控件可用原文中的名称和相对关系描述，不要求虚构业务 key。",
-    "角色精确匹配配置。匿名使用 default；不明确是否需要登录时待澄清。前置条件在执行阶段仍须核对，不在转换阶段假设成立。",
+    "角色精确匹配配置。匿名使用 default；不明确是否需要登录时待澄清。前置条件在执行阶段仍须核对，不在转换阶段假设成立。不得补充原文未指定的固定总数、页数、记录名称或账号名称；保留范围、集合匹配、前后比较等原始规则语义。",
   ].join("\n");
 }

@@ -152,6 +152,7 @@ export function ScriptSteps({ caseSteps, expected, preconditions = [], detail, s
                   {!own.length && <Typography.Text type="warning">{section.field === "caseStep" ? "没有对应脚本动作" : "没有能证明此项的关联断言"}</Typography.Text>}
                   {own.map(st => <div key={st.id}>
                     <StepRow step={st} state={states[st.id]} multiRole={multiRole} showMapping={false} />
+                    {st.action === "expectObserved" && <Typography.Text type="secondary">不等于验证正确或执行通过</Typography.Text>}
                     {st.action === "visualCheck" && <Typography.Text type="secondary">截图需人工复核</Typography.Text>}
                   </div>)}
                 </div>

@@ -51,6 +51,8 @@ export interface ThreadStartParams {
   approvalPolicy?: "untrusted" | "on-request" | "never";
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   baseInstructions?: string;
+  /** thread/start 的线程级配置覆盖，不影响其它任务。 */
+  config?: Record<string, unknown>;
 }
 
 export interface CommandApprovalParams {

@@ -1,9 +1,10 @@
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Form, Input, Modal, Space } from "antd";
+import { Alert, App, Button, Form, Input, Modal, Space, Timeline, Typography } from "antd";
 import { useRef, useState } from "react";
 import { api, type TestCase } from "../api";
+import { useLoad } from "../hooks";
 
-type CaseContent = Pick<TestCase, "title" | "preconditions" | "steps" | "expected" | "data_refs">;
+type CaseContent = Pick<TestCase, "title" | "owner" | "preconditions" | "steps" | "expected" | "data_refs">;
 
 /** Each textarea is one original item; embedded newlines do not change its identity. */
 export function CaseEditor({ value, onClose, onSaved }: {
@@ -14,6 +15,7 @@ export function CaseEditor({ value, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const pending = useRef(false);
+  const history = useLoad(() => api().caseHistory(value.id), [value.id]);
   const close = () => {
     if (pending.current) return;
     if (!form.isFieldsTouched()) { onClose(); return; }
@@ -34,9 +36,11 @@ export function CaseEditor({ value, onClose, onSaved }: {
   return <Modal open title="编辑测试用例" width={720} onCancel={close} onOk={save} okText="保存用例" cancelText="取消"
     confirmLoading={saving} cancelButtonProps={{ disabled: saving }} closable={!saving} maskClosable={false}>
     <Alert type="info" showIcon message="修改原始用例，不调用 AI。保存后重新检查规范；执行内容变化后，原脚本需重新校验。" style={{ marginBottom: 16 }} />
+    {history.data?.length ? <details style={{ marginBottom: 16 }}><summary>变更审计（最近 {history.data.length} 条）</summary><Timeline items={history.data.slice(0, 10).map((event: any, i: number) => ({ key: i, children: <Typography.Text type="secondary">{event.ts} · {event.actor} · {event.data?.comment || event.kind} · {(event.data?.fields || []).join("、")}</Typography.Text> }))} /></details> : null}
     {error && <Alert type="error" showIcon message="保存失败，修改内容已保留" description={error} style={{ marginBottom: 16 }} />}
-    <Form form={form} layout="vertical" disabled={saving} initialValues={{ title: value.title, preconditions: value.preconditions, steps: value.steps, expected: value.expected, data_refs: value.data_refs ?? [] }}>
+    <Form form={form} layout="vertical" disabled={saving} initialValues={{ title: value.title, owner: value.owner ?? "", preconditions: value.preconditions, steps: value.steps, expected: value.expected, data_refs: value.data_refs ?? [] }}>
       <Form.Item name="title" label="用例标题" rules={[{ required: true, whitespace: true, message: "请输入用例标题" }]}><Input /></Form.Item>
+      <Form.Item name="owner" label="责任人"><Input placeholder="填写责任人或团队" /></Form.Item>
       {([
         ["preconditions", "前置条件", false], ["steps", "操作步骤", true], ["expected", "预期结果", true], ["data_refs", "数据引用", false],
       ] as const).map(([name, label, required]) => <Form.List key={name} name={name} rules={required ? [{ validator: async (_, items) => { if (!items?.length) throw new Error(`请至少填写一条${label}`); } }] : []}>

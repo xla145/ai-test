@@ -104,11 +104,12 @@ describe("UI workbench orchestration", () => {
     const orch = new Orchestrator({ engine, ui: ui as any, agent, secretEnv: () => ({}) });
     return { orch, ui, agent, workflow, path, dir, rows };
   }
-  it("validates one selected script in the embedded browser then runs only its confirmed version without the model", async () => {
+  it("validates one selected script in a fresh context then runs only its confirmed version without the model", async () => {
     const { orch, ui, agent, workflow, path } = orchestration();
     await expect(orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" })).rejects.toThrow("尚未确认");
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true });
-    expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ caseIds: ["tc_a"], cdpEndpoint: "http://127.0.0.1:9333" });
+    expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ caseIds: ["tc_a"] });
+    expect(ui.runUiSuite.mock.calls[0][0].cdpEndpoint).toBeUndefined();
     await orch.confirmUiScript("p", "test", "tc_a", workflow.hash(path));
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" });
     expect(ui.runUiSuite.mock.calls[1][0]).toMatchObject({ caseIds: ["tc_a"] });

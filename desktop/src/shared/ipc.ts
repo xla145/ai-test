@@ -1,8 +1,18 @@
+import type { PerformanceOptions, PerformanceResult } from "./performance.js";
 export interface UiTaskRecord {
   id: string; projectId: string; env: string; kind: string; caseIds: string[];
   status: "running" | "stopping" | "completed" | "failed" | "stopped";
   startedAt: string; updatedAt: string; finishedAt?: string;
   stage: string; detail?: string; runId?: string;
+  /** UI、Agent 或未来的性能任务；保留 UiTaskRecord 名称以兼容现有 IPC。 */
+  source?: "ui" | "agent" | "performance";
+  canStop?: boolean;
+  parentTaskId?: string;
+  purpose?: string;
+  threadId?: string;
+  tokens?: number;
+  persistenceError?: string;
+  events?: { time: string; detail: string }[];
 }
 
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "./apiWorkspace.js";
@@ -178,7 +188,11 @@ export interface ApiTestSet {
 }
 
 export interface ApiRunOptions {
+  /** 本次未指定角色的请求使用此身份；不修改用例与脚本。 */
+  selectedRole?: string;
   confirmProduction?: boolean;
+  /** 默认启用；关闭后仅执行确定性脚本与规则分类，不调用模型。 */
+  autoTriage?: boolean;
   /** 省略时兼容全量脚本执行；显式空数组会拒绝执行。 */
   caseIds?: string[];
 }
@@ -359,6 +373,7 @@ export interface AitestApi {
   /** 当前调试会话（没有则为 null），页面重新进入时恢复 */
   uiDebugState(): Promise<UiDebugState | null>;
   uiTasks(): Promise<UiTaskRecord[]>;
+  stopExecutionTask(taskId: string): Promise<void>;
   stopUiTask(projectId: string, env: string): Promise<void>;
   reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */
@@ -378,6 +393,10 @@ export interface AitestApi {
   getSettings(projectId: string): Promise<Record<string, unknown>>;
   setSettings(projectId: string, settings: Record<string, string | number | null>): Promise<Record<string, unknown>>;
   metrics(projectId: string): Promise<any>;
+  runPerformance(projectId: string, env: string, options: PerformanceOptions): Promise<PerformanceResult>;
+  performanceHistory(projectId: string): Promise<PerformanceResult[]>;
+  caseHistory(caseId: string): Promise<any[]>;
+  coverage(projectId: string, env?: string): Promise<any>;
   stability(projectId: string): Promise<any>;
   listAttributions(projectId: string, pendingOnly?: boolean): Promise<any[]>;
   pageAttributions(projectId: string, q: PageQuery & { pending?: boolean }): Promise<Page<any>>;
@@ -404,7 +423,7 @@ export interface AitestApi {
   listRuns(projectId: string, framework?: "pytest" | "playwright"): Promise<any[]>;
   runDetail(runId: string): Promise<any>;
   /** 弹出保存对话框；用户取消返回 null */
-  exportReport(runIds: string[], format: "html" | "xlsx"): Promise<{ path: string } | null>;
+  exportReport(runIds: string[], format: "html" | "xlsx" | "json"): Promise<{ path: string } | null>;
   exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
   readEvidenceImage(projectId: string, path: string): Promise<string>;
   openPath(path: string): Promise<void>;

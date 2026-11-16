@@ -77,7 +77,7 @@ export class UiWorkflow {
       const v = entry?.validation;
       let reason: string | undefined;
       if (v) {
-        if (v.policy !== 2) reason = "历史校验未包含完整性检查，请重新试跑";
+        if (v.policy !== 3) reason = "历史校验未包含完整性检查，请重新试跑";
         else if (v.hash !== hash || v.context !== context.fingerprints?.[id]) reason = "脚本、用例或环境配置已变化，请重新试跑";
         else if (!v.passed) reason = v.reason || "最近一次试跑未通过，请修正后重新试跑";
         else if (v.reviews) {
@@ -99,7 +99,7 @@ export class UiWorkflow {
     const state = this.read();
     for (const [id, hash] of Object.entries(versions)) {
       const previous = state[this.key(env, id)];
-      state[this.key(env, id)] = { history: [...(previous?.history ?? []), ...(previous?.validation?.runId ? [previous.validation] : [])].slice(-20), validation: { hash, runId, passed: passed.includes(id), policy: 2,
+      state[this.key(env, id)] = { history: [...(previous?.history ?? []), ...(previous?.validation?.runId ? [previous.validation] : [])].slice(-20), validation: { hash, runId, passed: passed.includes(id), policy: 3,
         context: context.fingerprints?.[id], role: context.roles?.[id], reason: reasons[id], reviews: reviews[id] } };
     }
     this.save(state);

@@ -9,6 +9,7 @@ import { useAction } from "../hooks";
 const Context = createContext<UiTaskRecord[]>([]);
 export const useUiTasks = () => useContext(Context);
 export const isUiTaskActive = (task: UiTaskRecord) => task.status === "running" || task.status === "stopping";
+export const isUiExecutionTask = (task: UiTaskRecord) => (task.source ?? "ui") === "ui";
 
 /** 主进程快照是事实来源，页面挂载和事件丢失不会影响任务恢复。 */
 export function UiTasksProvider({ children }: { children: ReactNode }) {
@@ -34,7 +35,7 @@ const labels = { running: "执行中", stopping: "正在停止", completed: "已
 const colors = { running: "processing", stopping: "warning", completed: "success", failed: "error", stopped: "default" };
 
 export function UiTaskList({ projectId }: { projectId?: string }) {
-  const tasks = useUiTasks().filter(t => !projectId || t.projectId === projectId);
+  const tasks = useUiTasks().filter(t => isUiExecutionTask(t) && (!projectId || t.projectId === projectId));
   const { projects } = useProjects();
   const { run, busy } = useAction();
   return <List dataSource={tasks} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 UI 任务" /> }}
@@ -54,11 +55,13 @@ export function UiTaskList({ projectId }: { projectId?: string }) {
 }
 
 export function UiTasksButton() {
-  const tasks = useUiTasks();
+  const tasks = useUiTasks().filter(isUiExecutionTask);
   const [open, setOpen] = useState(false);
   return <>
-    <Button type="text" aria-label="UI 任务列表" title="UI 任务列表" onClick={() => setOpen(true)}
-      icon={<Badge count={tasks.filter(isUiTaskActive).length} size="small"><UnorderedListOutlined /></Badge>} />
+    <Button type="text" className="header-ui-tasks" aria-label="UI 任务列表" title="UI 任务列表" onClick={() => setOpen(true)}
+      icon={<Badge count={tasks.filter(isUiTaskActive).length} size="small"><UnorderedListOutlined /></Badge>}>
+      <span className="header-ui-tasks-label">任务</span>
+    </Button>
     <Drawer title="UI 任务" open={open} onClose={() => setOpen(false)} width={560}>
       <Typography.Paragraph type="secondary">切换页面不会中断后台任务。保留本次启动期间最近 100 条任务。</Typography.Paragraph>
       <UiTaskList />
@@ -67,7 +70,7 @@ export function UiTasksButton() {
 }
 
 export function UiTaskBanner({ projectId, env }: { projectId: string; env: string }) {
-  const task = useUiTasks().find(isUiTaskActive);
+  const task = useUiTasks().filter(isUiExecutionTask).find(isUiTaskActive);
   if (!task) return null;
   return <Alert style={{ marginBottom: 12 }} type="info" showIcon message={`${task.kind} · ${labels[task.status]}`}
     description={task.projectId === projectId && task.env === env ? task.detail || task.stage : `其他项目或环境正在执行 UI 任务（${task.env}），请在任务列表中查看。`} />;
