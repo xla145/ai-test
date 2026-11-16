@@ -122,6 +122,18 @@ describe("persisted UI conversion and script reuse", () => {
     expect(out.message).toContain("转换期间");
     expect(f.runTurn).toHaveBeenCalledTimes(1);
   });
+  it("invalidates version-1 clarification caches so old UI-detail blockers cannot persist", async () => {
+    const f = setup({ blocked: true });
+    await f.make().exploreUiCase("p", "test", "tc_a");
+    const folder = join(f.workspace, ".aitest/ui-contracts");
+    const path = join(folder, readdirSync(folder)[0]);
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+    entry.revision = 1;
+    writeFileSync(path, JSON.stringify(entry));
+    await f.make().exploreUiCase("p", "test", "tc_a");
+    expect(f.runTurn).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(readFileSync(path, "utf8")).revision).toBe(2);
+  });
   it("refuses coverage loss and shares no cache across project or environment", () => {
     const f = setup();
     const store = new UiExecutionContracts(f.workspace, "p", "test", "tc_a", f.source, ["admin"], f.project.environments.test);

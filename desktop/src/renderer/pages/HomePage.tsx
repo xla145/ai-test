@@ -221,7 +221,7 @@ function FlowStep({ index, title, value, hint, actions, done, loading }: {
       {loading ? <Skeleton active paragraph={{ rows: 1 }} title={false} /> : (
         <>
           <div className="flow-value">{value}</div>
-          <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: hint }} style={{ fontSize: 12, minHeight: 38, marginBottom: 10 }}>
+          <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: hint }} className="flow-hint" style={{ fontSize: 12, marginBottom: 10 }}>
             {hint}
           </Typography.Paragraph>
         </>

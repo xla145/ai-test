@@ -11,6 +11,7 @@ import { runUiSuite } from "../src/ui/runner.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createServer as createMcpServer } from "../src/server.js";
+import { listenLocal } from "./fixtures/listen.js";
 
 let session: BrowserSession;
 beforeEach(() => { session = new BrowserSession({ headless: true }); });
@@ -119,6 +120,17 @@ it("does not silently resolve a stale ref to another unique matching element", a
 const selectRegion = (name: string, value: string) => `<section role="region" aria-label="${name}"><h2>${name}</h2><div class="el-form-item"><label class="el-form-item__label">备用渠道</label><div class="el-select"><div class="el-select__wrapper"><div class="el-select__selection"><input readonly role="combobox" aria-label="备用渠道"><span class="el-select__selected-item">${value}</span></div></div></div></div></section>`;
 const selects = (wrong = false) => selectRegion("普通路由配置", wrong ? "阿里云源" : "不设置") + selectRegion("故障切换配置", wrong ? "错误渠道" : "阿里云源");
 
+it("negative text replay rejects missing and ambiguous targets while accepting a real empty field", async () => {
+  const page = await session.page();
+  const step = { action: "expectNoText" as const, target: { kind: "testid" as const, value: "status" }, text: "错误" };
+  await page.setContent('<div data-testid="status"></div>');
+  await session.runStep(step, { timeoutMs: 200 });
+  await page.getByTestId("status").evaluate(el => el.remove());
+  await expect(session.runStep(step, { timeoutMs: 200 })).rejects.toThrow("Timeout");
+  await page.setContent('<div data-testid="status"></div><div data-testid="status"></div>');
+  await expect(session.runStep(step, { timeoutMs: 200 })).rejects.toThrow("strict mode violation");
+});
+
 it("keeps selected-value assertions on their original field when expected text moves elsewhere", async () => {
   const page = await session.page();
   await page.setContent(selects());
@@ -135,7 +147,7 @@ it("keeps selected-value assertions on their original field when expected text m
 it("replays the generated spec in a fresh browser and fails when only another field has the expected value", async () => {
   let wrong = false;
   const server = createServer((_req, res) => { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(selects(wrong)); });
-  await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
+  await listenLocal(server);
   const url = `http://127.0.0.1:${(server.address() as any).port}`;
   const workspace = mkdtempSync(join(tmpdir(), "aitest-scope-"));
   try {

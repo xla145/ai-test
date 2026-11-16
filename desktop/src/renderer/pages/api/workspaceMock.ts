@@ -51,8 +51,8 @@ export function workspaceMock(cases: any[]): Pick<AitestApi, Methods> {
       return { generated, skipped };
     },
     listApiDefinitions:  async (p) => copy(defs(p)),
-    previewApiImport: async (_p, source): Promise<ApiImportPreview> => ({ source, title: "订单服务", version: "1.2.0", document: {}, changes: sample.map((d) => ({ method: d.method, path: d.path, summary: d.summary, change: "added" })) }),
-    importApiDefinitions: async (p, preview) => { definitions[p] = copy(sample).map((d) => ({ ...d, source: preview.source })); return { definitions: definitions[p] }; },
+    previewApiImport: async (_p, source): Promise<ApiImportPreview> => ({ source, title: "订单服务", version: "1.2.0", document: {}, changes: sample.map((d) => ({ method: d.method, path: d.path, summary: d.summary, module: d.module, change: "added" })) }),
+    importApiDefinitions: async (p, preview) => { const incoming = copy(sample).filter((d) => !preview.selected_keys || preview.selected_keys.includes(`${d.method}:${d.path}`)).map((d) => ({ ...d, source: preview.source })); definitions[p] = [...(definitions[p] ?? []).filter((d) => !incoming.some((n) => n.method === d.method && n.path === d.path)), ...incoming]; return { definitions: definitions[p] }; },
     saveApiCase: async (p, draft) => {
       const id = draft.id ?? `tc_${Date.now().toString(16)}`;
       const row = { id, project_id: p, title: draft.title, type: "api", execution_mode: "api", category: "功能测试", priority: "P1", module_path: draft.module_path ?? ["订单"], status: "draft", lint_status: "passed", preconditions: ["测试环境可用"], steps: draft.steps.map((s) => s.name || s.path), expected: draft.steps.map(() => "符合预期"),

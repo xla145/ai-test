@@ -11,6 +11,9 @@ const OVERLAYS = [
   ".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)", ".ant-popover:not(.ant-popover-hidden)",
 ].join(",");
 
+// 同时挂载多个工作台时，只有当前持有停靠区的组件可以释放它。
+let dockOwner: HTMLElement | null = null;
+
 const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
 function covered(rect: DOMRect): boolean {
@@ -44,7 +47,12 @@ export function BrowserDock({ url, title = "内嵌浏览器", session, suspended
   const [shown, setShown] = useState(false);
 
   useEffect(() => api().onViewChange?.((v) => { setVisible(v.visible); setShown(v.shown ?? v.visible); }), []);
-  useEffect(() => () => { void api().dockTestView?.(null); }, []);
+  useEffect(() => {
+    const el = box.current;
+    return () => {
+      if (el && dockOwner === el) { dockOwner = null; void api().dockTestView?.(null); }
+    };
+  }, []);
 
   useEffect(() => {
     const el = box.current;
@@ -56,13 +64,15 @@ export function BrowserDock({ url, title = "内嵌浏览器", session, suspended
       frame = requestAnimationFrame(() => {
         // 所在页签被切走（display:none）时不占用视图，交回右半屏显示，否则视图会被压成 0 尺寸
         if (!el.getClientRects().length) {
-          if (last !== "null") { last = "null"; void api().dockTestView!(null); }
+          last = "";
+          if (dockOwner === el) { dockOwner = null; void api().dockTestView!(null); }
           return;
         }
         const r = visibleRect(el);
         const dock: ViewDock = { x: r.left, y: r.top, width: r.width, height: r.height, suspended: suspended || covered(r) };
         const key = JSON.stringify(dock);
-        if (key === last) return;
+        if (key === last && dockOwner === el) return;
+        dockOwner = el;
         last = key;
         void api().dockTestView!(dock);
       });

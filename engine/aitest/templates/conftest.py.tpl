@@ -45,6 +45,7 @@ def aitest_env():
         "base_url": base_url.rstrip("/"),
         "auth_header": os.environ.get("AITEST_AUTH_HEADER", "Authorization"),
         "auth_token": os.environ.get("AITEST_AUTH_TOKEN", ""),
+        "default_login_role": json.loads(os.environ.get("AITEST_API_LOGIN") or "{}").get("default_role"),
         "timeout": float(os.environ.get("AITEST_TIMEOUT", "30")),
         "api_crypto": json.loads(os.environ.get("AITEST_API_CRYPTO") or "{}"),
     }

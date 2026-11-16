@@ -1,10 +1,11 @@
 import { Button, Card, Checkbox, Col, Form, Input, Row, Select, Typography } from "antd";
 import { useEffect } from "react";
 import { api, envOwner, type Project } from "../api";
-import { useAction } from "../hooks";
+import { useAction, useLoad, useProjectChanged } from "../hooks";
 import { useProjects } from "./ProjectSettings";
 
 interface ApiLoginConfig {
+  default_role?: string;
   method?: string;
   path: string;
   body?: Record<string, unknown>;
@@ -15,6 +16,7 @@ interface ApiLoginConfig {
 }
 
 interface ApiLoginForm {
+  default_role?: string;
   method: string;
   path?: string;
   body: string;
@@ -42,6 +44,8 @@ const DEFAULT_BODY = '{"username": "${username}", "password": "${password}"}';
 export function ApiLoginCard({ project, env }: { project: Project; env: string }) {
   const [form] = Form.useForm<ApiLoginForm>();
   const { busy, run } = useAction();
+  const roles = useLoad(() => api().listRoles(project.id), [project.id]);
+  useProjectChanged(project.id, () => { void roles.reload(); });
   const { reload, projects } = useProjects();
   const cfg = project.environments[env] as (Project["environments"][string] & { api_login?: ApiLoginConfig; api_crypto?: { protocol?: string; public_key_file?: string; private_key_file?: string; headers?: Record<string, unknown> } }) | undefined;
   const owner = env ? envOwner(project, env) : project.id;
@@ -50,6 +54,7 @@ export function ApiLoginCard({ project, env }: { project: Project; env: string }
   useEffect(() => {
     const l = cfg?.api_login;
     form.setFieldsValue({
+      default_role: l?.default_role,
       encrypt: l?.encrypt ?? false, headers: JSON.stringify(l?.headers ?? {}),
       protocol: cfg?.api_crypto?.protocol ?? "none", public_key_file: cfg?.api_crypto?.public_key_file ?? "", private_key_file: cfg?.api_crypto?.private_key_file ?? "",
       common_headers: JSON.stringify(cfg?.api_crypto?.headers ?? {}),
@@ -62,7 +67,7 @@ export function ApiLoginCard({ project, env }: { project: Project; env: string }
     const next: Record<string, unknown> = { ...cfg, api_crypto: { protocol: v.protocol, public_key_file: v.public_key_file.trim(), private_key_file: v.private_key_file.trim(), headers: JSON.parse(v.common_headers) } };
     if (v.path?.trim()) {
       next.api_login = {
-        ...cfg?.api_login, method: v.method, path: v.path.trim(), body: JSON.parse(v.body), encrypt: v.encrypt, headers: JSON.parse(v.headers),
+        ...cfg?.api_login, default_role: v.default_role || undefined, method: v.method, path: v.path.trim(), body: JSON.parse(v.body), encrypt: v.encrypt, headers: JSON.parse(v.headers),
         token_path: v.token_path.trim() || "data.token", prefix: v.prefix,
       };
     } else {
@@ -76,6 +81,9 @@ export function ApiLoginCard({ project, env }: { project: Project; env: string }
     <Card size="small" title={`接口登录（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`}
       extra={<Typography.Text type="secondary">用角色账号密码换取 token</Typography.Text>}>
       <Form form={form} layout="vertical" onFinish={save}>
+        <Form.Item name="default_role" label="默认前置登录角色" extra="选择后，未指定角色的鉴权请求会先用该角色登录；留空则使用网页登录保存的环境 token。">
+          <Select allowClear placeholder="使用环境 token" options={(roles.data ?? []).map((r) => ({ value: r.role_name, label: r.role_name }))} />
+        </Form.Item>
         <Form.Item name="protocol" label="接口传输协议"><Select options={[{ value: "none", label: "普通 JSON" }, { value: "ruoyi", label: "RuoYi · AES-256-ECB + RSA" }]} /></Form.Item>
         <Form.Item name="public_key_file" label="请求加密公钥文件" extra="填写引擎所在机器的 PEM 文件绝对路径"><Input placeholder="/path/to/request-public.pem" /></Form.Item>
         <Form.Item name="private_key_file" label="响应解密私钥文件" extra="密钥不写入用例；服务端响应带 encrypt-key 时自动解密"><Input placeholder="/path/to/response-private.pem" /></Form.Item>

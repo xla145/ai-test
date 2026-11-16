@@ -102,6 +102,15 @@ export class SecretStore {
   }
 }
 
+/** Replace the active browser credential, including a stale child override. */
+export function saveBrowserEnvSecret(store: Pick<SecretStore, "set" | "get" | "delete">,
+  projectId: string, ownerId: string, env: string, secret: EnvSecret): void {
+  store.set(SecretStore.ref(ownerId, env), secret);
+  if (ownerId !== projectId && store.get(SecretStore.ref(projectId, env))) {
+    store.delete(SecretStore.ref(projectId, env));
+  }
+}
+
 export interface Broker {
   url: string;
   token: string;

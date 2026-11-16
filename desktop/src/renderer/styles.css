@@ -508,7 +508,6 @@ button.workflow-step:hover { color: var(--console-accent); }
   .workflow-guide { gap: 12px 20px; }
   .workflow-guide li { gap: 8px; }
   .workflow-arrow { display: none; }
-  .page-header-actions { flex-basis: 100%; }
 }
 @container (max-width: 600px) {
   .workflow-guide li, .workflow-guide li:last-child { flex: 0 1 auto; }
@@ -678,7 +677,39 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-import-summary { margin-bottom: 16px; }
 .api-import-summary h3 { margin-bottom: 8px; font-size: 20px; font-weight: 500; }
 .api-import-path { margin-left: 8px; font-size: 12px; overflow-wrap: anywhere; }
-.api-import-confirm { margin-top: 24px; }
+.api-import-drawer .ant-drawer-body { padding: 16px 24px; }
+.api-import-drawer .ant-drawer-footer { padding: 18px 28px; }
+.api-import-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.api-import-summary h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.api-import-drawer .api-import-summary { margin-bottom: 8px; }
+.api-import-summary > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+.api-import-summary > .anticon { font-size: 28px; color: var(--console-muted); }
+.api-import-eyebrow { font-size: 10px; letter-spacing: 1.2px; color: var(--console-secondary); }
+.api-import-stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.api-import-stat { display: inline-flex; align-items: center; gap: 12px; padding: 5px 10px; border-radius: 5px; background: var(--console-bg); color: var(--console-secondary); font-size: 12px; }
+.api-import-stat strong { font-weight: 600; font-variant-numeric: tabular-nums; }
+.api-import-stat-added { color: var(--console-success); }
+.api-import-stat-updated { color: var(--console-accent); }
+.api-import-stat-removed { color: var(--console-error); }
+.api-import-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--console-border); padding-top: 12px; margin-bottom: 12px; }
+.api-import-selection h4 { margin: 0; font-size: 14px; font-weight: 500; }
+.api-import-selection p { margin: 6px 0 0; font-size: 12px; color: var(--console-secondary); }
+.api-import-modules { background: transparent; border-radius: 8px; }
+.api-import-modules .ant-collapse-header { align-items: center !important; padding: 16px !important; }
+.api-import-modules .ant-collapse-content-box { padding: 0 12px 12px !important; }
+.api-import-module { display: flex; align-items: center; gap: 12px; }
+.api-import-module > .anticon { color: var(--console-secondary); }
+.api-import-module-count { margin-left: auto; font-size: 12px; color: var(--console-secondary); font-variant-numeric: tabular-nums; }
+.api-import-modules .ant-table { font-size: 12px; }
+.api-import-note { margin-top: 18px; font-size: 12px; line-height: 1.8; color: var(--console-secondary); }
+.api-import-note p { margin: 6px 0 0; }
+.api-import-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.api-import-footer > span { color: var(--console-secondary); font-size: 12px; }
+.api-import-footer strong { color: var(--console-text); font-weight: 600; }
+@media (max-width: 600px) {
+  .api-import-drawer .ant-drawer-body { padding: 20px 16px; }
+  .api-import-drawer .ant-drawer-footer { padding: 16px; }
+}
 .api-add-steps { margin-top: 16px; max-height: 480px; overflow: auto; }
 .api-add-steps button { width: 100%; display: flex; gap: 12px; align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--console-border); padding: 16px 8px; cursor: pointer; color: var(--console-text); text-align: left; font: inherit; font-size: 13px; }
 .api-add-steps button:hover { background: var(--console-bg); }
@@ -738,11 +769,12 @@ button.workflow-step:hover { color: var(--console-accent); }
 /* 接口目录：业务模块为树枝，方法与路径为叶子节点。 */
 .api-directory-tree .ant-tree { background: transparent; font-size: 13px; }
 .api-directory-tree .ant-tree-treenode { width: 100%; padding-bottom: 4px; align-items: flex-start; }
-.api-directory-tree .ant-tree-node-content-wrapper { min-width: 0; padding: 4px 6px; border-radius: 6px; }
+.api-directory-tree .ant-tree-node-content-wrapper { flex: 1; min-width: 0; padding: 4px 6px; border-radius: 6px; }
 .api-directory-tree .ant-tree-title { display: block; }
 .api-directory-tree .ant-tree-switcher { margin-top: 4px; }
 .api-tree-module { display: flex; align-items: center; gap: 8px; font-weight: 500; min-height: 28px; }
-.api-tree-module > span:nth-child(2) { flex: 1; overflow-wrap: anywhere; }
+.api-tree-module > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-tree-module > .anticon, .api-tree-count { flex-shrink: 0; }
 .api-tree-count { color: var(--console-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .api-tree-endpoint { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
 .api-tree-endpoint .api-directory-title { flex-wrap: wrap; gap: 4px 8px; line-height: 20px; }
@@ -801,3 +833,163 @@ button.workflow-step:hover { color: var(--console-accent); }
   .metric-strip > .ant-card:nth-child(3) { border-left: 0; }
   .metric-strip > .ant-card:nth-child(n+3) { border-top: 1px solid var(--console-border); }
 }
+
+/* 其余子页面：统一页签、统计和长内容的容纳方式。 */
+.section-page > .ant-tabs { min-width: 0; }
+.section-page > .ant-tabs-left > .ant-tabs-content-holder { min-width: 0; }
+.section-page .ant-card { min-width: 0; }
+.summary-grid.stat-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--console-border); border-radius: 10px; background: var(--console-surface); overflow: hidden; }
+.summary-grid > .ant-card { border: 0; border-radius: 0; background: transparent; }
+.summary-grid > .ant-card + .ant-card { border-left: 1px solid var(--console-border); }
+.summary-grid > .ant-card > .ant-card-body { padding: 16px 18px; }
+.result-summary.stat-grid { gap: 0; border: 1px solid var(--console-border); border-radius: 10px; background: var(--console-surface); overflow: hidden; }
+.result-summary > .ant-card { border: 0; border-radius: 0; background: transparent; }
+.result-summary > .ant-card + .ant-card { border-left: 1px solid var(--console-border); }
+.result-summary > .ant-card > .ant-card-body { padding: 14px 16px; }
+.responsive-card .ant-card-extra { max-width: 60%; }
+.flow-hint { min-height: 38px; }
+.api-intro-empty { min-height: 420px; padding: 36px 48px; }
+@container (max-width: 760px) {
+  .result-summary.stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .result-summary > .ant-card:nth-child(3) { border-left: 0; border-top: 1px solid var(--console-border); }
+  .result-summary > .ant-card:nth-child(4) { border-top: 1px solid var(--console-border); }
+  .responsive-card .ant-card-extra { max-width: 100%; }
+  .responsive-card .ant-card-head { align-items: flex-start; }
+}
+@container (max-width: 520px) {
+  .api-intro-empty { min-height: 320px; padding: 28px 24px; }
+  .api-intro-empty h2 { font-size: 22px; }
+}
+
+.section-page .ant-tabs-top > .ant-tabs-nav { margin-bottom: 20px; }
+.settings-page .ant-form-item-extra, .settings-page .ant-descriptions-item-content { overflow-wrap: anywhere; }
+.settings-page .ant-table-cell .mono { overflow-wrap: anywhere; }
+.responsive-card .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px 16px; padding-block: 10px; }
+.responsive-card .ant-segmented { max-width: 100%; overflow-x: auto; }
+.home-overview .flow-value { font-size: 28px; margin-block: 6px; }
+.home-overview .flow-step .ant-card-body { padding: 12px 16px; }
+.home-overview .flow-actions { padding-top: 8px; }
+@container (max-width: 520px) {
+  .summary-grid.stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .summary-grid > .ant-card + .ant-card { border-left: 0; border-top: 1px solid var(--console-border); }
+  .summary-grid > .ant-card > .ant-card-body { padding: 12px 16px; }
+  .summary-grid .ant-statistic { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .summary-grid .ant-statistic-content { font-size: 24px; }
+  .summary-grid .ant-statistic-title { margin-bottom: 4px; }
+  .home-overview .flow-hint { min-height: 0; }
+}
+
+/* 接口工作台：环境和入口集中于页头，数量跟随对应页签。 */
+.api-workspace > .page-header { margin-bottom: 12px; }
+.api-tab-count { margin-left: 4px; color: var(--console-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.api-workspace-tabs > .ant-tabs-nav { margin-bottom: 0; }
+.api-directory { padding-top: 12px; }
+.api-directory-top { margin-bottom: 8px; }
+.api-directory-tree .ant-tree-node-content-wrapper { padding-block: 2px; }
+.api-tree-endpoint { padding-block: 2px; }
+.api-definition-heading { padding: 20px 24px 16px; gap: 16px; }
+.api-definition-heading h2 { font-size: 20px; line-height: 28px; margin: 6px 0 8px; }
+.api-definition-meta { padding: 10px 24px; gap: 8px 20px; }
+.api-definition-content { padding: 16px 24px; }
+.api-definition-content h4 { margin-top: 0; }
+.api-section-toolbar { flex-wrap: wrap; }
+.api-editor-toolbar { flex-wrap: wrap; padding: 12px 16px; }
+.api-editor-title { flex: 1 1 240px; }
+.api-intro-empty { min-height: 340px; padding: 28px; }
+.api-empty-symbol { width: 40px; height: 40px; font-size: 22px; border-radius: 10px; margin-bottom: 16px; }
+.api-intro-empty h2 { font-size: 20px; }
+.api-empty-sequence { margin: 24px 0 12px; flex-wrap: wrap; gap: 12px; }
+@container (max-width: 680px) {
+  .api-directory-list { max-height: 160px; }
+  .api-directory { padding: 12px; }
+  .api-definition-heading, .api-definition-content { padding: 16px; }
+  .api-definition-meta { padding: 10px 16px; }
+  .api-workspace .page-header-actions { flex-basis: 100%; }
+}
+
+.api-regression .page-header-title-row .page-title { display: none; }
+.api-regression .page-header-main { justify-content: flex-start; gap: 8px; }
+.api-regression .page-header-actions { flex: 1; }
+.api-flow-empty { padding: 24px; }
+
+/* 接口页聚焦当前任务：目录作为次级背景，文档作为主阅读面。 */
+.api-workspace { --api-space: 24px; }
+.api-workspace > .page-header .page-title { font-size: 20px; }
+.api-workspace-tabs > .ant-tabs-nav::before { border-bottom: 0; }
+.api-workspace-tabs .ant-tabs-tab { padding: 10px 0 14px; }
+.api-workbench-layout { border-radius: 10px; border: 1px solid var(--console-border); grid-template-columns: 220px minmax(0, 1fr); }
+.api-directory { background: var(--console-bg); border-right: 1px solid var(--console-border); padding: 16px 12px; }
+.api-directory-top { color: var(--console-secondary); font-size: 12px; }
+.api-directory-tree .ant-tree-switcher-line-icon { color: var(--console-muted); }
+.api-directory-import, .api-directory-note { border-top: 0; }
+.api-definition-heading { padding: 28px var(--api-space) 20px; }
+.api-definition-heading h2 { font-size: 22px; margin-block: 8px 12px; }
+.api-definition-meta { border: 0; padding: 0 var(--api-space) 20px; color: var(--console-muted); }
+.api-definition-content { padding: 4px var(--api-space) 24px; }
+.api-definition-content > .ant-collapse { border: 0; border-radius: 0; background: transparent; border-block: 1px solid var(--console-border); }
+.api-definition-content > .ant-collapse .ant-collapse-header { padding-inline: 0; }
+.api-definition-content > .ant-collapse .ant-collapse-content { border-top: 0; }
+.api-definition-content > .ant-collapse .ant-collapse-content-box { padding-inline: 0; }
+.api-no-params { font-size: 12px; margin: 0 0 24px; }
+.api-empty-sequence { display: none; }
+.api-intro-empty > .ant-btn-text { margin-top: 20px; color: var(--console-secondary); font-size: 12px; }
+@container (max-width: 680px) {
+  .api-workbench-layout { grid-template-columns: minmax(0, 1fr); }
+  .api-directory { border-right: 0; border-bottom: 1px solid var(--console-border); }
+  .api-workspace { --api-space: 16px; }
+}
+
+
+/* 浏览器面板使用与参考图一致的无底色分栏图标按钮。 */
+.header-browser-toggle.ant-btn { width: 32px; height: 32px; padding: 0; color: var(--console-secondary); }
+.header-browser-toggle.ant-btn:hover { color: var(--console-text); background: var(--console-raised); }
+.header-browser-toggle svg { display: block; }
+
+/* 未停靠的原生浏览器：工具栏与主工作区齐平，网页在内框中呈现。 */
+.test-browser-panel { position: fixed; inset: 0 0 0 50%; background: var(--console-bg); border-left: 1px solid var(--console-border); }
+.test-browser-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; background: var(--console-surface); border-bottom: 1px solid var(--console-border); }
+.test-browser-title { display: inline-flex; align-items: center; gap: 8px; color: var(--console-secondary); font-size: 12px; }
+.test-browser-title .anticon { font-size: 15px; }
+.test-browser-surface { position: absolute; background: var(--console-surface); outline: 1px solid var(--console-border); box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+.api-import-cluster-badge { padding: 2px 6px; border-radius: 4px; background: color-mix(in srgb, var(--console-accent) 12%, transparent); color: var(--console-accent); font-size: 10px; }
+
+/* API 工作台：让页头、页签和编辑区形成连续的任务面板。 */
+.api-workspace { max-width: 1440px; }
+.api-workspace > .page-header { padding: 6px 0 0; }
+.api-workspace > .page-header .page-header-main { min-height: 44px; }
+.api-workspace-tabs > .ant-tabs-nav { padding: 0 24px; background: var(--console-surface); border: 1px solid var(--console-border); border-bottom: 0; border-radius: 10px 10px 0 0; }
+.api-workspace-tabs > .ant-tabs-content-holder { border: 0; }
+.api-workspace-tabs .ant-tabs-tab { padding: 12px 4px 13px; margin-inline-end: 24px !important; }
+.api-workbench-layout { min-height: calc(100vh - 220px); border-radius: 0 0 10px 10px; border-top-color: var(--console-border); }
+.api-directory { padding: 14px 10px 10px; }
+.api-directory-top { padding-inline: 10px; }
+.api-directory-tree .ant-tree-list-holder-inner { gap: 2px; }
+.api-directory-tree .ant-tree-treenode { padding-bottom: 0; }
+.api-directory-tree .ant-tree-switcher { width: 20px; margin-top: 2px; }
+.api-directory-tree .ant-tree-indent-unit { width: 16px; }
+.api-tree-module { min-height: 32px; padding: 2px 4px; border-radius: 6px; }
+.api-tree-module:hover { background: var(--console-raised); }
+.api-tree-endpoint { padding: 4px 2px; }
+.api-editor-toolbar { min-height: 64px; padding: 12px 20px; background: var(--console-surface); }
+.api-editor-title { flex: 1 1 260px; }
+.api-editor-title .ant-input { max-width: 360px; background: var(--console-bg); }
+.api-editor-toolbar > .ant-space { flex-shrink: 0; }
+.api-step-editor { padding: 16px 20px 0; }
+.api-request-editor > .ant-tabs { margin-top: 8px; }
+.api-request-editor > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
+.api-auth-line { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--console-border); }
+.api-auth-line > label { min-width: 56px; color: var(--console-secondary); font-size: 12px; }
+@container (max-width: 680px) {
+  .api-workspace-tabs > .ant-tabs-nav { padding-inline: 16px; }
+  .api-workbench-layout { min-height: 0; }
+  .api-editor-toolbar { padding: 12px 16px; }
+}
+
+/* 编辑器明确采用名称行与操作行，避免随宽度随机折行。 */
+.api-editor-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.api-editor-title { width: 100%; }
+.api-editor-title .ant-input { max-width: none; }
+.api-editor-actions { justify-content: flex-end; }
+.api-input-variables > .ant-collapse-item > .ant-collapse-header { padding: 8px 0; font-size: 12px; color: var(--console-secondary); }
+.api-input-variables .ant-collapse-content-box { padding: 0 0 12px !important; }
+.api-directory-tree .ant-tree-switcher-noop { display: none; }

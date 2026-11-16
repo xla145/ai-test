@@ -53,7 +53,9 @@ export interface ApiImportPreview {
   title: string;
   version: string;
   document: Record<string, unknown>;
-  changes: { method: string; path: string; summary: string; change: "added" | "updated" | "unchanged" | "removed" }[];
+  /** Omitted for legacy full imports; otherwise apply only these method:path keys. */
+  selected_keys?: string[];
+  changes: { method: string; path: string; summary: string; module: string; change: "added" | "updated" | "unchanged" | "removed" }[];
 }
 
 export interface ApiCaseDraft {

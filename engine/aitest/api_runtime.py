@@ -78,6 +78,7 @@ def redact(value, secrets=(), key=""):
 def auth_resolver(client, env, login=None, accounts=None, tokens=None):
     cache = dict(tokens or {})
     accounts = {a["role"]: a for a in accounts or []}
+    client_headers = {}
 
     def auth_for(role):
         if cache.get(role):
@@ -97,9 +98,21 @@ def auth_resolver(client, env, login=None, accounts=None, tokens=None):
             token = pick(decoded, login.get("token_path") or "data.token")
         except (KeyError, IndexError, ValueError, TypeError) as exc:
             raise ValueError(f"角色「{role}」登录响应找不到 token 字段") from exc
-        cache[role] = f"{login.get('prefix', 'Bearer ')}{token}"
+        if not isinstance(token, str) or not token.strip() or token.strip().lower() in {"null", "undefined", "false"} or "\r" in token or "\n" in token:
+            raise ValueError(f"角色「{role}」登录响应的 token 无效")
+        prefix = login.get("prefix", "Bearer ")
+        token = token.strip()
+        cache[role] = token if prefix and token.lower().startswith(prefix.lower()) else f"{prefix}{token}"
+        # Bind the client ID to this role, never to shared environment state.
+        configured_headers = {**(env.get("api_crypto") or {}).get("headers", {}), **(login.get("headers") or {})}
+        client_id = next((v for k, v in configured_headers.items() if k.lower() == "clientid"), None)
+        if isinstance(body, dict) and body.get("clientId"):
+            client_id = body["clientId"]
+        if isinstance(client_id, str) and client_id and "\r" not in client_id and "\n" not in client_id:
+            client_headers[role] = {"clientid": client_id}
         return cache[role]
 
+    auth_for.headers_for = lambda role: client_headers.get(role, {})
     return auth_for
 
 
@@ -128,11 +141,16 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
             raise ValueError("接口路径必须为当前环境的相对路径")
         headers = {k: str(v) for k, v in (resolved.get("headers") or {}).items()}
         if resolved.get("auth", True):
-            token = auth_for(resolved.get("role")) if resolved.get("role") else env.get("auth_token", "")
+            role = resolved.get("role") or env.get("default_login_role")
+            token = auth_for(role) if role else env.get("auth_token", "")
             if token:
                 auth_header = env.get("auth_header", "Authorization")
                 headers = {k: v for k, v in headers.items() if k.lower() != auth_header.lower()}
                 headers[auth_header] = token
+                if role:
+                    bound_headers = getattr(auth_for, "headers_for", lambda _: {})(role)
+                    headers = {k: v for k, v in headers.items() if k.lower() not in bound_headers}
+                    headers.update(bound_headers)
                 secrets.append(token)
         for key, value in headers.items():
             if _SENSITIVE.search(key) or key.lower() == env.get("auth_header", "authorization").lower():

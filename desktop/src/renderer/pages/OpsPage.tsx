@@ -32,17 +32,16 @@ import { FAILURE, LabelTag, PURPOSE } from "../components/labels";
 import { PageHeader } from "../components/PageHeader";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { useProjects } from "../components/ProjectSettings";
-import { useAction, useLoad, useNarrow, usePaged } from "../hooks";
+import { useAction, useLoad, usePaged } from "../hooks";
 
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
 export function OpsPage({ project }: { project: Project }) {
-  const [ref, narrow] = useNarrow<HTMLDivElement>();
   return (
-    <div ref={ref}>
+    <div className="section-page ops-page">
       <PageHeader title="工程化" description="验证指标与门禁、失败归因确认、模型用量与预算、团队共享与 CI。模型服务在「全局设置」中配置。" />
       <Tabs
-        tabPosition={narrow ? "top" : "left"}
+        tabPosition="top"
         items={[
           { key: "metrics", label: "验证指标", children: <Metrics project={project} /> },
           { key: "attribution", label: "失败归因", children: <Attributions project={project} /> },
@@ -60,7 +59,7 @@ function Metrics({ project }: { project: Project }) {
   const gate = m.ui_gate;
   return (
     <>
-      <div className="stat-grid">
+      <div className="stat-grid summary-grid">
           <Card>
             <Statistic title="一次生成通过率" value={pct(m.first_pass_rate)} />
             <Typography.Text type="secondary">脚本生成后不经修改即跑通：{m.first_pass.passed}/{m.first_pass.measured}</Typography.Text>
@@ -74,7 +73,7 @@ function Metrics({ project }: { project: Project }) {
             <Typography.Text type="secondary">共 {m.interventions.total} 次，涉及 {m.interventions.cases} 条用例</Typography.Text>
           </Card>
       </div>
-      <Card style={{ marginTop: 16 }} title="门禁：UI 回归稳定"
+      <Card style={{ marginTop: 16 }} size="small" title="UI 回归稳定性"
         extra={gate.passed ? <Tag icon={<CheckCircleFilled />} color="success">已达标</Tag> : <Tag icon={<CloseCircleFilled />} color="error">未达标</Tag>}>
         <div className="split" style={{ alignItems: "center", gap: 24 }}>
           <div style={{ flex: "0 0 auto" }}>
@@ -100,7 +99,7 @@ function Attributions({ project }: { project: Project }) {
     (q) => api().pageAttributions(project.id, { ...q, pending: true }), [project.id], 10);
   const { busy, run } = useAction();
   return (
-    <Card title="待确认的失败归因" extra={<Typography.Text type="secondary">确认后以人工结论为准，并计入归因准确率</Typography.Text>}>
+    <Card size="small" className="responsive-card" title="待确认的失败归因" extra={<Typography.Text type="secondary">确认后以人工结论为准，并计入归因准确率</Typography.Text>}>
       <CaseTitles projectId={project.id} ids={data.map((r: any) => r.case_id)}>
       <Table
         size="small"
@@ -148,10 +147,9 @@ export function Usage({ project }: { project: Project }) {
   const ratio = b?.monthly_budget ? Math.min(100, Math.round((b.month_used / b.monthly_budget) * 100)) : 0;
   return (
     <>
-      <div className="stat-grid">
+      <div className="stat-grid summary-grid">
         <Card loading={usage.loading}><Statistic title="近 30 天 token" value={u?.total_tokens ?? 0} /><Typography.Text type="secondary">{u?.agent_tasks ?? 0} 个 agent 任务</Typography.Text></Card>
         <Card loading={usage.loading}><Statistic title="估算成本" value={u?.estimated_cost ?? "—"} suffix={u?.currency} /><Typography.Text type="secondary">按设置中的单价估算</Typography.Text></Card>
-        <div style={{ display: "grid" }}>
           <Card loading={budget.loading}>
             <Typography.Text type="secondary">本月预算</Typography.Text>
             {b?.monthly_budget ? (
@@ -162,7 +160,6 @@ export function Usage({ project }: { project: Project }) {
               </>
             ) : <div style={{ fontSize: 24, marginTop: 4 }}>不限</div>}
           </Card>
-        </div>
       </div>
       <div className="split" style={{ marginTop: 16 }}>
         <div style={{ flex: "1 1 320px" }}>

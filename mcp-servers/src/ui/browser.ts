@@ -90,6 +90,7 @@ export class BrowserSession {
   private browser?: Browser;
   private readonly pages = new Map<string, Page>();
   private readonly contexts = new Map<string, BrowserContext>();
+  private requiredLogin = new Map<string, LoginRecipe | undefined>();
   private refs = new Map<string, RefEntry>();
   private refSeq = 0;
   private steps: UiStep[] = [];
@@ -150,7 +151,7 @@ export class BrowserSession {
   /** 新建（或切换到）角色上下文；需要登录时由客户端提供账号，登录态保存为 storageState */
   async newRoleContext(
     role: string,
-    opts: { storageStatePath?: string; login?: LoginRecipe; credentials?: Credentials } = {},
+    opts: { storageStatePath?: string; login?: LoginRecipe; credentials?: Credentials; requireLogin?: boolean } = {},
   ): Promise<{ role: string; loggedIn: boolean; reusedState: boolean }> {
     const browser = await this.ensureBrowser();
     let page = this.pages.get(role);
@@ -184,6 +185,15 @@ export class BrowserSession {
         reusedState = current.origin === base.origin && (!login || current.pathname !== login.pathname);
       } catch { /* 空白页没有可复用的站点会话 */ }
     }
+    if (opts.requireLogin) {
+      this.requiredLogin.set(role, opts.login);
+      if (this.opts.baseUrl && (!/^https?:/.test(page.url()) || !this.opts.cdpEndpoint)) {
+        await page.goto(this.opts.baseUrl);
+      }
+      await this.checkRequiredLogin(page, role);
+      return { role, loggedIn: true, reusedState: true };
+    }
+    this.requiredLogin.delete(role);
     if (opts.login && opts.credentials && !reusedState) {
       await performLogin(page, opts.login, opts.credentials, this.opts.baseUrl);
       loggedIn = true;
@@ -197,7 +207,29 @@ export class BrowserSession {
 
   async page(role = this.currentRole): Promise<Page> {
     if (!this.pages.has(role)) await this.newRoleContext(role);
-    return this.pages.get(role)!;
+    const page = this.pages.get(role)!;
+    await this.checkRequiredLogin(page, role);
+    return page;
+  }
+
+  private async checkRequiredLogin(page: Page, role: string): Promise<void> {
+    if (!this.requiredLogin.has(role)) return;
+    const recipe = this.requiredLogin.get(role);
+    let valid = false;
+    try {
+      const current = new URL(page.url());
+      const base = new URL(this.opts.baseUrl!);
+      const login = recipe && new URL(recipe.url, base);
+      const onLogin = login ? current.pathname === login.pathname && current.hash === login.hash
+        : /(?:^|[\/#])(?:login|signin|sign-in)(?:[\/?#]|$)/i.test(current.href);
+      const passwordVisible = await page.locator('input[type="password"]:visible').count() > 0;
+      // 文件存在不代表会话有效；没有成功标志时，至少要求站点已建立存储且没有登录表单。
+      const hasState = (await page.context().cookies(current.origin)).length > 0
+        || await page.evaluate(() => localStorage.length > 0 || sessionStorage.length > 0);
+      valid = current.origin === base.origin && !onLogin && !passwordVisible
+        && (hasState || Boolean(recipe?.success && page.url().includes(recipe.success)));
+    } catch { /* 无法确认登录时不执行需要登录的步骤 */ }
+    if (!valid) throw new Error(`登录前置条件未满足：角色「${role}」未登录、登录已失效或无法确认。当前用例不能执行，请在「角色与登录」中完成登录后重试。`);
   }
 
   private record(step: Step): void {
@@ -486,7 +518,8 @@ export class BrowserSession {
     const loc = toLocator(page, spec);
     let actual = "";
     const ok = await poll(async () => {
-      actual = (await loc.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
+      // Only a successful read can prove absence of text. Preserve locator errors.
+      actual = (await loc.innerText({ timeout: Math.min(1000, timeoutMs) })).replace(/\s+/g, " ");
       return !actual.includes(text);
     }, timeoutMs);
     if (!ok) throw new Error(`断言不成立：元素文本「${actual.slice(0, 200)}」中包含「${text}」`);
@@ -674,7 +707,8 @@ export class BrowserSession {
       case "expectNoText": {
         let actual = "";
         const ok = await poll(async () => {
-          actual = (await loc!.innerText({ timeout: 1000 }).catch(() => "")).replace(/\s+/g, " ");
+          // Missing/ambiguous targets must fail just as in generated Playwright tests.
+          actual = (await loc!.innerText({ timeout: Math.min(1000, timeout) })).replace(/\s+/g, " ");
           return !actual.includes(step.text);
         }, timeout);
         if (!ok) throw new Error(`断言不成立：元素文本「${actual.slice(0, 200)}」中包含「${step.text}」`);

@@ -1,3 +1,5 @@
+import { UiTasksProvider, UiTasksButton } from "./components/UiTasks";
+import { BROWSER_PANEL_HEADER, BROWSER_PANEL_GUTTER } from "../shared/browserPanel";
 import {
   ApiOutlined,
   AppstoreOutlined,
@@ -153,6 +155,12 @@ export function App() {
   const savedNav = current ? navByProject[current.id] ?? lastNav(current.id) : "home";
   // 测试端调整后某些页面不再显示：回到概览
   const nav = current && !group && visibleProjectTab(savedNav, current.project_type) && savedNav !== "settings" ? savedNav : "home";
+  const [visitedUi, setVisitedUi] = useState<string[]>([]);
+  const activeUiId = !showSettings && !group && nav === "ui" ? current?.id : undefined;
+  useEffect(() => {
+    if (activeUiId) setVisitedUi((ids) => ids.includes(activeUiId) ? ids : [...ids, activeUiId]);
+  }, [activeUiId]);
+  const retainedUiIds = new Set([...visitedUi, ...(activeUiId ? [activeUiId] : [])]);
   // 侧栏角标与概览待办：切换页面后重新统计（页面上的审核、合并会改变计数）
   const todos = useLoad(async () => current && !group ? { id: current.id, ...(await loadTodos(current)) } : undefined,
     [current?.id, current?.project_type, nav]);
@@ -251,8 +259,24 @@ export function App() {
 
   return (
     <ProjectsContext.Provider value={projectsCtx}>
+    <UiTasksProvider>
     <NavContext.Provider value={navCtx}>
     <Layout className={`app-shell ${viewVisible ? "with-view" : ""} ${window.desktopHost?.platform === "darwin" ? "native-mac" : ""}`}>
+      {viewVisible && <aside className="test-browser-panel" aria-label="右侧测试浏览器">
+        <div className="test-browser-toolbar" style={{ height: BROWSER_PANEL_HEADER }}>
+          <span className="test-browser-title"><ChromeOutlined />测试浏览器</span>
+          <Tooltip title="收起右侧浏览器" placement="bottom">
+                    <Button size="small" type="text" className="header-browser-toggle" aria-label="收起浏览器" onClick={() => api().hideTestView?.()}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                        <rect x="3" y="3.5" width="18" height="17" rx="3.5" />
+                        <path d="M9 3.5v17" />
+                      </svg>
+                    </Button>
+                  </Tooltip>
+        </div>
+        <div className="test-browser-surface" aria-hidden="true" style={{ top: BROWSER_PANEL_HEADER, left: BROWSER_PANEL_GUTTER, right: BROWSER_PANEL_GUTTER, bottom: BROWSER_PANEL_GUTTER }} />
+      </aside>}
           <Header className="workspace-header">
             <Flex justify="space-between" align="center" gap={16} style={{ height: "100%" }}>
               <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
@@ -290,9 +314,7 @@ export function App() {
                     <Button size="small" type="text" icon={<ToolOutlined />} aria-label="项目设置" onClick={() => setProjectSettingsOpen({})} />
                   </Tooltip>
                 )}
-                {viewVisible && (
-                  <Button size="small" icon={<CloseOutlined />} onClick={() => api().hideTestView?.()}>收起浏览器</Button>
-                )}
+
               </Space>}
             </Flex>
           </Header>
@@ -314,6 +336,7 @@ export function App() {
             }}
             items={menuItems}
           />
+          <UiTasksButton />
           <div className={`sider-footer ${compact ? "compact" : ""}`} style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
             <Tooltip placement={compact ? "right" : "topLeft"} title={user && (
               <>
@@ -362,10 +385,10 @@ export function App() {
               <GroupPage group={current} onOpen={openProject} onNewChild={() => setCreating({ parent: current.id })} />
             </div>
           ) : current ? (
-            <div className="page" key={`${current.id}:${nav}`}>
+            nav !== "ui" ? <div className="page" key={`${current.id}:${nav}`}>
               {!compact && <ProjectGuide key={current.id} project={current} />}
               {page(current, nav)}
-            </div>
+            </div> : null
           ) : (
             <Flex align="center" justify="center" style={{ height: "100%" }}>
               <Empty description="还没有项目">
@@ -376,6 +399,13 @@ export function App() {
               </Empty>
             </Flex>
           )}
+          {/* 按项目保留已访问的工作台，后台任务和事件订阅不因导航切换而中断。 */}
+          {projects.filter((p) => retainedUiIds.has(p.id) && !isGroup(p) && visibleProjectTab("ui", p.project_type)).map((p) => (
+            <div className="page" key={`ui:${p.id}`} style={{ display: activeUiId === p.id ? undefined : "none" }} aria-hidden={activeUiId !== p.id}>
+              {!compact && <ProjectGuide project={p} />}
+              <UiPage project={p} />
+            </div>
+          ))}
         </Content>
       </Layout>
       </Layout>
@@ -420,6 +450,7 @@ export function App() {
       </Drawer>
     </Layout>
     </NavContext.Provider>
+    </UiTasksProvider>
     </ProjectsContext.Provider>
   );
 }

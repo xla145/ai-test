@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { listenLocal } from "./listen.js";
 
 /** 模拟被测系统：登录、角色菜单、标签停用、埋点上报。version=2 模拟页面改版（按钮 testid 变了） */
 export interface DemoApp {
@@ -99,7 +100,7 @@ export async function startDemoApp(): Promise<DemoApp> {
       send(404, page("404", "not found"));
     });
   });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  await listenLocal(server);
   const port = (server.address() as { port: number }).port;
   return {
     url: `http://127.0.0.1:${port}`,

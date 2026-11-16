@@ -1,3 +1,10 @@
+export interface UiTaskRecord {
+  id: string; projectId: string; env: string; kind: string; caseIds: string[];
+  status: "running" | "stopping" | "completed" | "failed" | "stopped";
+  startedAt: string; updatedAt: string; finishedAt?: string;
+  stage: string; detail?: string; runId?: string;
+}
+
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "./apiWorkspace.js";
 /** 渲染进程可调用的 API（preload 通过 contextBridge 暴露为 window.aitest） */
 export interface ApprovalRequest {
@@ -343,6 +350,7 @@ export interface AitestApi {
   uiDebugCommand(command: UiDebugCommand): Promise<UiDebugState>;
   /** 当前调试会话（没有则为 null），页面重新进入时恢复 */
   uiDebugState(): Promise<UiDebugState | null>;
+  uiTasks(): Promise<UiTaskRecord[]>;
   stopUiTask(projectId: string, env: string): Promise<void>;
   reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */

@@ -44,7 +44,7 @@ export function AppPage({ project }: { project: Project }) {
           { title: "执行回归", description: "执行生成的脚本，不调用模型" },
           { title: "查看结果", description: "查看执行结果、截图与失败归因" },
         ]}
-        description="agent 通过 Pinky 在手机上走通用例，生成 Maestro 脚本；回归直接执行脚本，不调用模型。同一份脚本在 Android 与 iOS 上运行。"
+        description="通过 Pinky 探索并生成 Maestro 脚本，支持 Android 与 iOS；回归直接执行脚本，不调用模型。"
         extra={<>
           <Segmented<Platform> value={platform} onChange={setPlatform} options={[
             { value: "android", label: <Space size={4}><AndroidOutlined />Android</Space> },
@@ -52,7 +52,7 @@ export function AppPage({ project }: { project: Project }) {
           ]} />
           <EnvSelect project={project} value={env} onChange={setEnv} width={160} />
           <Tooltip title="adb devices / xcrun simctl list 中的设备 ID；只连接一台设备时可不填">
-            <Input value={device} onChange={(e) => setDevice(e.target.value)} placeholder="设备 ID（可选）" style={{ width: 170 }} allowClear />
+            <Input value={device} onChange={(e) => setDevice(e.target.value)} aria-label="设备 ID" placeholder="设备 ID（可选）" style={{ width: 170 }} allowClear />
           </Tooltip>
           <RunButton project={project} env={env} loading={busy}
             onRun={(confirmProduction) => run(async () => {
@@ -81,7 +81,7 @@ export function AppPage({ project }: { project: Project }) {
 
       {result && (
         <>
-          <div className="stat-grid" style={{ marginBottom: 16 }}>
+          <div className="stat-grid result-summary" style={{ marginBottom: 16 }}>
             <Card size="small"><Statistic title={`${PLATFORM_LABEL[result.platform]} 用例`} value={result.run.total} /></Card>
             <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
             <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "var(--console-error)" : undefined }} /></Card>

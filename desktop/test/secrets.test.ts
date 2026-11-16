@@ -130,3 +130,14 @@ describe("API multi-account secrets", () => {
     expect(secretEnvFor(store, "child", "test", [], "grp")).toEqual({});
   });
 });
+
+it("uses the newly saved browser token instead of an inherited environment's stale child override", async () => {
+  const { saveBrowserEnvSecret, secretEnvFor } = await import("../src/main/secrets.js");
+  const store = new SecretStore(join(mkdtempSync(join(tmpdir(), "sec-")), "s.json"), cipher);
+  store.set(SecretStore.ref("child", "test"), { authToken: "expired-child", authHeader: "X-Old" });
+  store.set(SecretStore.ref("child", "prod"), { authToken: "keep-prod" });
+  saveBrowserEnvSecret(store, "child", "parent", "test", { authToken: "fresh-browser", authHeader: "Authorization" });
+  expect(secretEnvFor(store, "child", "test", [], "parent")).toEqual({ AITEST_AUTH_TOKEN: "fresh-browser", AITEST_AUTH_HEADER: "Authorization" });
+  expect(secretEnvFor(store, "child", "prod", [], "parent").AITEST_AUTH_TOKEN).toBe("keep-prod");
+  expect(store.get(SecretStore.ref("child", "test"))).toBeUndefined();
+});

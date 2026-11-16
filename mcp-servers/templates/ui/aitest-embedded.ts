@@ -26,7 +26,16 @@ export async function embeddedPage(browser: Browser, role: string): Promise<Page
   page.setDefaultNavigationTimeout(Number(process.env.AITEST_NAVIGATION_TIMEOUT || 30_000));
   const recipe = JSON.parse(process.env.AITEST_LOGIN || "null");
   const creds = JSON.parse(process.env.AITEST_ROLES || "[]").find((c: { role: string }) => c.role === role);
-  if (recipe && creds) {
+  // 手动登录已建立的会话不再被自动登录覆盖（验证码/会话内 token 也保留）。
+  let reuseSession = false;
+  try {
+    const current = new URL(page.url());
+    const baseUrl = new URL(process.env.AITEST_BASE_URL!);
+    const loginUrl = recipe && new URL(recipe.url, baseUrl);
+    reuseSession = current.origin === baseUrl.origin && (!loginUrl || current.pathname !== loginUrl.pathname)
+      && (!recipe?.success || current.href.includes(recipe.success));
+  } catch { /* 新建的空白角色视图需要登录 */ }
+  if (recipe && creds && !reuseSession) {
     await page.goto(new URL(recipe.url, process.env.AITEST_BASE_URL).href);
     await page.locator(recipe.username).fill(creds.username);
     await page.locator(recipe.password).fill(creds.password);

@@ -439,6 +439,7 @@ const mockApi: AitestApi = {
     return state;
   },
   uiDebugState: async () => debugSession?.state() ?? null,
+  uiTasks: async () => [],
   stopUiTask: async () => { mockUiStopped = true; },
   openRoleLogin: async () => { setView({ visible: true }); },
   saveRoleLogin: async (_p, _e, role) => { roleSessionTimes[role] = new Date().toISOString(); return delay({ cookies: 3, localStorage: 1, url: "https://feature-test.example.com/index", savedAt: roleSessionTimes[role] }, 300); },

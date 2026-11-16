@@ -33,7 +33,7 @@ import type { GlobalSettings, GlobalSettingsView, ModelCheckResult, ModelEntry, 
 import { api } from "../api";
 import { PageHeader } from "../components/PageHeader";
 import { UpdateCard } from "../components/UpdateCard";
-import { useAction, useLoad, useNarrow } from "../hooks";
+import { useAction, useLoad } from "../hooks";
 
 /** 全局设置保存后广播（detail 为 GlobalSettingsView）：主题、侧栏当前模型据此立即刷新 */
 export const SETTINGS_EVENT = "aitest:settings";
@@ -44,7 +44,6 @@ export function SettingsPage() {
   const view = useLoad(() => api().getGlobalSettings(), []);
   const presets = useLoad(() => api().modelPresets(), []);
   const { busy, run } = useAction();
-  const [ref, narrow] = useNarrow<HTMLDivElement>();
 
   if (!view.data || !presets.data) return <Card loading />;
   const save = (settings: GlobalSettings, keys?: Record<string, string>, success = "已保存") =>
@@ -57,10 +56,10 @@ export function SettingsPage() {
 
   const props = { view: view.data, presets: presets.data, save, busy };
   return (
-    <div ref={ref} className="settings-page">
+    <div className="settings-page section-page">
       <PageHeader title="全局设置" description="对所有项目生效，不随项目保存。API key 存入系统钥匙串，只注入对应进程。" />
       <Tabs
-        tabPosition={narrow ? "top" : "left"}
+        tabPosition="top"
         items={[
           { key: "models", label: "模型", children: <Models {...props} /> },
           { key: "runtime", label: "运行环境", children: <Runtime {...props} /> },
@@ -133,6 +132,7 @@ function Models({ view, presets, save, busy }: SectionProps) {
         <Table
           size="small"
           rowKey="id"
+          scroll={{ x: 760 }}
           pagination={false}
           dataSource={settings.models}
           columns={[

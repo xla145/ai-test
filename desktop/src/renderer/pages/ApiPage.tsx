@@ -1,5 +1,7 @@
-import { ApiOutlined, ArrowDownOutlined, ArrowRightOutlined, ArrowUpOutlined, CheckOutlined, DeleteOutlined, FileTextOutlined, HistoryOutlined, FolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Collapse, Drawer, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tree, Typography } from "antd";
+import { ApiCaseList } from "./api/ApiCaseList";
+import { clusterImportChanges } from "../../shared/apiImportClusters";
+import { ApiOutlined, ArrowDownOutlined, ArrowRightOutlined, ArrowUpOutlined, CheckOutlined, DeleteOutlined, FileTextOutlined, HistoryOutlined, MoreOutlined, FolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Checkbox, Collapse, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Table, Tabs, Tag, Tree, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import type { ApiCaseDraft, ApiDebugResult, ApiDefinition, ApiImportPreview, ApiRequest } from "../../shared/apiWorkspace";
@@ -51,7 +53,13 @@ function ApiWorkspace({ project }: { project: Project }) {
   const [importOpen, setImportOpen] = useState(false);
   const [source, setSource] = useState("");
   const [preview, setPreview] = useState<ApiImportPreview>();
+  const [importKeys, setImportKeys] = useState<string[]>([]);
+  const acceptPreview = (next: ApiImportPreview) => {
+    setPreview(next);
+    setImportKeys(next.changes.map((c) => `${c.method}:${c.path}`));
+  };
   const [addTo, setAddTo] = useState<"steps" | "cleanup">();
+  const importClusters = useMemo(() => preview ? clusterImportChanges(preview.changes) : [], [preview]);
   const [env, setEnv] = useEnvChoice(project);
   const selected = definitions.find((d) => d.id === selectedId);
   const isFlow = tab === "flows";
@@ -73,7 +81,13 @@ function ApiWorkspace({ project }: { project: Project }) {
   useProjectChanged(project.id, () => { void refresh(); });
   const currentDefinitions = definitions.filter((d) => !d.removed);
   const filtered = definitions.filter((d) => `${d.method} ${d.path} ${d.summary} ${d.module}`.toLowerCase().includes(search.toLowerCase()));
-  const modules = useMemo(() => [...new Set(filtered.map((d) => d.module))], [definitions, search]);
+  const directoryClusters = useMemo(() => clusterImportChanges(definitions), [definitions]);
+  const visibleClusters = directoryClusters.map((cluster) => ({
+    ...cluster,
+    key: JSON.stringify(cluster.modules),
+    rows: cluster.rows.filter((d) => `${d.method} ${d.path} ${d.summary} ${d.module}`.toLowerCase().includes(search.toLowerCase())),
+  })).filter((cluster) => cluster.rows.length);
+  const modules = visibleClusters.map((cluster) => cluster.key);
   const flows = cases.filter((c) => c.api_flow?.length);
   const related = cases.filter((c) => c.api?.definition_id === selectedId);
   const askDiscard = (dirty: boolean, action: () => void) => {
@@ -107,28 +121,21 @@ function ApiWorkspace({ project }: { project: Project }) {
   });
   const previewSource = (value: string) => run("preview", async () => {
     if (!value.trim()) throw new Error("请选择文件或输入规范文档地址");
-    setPreview(await api().previewApiImport(project.id, value.trim()));
+    acceptPreview(await api().previewApiImport(project.id, value.trim()));
   });
-  const review = (c: TestCase) => run(`review:${c.id}`, async () => {
-    await api().updateCase(c.id, { status: "reviewed" }); notifyProjectChanged(project.id); await refresh();
-  }, "已审核，可生成脚本并回归");
-  const caseRows = (rows: TestCase[]) => <Table size="small" rowKey="id" dataSource={rows} pagination={{ pageSize: 8, hideOnSinglePage: true }} columns={[
-    { title: "用例", dataIndex: "title", render: (v, c) => <Button type="link" className="api-case-link" onClick={() => loadCase(c)}>{v}</Button> },
-    { title: "状态", dataIndex: "status", width: 116, render: (v, c) => <span className="api-muted">{c.api_needs_review ? "接口待检查" : v === "reviewed" ? "已审核" : v === "deprecated" ? "已废弃" : "草稿"}</span> },
-    { title: "操作", width: 108, render: (_, c) => c.status === "draft" && <Button size="small" icon={<CheckOutlined />} disabled={busy || c.api_needs_review} onClick={() => review(c)}>审核</Button> },
-  ]} />;
+  const caseRows = (rows: TestCase[]) => <ApiCaseList project={project} env={env} rows={rows} onEdit={loadCase} onChanged={refresh} />;
   const directory = <aside className="api-directory"><div className="api-directory-top"><span>接口目录</span><span className="api-mono api-muted">{currentDefinitions.length}</span></div>
     <Input aria-label="搜索接口" prefix={<SearchOutlined />} placeholder="搜索名称或路径" value={search} onChange={(e) => setSearch(e.target.value)} allowClear />
     <div className="api-directory-list api-directory-tree">
-      {filtered.length ? <Tree blockNode showLine={{ showLeafIcon: false }}
+      {filtered.length ? <Tree blockNode
         aria-label="接口目录" selectedKeys={selectedId ? [`api:${selectedId}`] : []}
         expandedKeys={modules.filter((module) => search.trim() || !collapsedModules.includes(module)).map((module) => `module:${module}`)}
         onExpand={(keys) => setCollapsedModules(modules.filter((module) => !keys.includes(`module:${module}`)))}
         onSelect={(keys) => { const d = filtered.find((item) => `api:${item.id}` === keys[0]); if (d) selectDefinition(d); }}
-        treeData={modules.map((module) => ({
-          key: `module:${module}`, selectable: false,
-          title: <span className="api-tree-module"><FolderOutlined /><span>{module || "未分组"}</span><span className="api-tree-count">{filtered.filter((d) => d.module === module).length}</span></span>,
-          children: filtered.filter((d) => d.module === module).map((d) => ({
+        treeData={visibleClusters.map((cluster) => ({
+          key: `module:${cluster.key}`, selectable: false,
+          title: <span className="api-tree-module" title={cluster.modules.join("、")}><FolderOutlined /><span>{cluster.label}</span><span className="api-tree-count">{cluster.rows.length}</span></span>,
+          children: cluster.rows.map((d) => ({
             key: `api:${d.id}`, isLeaf: true,
             title: <span className="api-tree-endpoint" title={`${d.method} ${d.summary}\n${d.path}`}>
               <span className="api-directory-title"><Method method={d.method} /><span>{d.summary}</span>{d.removed && <span className="api-muted">已移除</span>}</span>
@@ -153,11 +160,12 @@ function ApiWorkspace({ project }: { project: Project }) {
       {definitions.find((d) => d.id === request.definition_id)?.unsupported_body && <Alert type="warning" message="该接口需要表单、文件或其他请求类型；当前执行器仅支持 JSON 请求体" />}
       {isFlow && <Input aria-label={`${target === "cleanup" ? "清理" : "业务"}步骤名称 ${index + 1}`} placeholder="步骤名称" value={request.name ?? ""} onChange={(e) => update({ ...request, name: e.target.value })} />}
       <div className="api-request-url"><Method method={request.method} /><span className="api-base-url" title={project.environments[env]?.base_url}>{project.environments[env]?.base_url ?? "未选择环境"}</span><Input aria-label={`请求路径 ${index + 1}`} value={request.path} onChange={(e) => update({ ...request, path: e.target.value })} /></div>
+      {!isFlow && <Collapse className="api-input-variables" ghost items={[{ key: "inputs", label: "请求输入变量", children: <JsonField key={`single-inputs:${editorKey}`} label="请求输入变量" object value={single.inputs} onChange={(inputs) => setDraft({ ...single, inputs })} onValidity={(v) => validity("single:inputs", v)} rows={4} /> }]} />}
       <RequestEditor key={`${editorKey}:${target}:${index}:${request.definition_id ?? "manual"}`} request={request} onChange={update} roles={roles} sourceSchema={definitions.find((d) => d.id === request.definition_id)?.request.response_schema} initialTab={request.body != null ? "body" : "params"} onValidity={(key, ok) => validity(`${isFlow ? "flow" : "single"}:${target}:${index}:${key}`, ok)} />
     </div>;
   };
   const executionToolbar = <div className="api-editor-toolbar"><div className="api-editor-title"><Input aria-label={isFlow ? "场景名称" : "用例名称"} value={draft.title} placeholder={isFlow ? "例如：订单-创建后取消" : "用例名称"} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /><span className="api-muted">{(isFlow ? flowDirty : singleDirty) ? "未保存" : draft.id ? "已保存" : "临时请求"}</span></div>
-    <Space>{!isFlow && <Button disabled={busy || !valid || !supported || !single.steps[0]?.definition_id} onClick={() => setGenerationDraft(clone(single))}>根据参数生成用例</Button>}<Button icon={<SaveOutlined />} disabled={busy || !valid || !draft.steps.length} loading={activeKey === "save"} onClick={save}>保存{isFlow ? "场景" : "用例"}</Button>{activeKey === "send" && <Button onClick={() => api().stopApiDebug(project.id, env)}>取消等待</Button>}<RunButton project={project} env={env} loading={activeKey === "send"} disabled={busy || !valid || !supported || !env || !draft.steps.length} onRun={send}>{isFlow ? "试运行场景" : "发送请求"}</RunButton></Space>
+    <Space className="api-editor-actions" wrap>{!isFlow && <Button type="text" title="根据参数生成用例" disabled={busy || !valid || !supported || !single.steps[0]?.definition_id} onClick={() => setGenerationDraft(clone(single))}>生成用例</Button>}<Button icon={<SaveOutlined />} disabled={busy || !valid || !draft.steps.length} loading={activeKey === "save"} onClick={save}>保存{isFlow ? "场景" : "用例"}</Button>{activeKey === "send" && <Button onClick={() => api().stopApiDebug(project.id, env)}>取消等待</Button>}<RunButton project={project} env={env} loading={activeKey === "send"} disabled={busy || !valid || !supported || !env || !draft.steps.length} onRun={send}>{isFlow ? "试运行场景" : "发送请求"}</RunButton></Space>
   </div>;
   const flowSteps = (target: "steps" | "cleanup") => <>
     <div className="api-flow-section-title"><h4>{target === "steps" ? "业务步骤" : "执行后清理"}</h4><span className="api-muted">{target === "steps" ? "按顺序执行，变量在本场景内传递" : "业务失败后仍尝试执行"}</span><Button size="small" icon={<PlusOutlined />} disabled={busy || !valid || !currentDefinitions.length} onClick={() => setAddTo(target)}>添加{target === "steps" ? "步骤" : "清理"}</Button></div>
@@ -169,14 +177,26 @@ function ApiWorkspace({ project }: { project: Project }) {
   </>;
 
   return <div className="api-workspace">
-    <PageHeader title="接口测试" description="从一个请求开始，验证接口，再串联完整业务" extra={<Space><Button onClick={() => setTab("login")}>登录与加密</Button><Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>调试历史</Button><Button icon={<UploadOutlined />} onClick={() => { setPreview(undefined); setImportOpen(true); }}>导入接口</Button></Space>} />
-    <div className="api-workspace-context"><div className="api-workspace-counts"><span><strong>{currentDefinitions.length}</strong> 个接口</span><span><strong>{cases.filter((c) => c.api).length}</strong> 条单接口用例</span><span><strong>{flows.length}</strong> 个业务场景</span></div><div className="api-environment">{env ? <><span className="api-muted">执行环境</span><EnvSelect project={project} value={env} onChange={setEnv} disabled={busy} width={180} /></> : <Button size="small" onClick={() => openSettings?.({ addEnv: true })}>配置执行环境</Button>}</div></div>
+    <PageHeader title="接口测试" extra={<Space wrap>
+      {tab !== "regression" && (env ? <EnvSelect project={project} value={env} onChange={setEnv} disabled={busy} width={160} /> : <Button onClick={() => openSettings?.({ addEnv: true })}>配置执行环境</Button>)}
+      <Button onClick={() => { if (!valid) { void message.warning("请先修正编辑器中的无效内容"); return; } setTab("login"); }}>接口登录</Button>
+      <Dropdown trigger={["click"]} menu={{ items: [
+        { key: "history", label: "调试历史", icon: <HistoryOutlined /> },
+        { key: "regression", label: "回归执行" },
+        { key: "login", label: "登录与加密" },
+      ], onClick: ({ key }) => { if (key === "history") setHistoryOpen(true); else if (!valid && ["request", "flows"].includes(tab)) void message.warning("请先修正当前编辑器中的无效内容"); else setTab(key); } }}>
+        <Button type="text" icon={<MoreOutlined />} aria-label="更多接口工具" title="更多工具" />
+      </Dropdown>
+      <Button icon={<UploadOutlined />} onClick={() => { setPreview(undefined); setImportOpen(true); }}>导入接口</Button>
+    </Space>} />
     {loadError && <Alert type="error" message="接口工作台加载失败" description={loadError} action={<Button onClick={() => void refresh()}>重试</Button>} />}
     <Tabs className="api-workspace-tabs" activeKey={tab} onChange={(next) => {
       if (!valid && ["request", "flows"].includes(tab)) { void message.warning("请先修正当前编辑器中的无效内容"); return; }
       setTab(next);
     }} items={[
-      { key: "definitions", label: "接口管理" }, { key: "request", label: "单接口测试" }, { key: "flows", label: "业务场景" }, { key: "regression", label: "回归执行" }, { key: "login", label: "登录与加密" },
+      { key: "definitions", label: "接口文档" }, { key: "request", label: "请求调试" }, { key: "flows", label: "业务场景" },
+      ...(tab === "regression" ? [{ key: "regression", label: "回归执行" }] : []),
+      ...(tab === "login" ? [{ key: "login", label: "登录与加密" }] : []),
     ]} />
     {loading ? <div className="api-loading"><Spin tip="正在读取接口资产" /></div> : tab === "login" ? <ApiLoginWorkspace project={project} env={env} onProtocol={() => setProtocolOpen(true)} /> : tab === "regression" ? <div className="api-regression"><RunPage project={project} /></div> : tab === "flows" ? <div className="api-workbench-layout api-flow-layout">
       <aside className="api-directory"><div className="api-directory-top"><span>业务场景</span><Button size="small" type="text" aria-label="新建业务场景" icon={<PlusOutlined />} onClick={() => askDiscard(flowDirty, () => { setFlow(newDraft("flow")); setFlowDirty(false); setFlowResult(undefined); resetEditor(); })} /></div><div className="api-directory-list">{flows.map((c) => <button className={`api-directory-row ${flow.id === c.id ? "selected" : ""}`} key={c.id} onClick={() => loadCase(c)}><span>{c.title}</span><span className="api-directory-path">{c.api_flow!.length} 个步骤 · {c.api_needs_review ? "接口待检查" : c.status === "reviewed" ? "已审核" : "草稿"}</span></button>)}{!flows.length && <p className="api-muted api-directory-empty">创建场景，将多个请求串成业务流程</p>}</div><div className="api-directory-note">测试集用于批量选择，业务场景负责顺序与依赖</div></aside>
@@ -184,24 +204,42 @@ function ApiWorkspace({ project }: { project: Project }) {
     </div> : <div className="api-workbench-layout">{directory}<main className="api-workbench-main">
       {tab === "definitions" ? selected ? <><div className="api-definition-heading"><div><div className="api-overline">{selected.module} <span>定义版本 {selected.revision}</span></div><h2>{selected.summary}</h2><div className="api-definition-path"><Method method={selected.method} /><code>{selected.path}</code></div></div><Button type="primary" icon={<ArrowRightOutlined />} iconPosition="end" disabled={selected.removed} onClick={() => { if (!single.steps[0]?.definition_id) selectDefinition(selected, true); else setTab("request"); }}>调试此接口</Button></div>
         <div className="api-definition-meta"><span>来源 {selected.title || selected.source}</span><span>文档版本 {selected.version || "未声明"}</span><span>{selected.request.auth ? "需要鉴权" : "无需鉴权"}</span></div>
-        <div className="api-definition-content"><h4>请求参数</h4><Table size="small" rowKey={(r) => `${r.location}:${r.name}`} pagination={false} dataSource={selected.operation.params} columns={[{ title: "参数名", dataIndex: "name", render: (v) => <code>{v}</code> }, { title: "位置", dataIndex: "location" }, { title: "类型", dataIndex: "schema", render: (v) => String(v.type ?? "—") }, { title: "必填", dataIndex: "required", render: (v) => v ? "是" : "否" }]} />
+        <div className="api-definition-content"><h4>请求参数</h4>{selected.operation.params.length ? <Table size="small" locale={{ emptyText: <span className="api-muted">此接口未声明路径或查询参数</span> }} rowKey={(r) => `${r.location}:${r.name}`} pagination={false} dataSource={selected.operation.params} columns={[{ title: "参数名", dataIndex: "name", render: (v) => <code>{v}</code> }, { title: "位置", dataIndex: "location" }, { title: "类型", dataIndex: "schema", render: (v) => String(v.type ?? "—") }, { title: "必填", dataIndex: "required", render: (v) => v ? "是" : "否" }]} /> : <p className="api-muted api-no-params">无路径或查询参数</p>}
           {selected.operation.body_schema && <Collapse style={{ marginTop: 24 }} items={[{ key: "body", label: "请求体结构", children: <pre className="api-response-code">{JSON.stringify(selected.operation.body_schema, null, 2)}</pre> }]} />}
           <h4 className="api-section-heading">响应定义</h4><Collapse items={Object.entries(selected.operation.responses).map(([status, schema]) => ({ key: status, label: <span className="api-mono">HTTP {status}</span>, children: <pre className="api-response-code">{JSON.stringify(schema, null, 2)}</pre> }))} />
           <div className="api-section-toolbar"><h4>关联单接口用例</h4><Button size="small" icon={<PlusOutlined />} disabled={busy || selected.removed || selected.unsupported_body} onClick={() => setGenerationDraft(clone(single.steps[0]?.definition_id === selected.id ? single : { ...newDraft("single"), title: `${selected.module}-${selected.summary}`, steps: [selected.request] }))}>根据参数生成用例</Button></div>{caseRows(related)}
-        </div></> : <div className="api-intro-empty"><div className="api-empty-symbol"><ApiOutlined /></div><h2>{definitions.length ? "选择一个接口" : "先导入接口，再验证业务"}</h2><p>{definitions.length ? "查看参数与响应定义，或进入单接口测试发送请求" : "支持 OpenAPI 3.x 与 Swagger 2.0，导入后保留接口目录和版本"}</p><Button type="primary" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>导入接口定义</Button><div className="api-empty-sequence"><span>接口定义</span><ArrowRightOutlined /><span>单接口用例</span><ArrowRightOutlined /><span>业务场景</span></div><Button type="text" icon={<FileTextOutlined />} disabled={busy} onClick={() => run("requirement", async () => {
+        </div></> : <div className="api-intro-empty"><div className="api-empty-symbol"><ApiOutlined /></div><h2>{definitions.length ? "选择一个接口" : "先导入接口，再验证业务"}</h2><p>{definitions.length ? "查看参数与响应定义，或进入单接口测试发送请求" : "支持 OpenAPI 3.x 与 Swagger 2.0，导入后保留接口目录和版本"}</p>{currentDefinitions.length ? <Button type="primary" icon={<ArrowRightOutlined />} onClick={() => selectDefinition(currentDefinitions[0])}>打开第一个接口</Button> : <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>导入接口定义</Button>}<div className="api-empty-sequence"><span>接口定义</span><ArrowRightOutlined /><span>单接口用例</span><ArrowRightOutlined /><span>业务场景</span></div><Button type="text" icon={<FileTextOutlined />} disabled={busy} onClick={() => run("requirement", async () => {
           const file = await api().pickFile([{ name: "需求文档", extensions: ["md", "docx", "pdf", "txt"] }]); if (!file) return;
           await api().generateCases(project.id, file); notifyProjectChanged(project.id); goTab?.("cases");
         })}>从需求文档设计用例（调用模型）</Button></div>
-        : <>{executionToolbar}<Collapse ghost items={[{ key: "inputs", label: "请求输入变量", children: <JsonField key={`single-inputs:${editorKey}`} label="请求输入变量" object value={single.inputs} onChange={(inputs) => setDraft({ ...single, inputs })} onValidity={(v) => validity("single:inputs", v)} rows={4} /> }]} />{requestEditor(single.steps[0], 0)}{!valid && <Alert type="error" message="请修正参数、JSON 或状态码后继续" />}<ExecutionResult result={result} /><div className="api-related-cases"><div className="api-section-toolbar"><h4>此接口的用例</h4>{single.steps[0]?.definition_id && <Button size="small" disabled={!valid} onClick={() => { setFlow((old) => ({ ...old, inputs: { ...single.inputs, ...old.inputs }, steps: [...old.steps, clone(single.steps[0])] })); setFlowDirty(true); setTab("flows"); resetEditor(); }}>加入业务场景</Button>}</div>{caseRows(related)}</div></>}
+        : <>{executionToolbar}{requestEditor(single.steps[0], 0)}{!valid && <Alert type="error" message="请修正参数、JSON 或状态码后继续" />}<ExecutionResult result={result} /><div className="api-related-cases"><div className="api-section-toolbar"><h4>此接口的用例</h4>{single.steps[0]?.definition_id && <Button size="small" disabled={!valid} onClick={() => { setFlow((old) => ({ ...old, inputs: { ...single.inputs, ...old.inputs }, steps: [...old.steps, clone(single.steps[0])] })); setFlowDirty(true); setTab("flows"); resetEditor(); }}>加入业务场景</Button>}</div>{caseRows(related)}</div></>}
     </main></div>}
     {generationDraft && <GenerateParameterCases projectId={project.id} draft={generationDraft} result={result} onClose={() => setGenerationDraft(undefined)} onSaved={async () => { notifyProjectChanged(project.id); await refresh(); }} />}
-    <Drawer title="导入接口定义" width={680} open={importOpen} onClose={() => { if (!busy) setImportOpen(false); }} extra={<Button disabled={busy} onClick={() => { setPreview(undefined); setSource(""); }}>重新选择</Button>}>
+    <Drawer title="导入接口定义" className="api-import-drawer" width={680} footer={preview && <div className="api-import-footer"><span>已选择 <strong>{importKeys.length}</strong> 个接口</span><Button type="primary" loading={activeKey === "import"} disabled={busy || !importKeys.length} onClick={() => run("import", async () => {
+          await api().importApiDefinitions(project.id, { ...preview, selected_keys: importKeys }); await refresh(); setImportOpen(false); setPreview(undefined); setImportKeys([]); setTab("definitions"); notifyProjectChanged(project.id);
+        }, "接口目录已更新")}>确认导入（{importKeys.length} 项）</Button></div>} open={importOpen} onClose={() => { if (!busy) setImportOpen(false); }} extra={<Button disabled={busy} onClick={() => { setPreview(undefined); setSource(""); }}>重新选择</Button>}>
       {!preview ? <div className="api-import-body"><p className="api-muted">先预览变更，再确认导入。此操作不会自动生成用例或脚本</p><button className="api-import-file" disabled={busy} onClick={() => run("pick", async () => {
-        const file = await api().pickFile([{ name: "OpenAPI / Swagger", extensions: ["json", "yaml", "yml"] }]); if (file) setPreview(await api().previewApiImport(project.id, file));
+        const file = await api().pickFile([{ name: "OpenAPI / Swagger", extensions: ["json", "yaml", "yml"] }]); if (file) acceptPreview(await api().previewApiImport(project.id, file));
       })}><UploadOutlined /><strong>选择 OpenAPI 文件</strong><span>JSON / YAML / YML</span></button><div className="api-import-divider">或从文档地址导入</div><label htmlFor="api-source-url">规范文档地址</label><Input id="api-source-url" placeholder="https://example.com/v3/api-docs" value={source} disabled={busy} onChange={(e) => setSource(e.target.value)} /><p className="api-muted">请填写规范 JSON/YAML 地址，非 Swagger UI 页面</p><Button type="primary" loading={busy} disabled={!source.trim()} onClick={() => previewSource(source)}>预览接口变更</Button></div>
-        : <><div className="api-import-summary"><h3>{preview.title}</h3><span className="api-muted">版本 {preview.version || "未声明"} · {preview.changes.length} 项</span></div><Space wrap>{Object.entries(changeLabels).map(([key, label]) => <span className="api-muted" key={key}>{label} {preview.changes.filter((c) => c.change === key).length}</span>)}</Space><Table style={{ marginTop: 24 }} rowKey={(r) => `${r.method}:${r.path}`} size="small" dataSource={preview.changes} pagination={{ pageSize: 10 }} columns={[{ title: "接口", render: (_, c) => <><Method method={c.method} /><code className="api-import-path">{c.path}</code><div className="api-muted">{c.summary}</div></> }, { title: "变更", dataIndex: "change", width: 108, render: (v: keyof typeof changeLabels) => changeLabels[v] }]} /><Alert type="info" message="接口更新保留人工用例配置，受影响用例会回到待检查状态" /><Button type="primary" className="api-import-confirm" loading={activeKey === "import"} disabled={busy} onClick={() => run("import", async () => {
-          await api().importApiDefinitions(project.id, preview); await refresh(); setImportOpen(false); setTab("definitions"); notifyProjectChanged(project.id);
-        }, "接口目录已更新")}>确认导入</Button></>}
+        : <><div className="api-import-summary"><div><h3>{preview.title}</h3><span className="api-muted">版本 {preview.version || "未声明"} · {preview.changes.length} 个接口</span></div></div>
+          <div className="api-import-stats">{Object.entries(changeLabels).map(([key, label]) => {
+            const count = preview.changes.filter((c) => c.change === key).length;
+            return count > 0 && <span key={key} className={`api-import-stat api-import-stat-${key}`}>{label}<strong>{count}</strong></span>;
+          })}</div>
+          <div className="api-import-selection"><div><h4>选择要导入的模块</h4><p>展开模块可单独选择接口</p></div><Space size={0}><Button type="text" size="small" disabled={busy} onClick={() => setImportKeys(preview.changes.map((c) => `${c.method}:${c.path}`))}>全选</Button><Button type="text" size="small" disabled={busy} onClick={() => setImportKeys([])}>清空</Button></Space></div>
+          <Collapse className="api-import-modules" expandIconPosition="end" items={importClusters.map((cluster) => {
+            const rows = cluster.rows;
+            const keys = rows.map((c) => `${c.method}:${c.path}`);
+            const count = keys.filter((key) => importKeys.includes(key)).length;
+            return {
+              key: JSON.stringify(cluster.modules),
+              label: <div className="api-import-module"><Checkbox aria-label={`选择模块 ${cluster.label}`} disabled={busy} checked={count === keys.length} indeterminate={count > 0 && count < keys.length}
+                onClick={(e) => e.stopPropagation()} onChange={(e) => setImportKeys((old) => e.target.checked ? [...new Set([...old, ...keys])] : old.filter((key) => !keys.includes(key)))} /><FolderOutlined /><span>{cluster.label}</span>{cluster.modules.length > 1 && <span className="api-import-cluster-badge">相似模块</span>}<span className="api-import-module-count">{count} / {rows.length}</span></div>,
+              children: <Table size="small" rowKey={(r) => `${r.method}:${r.path}`} dataSource={rows} pagination={{ pageSize: 10, hideOnSinglePage: true }}
+                rowSelection={{ selectedRowKeys: importKeys, onChange: (selected) => setImportKeys((old) => [...old.filter((key) => !keys.includes(key)), ...selected.map(String).filter((key) => keys.includes(key))]), getCheckboxProps: () => ({ disabled: busy }) }}
+                columns={[{ title: "接口", render: (_, c) => <><Method method={c.method} /><code className="api-import-path">{c.path}</code><div className="api-muted">{c.summary}{cluster.modules.length > 1 && ` · ${c.module}`}</div></> }, { title: "变更", dataIndex: "change", width: 108, render: (v: keyof typeof changeLabels) => changeLabels[v] }]} />,
+            };
+          })} /><div className="api-import-note">按文档标签分组，并将名称相似的模块聚类展示；无标签接口归入「未分组」。仅应用勾选项，更新后受影响用例需重新检查。{preview.changes.some((c) => c.change === "removed") && <p>勾选「来源已移除」会将对应接口标记为已移除。</p>}</div></>}
     </Drawer>
     <Drawer title="调试历史" width={800} open={historyOpen} onClose={() => setHistoryOpen(false)}>{!history.length ? <Empty description="暂无调试记录" /> : <Collapse items={history.map((item) => ({ key: item.id, label: <span>{item.title} <span className="api-muted">{new Date(item.created_at).toLocaleString()} · {item.env}</span></span>, children: <ExecutionResult result={item} /> }))} />}<p className="api-muted">保留最近 50 次调试，凭据字段已脱敏</p></Drawer>
     <Drawer title="接口登录与加密" open={protocolOpen} onClose={() => setProtocolOpen(false)} width={640} destroyOnClose><ApiLoginCard project={project} env={env} /></Drawer>

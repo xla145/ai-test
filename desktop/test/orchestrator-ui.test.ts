@@ -348,3 +348,43 @@ it("passes cancellation to the AI task and records consumed tokens before unlock
   expect(calls.find(args => args[0] === "add-tokens")).toContain("12");
   expect(orch.uiBusy()).toBe(false);
 });
+
+it("retains queryable task progress and distinguishes failed runs from completed requests", async () => {
+  const { engine, ui, secretEnv } = setup([]);
+  let finish!: (value: any) => void;
+  const execution = new Promise<any>(resolve => { finish = resolve; });
+  const started = Promise.withResolvers<void>();
+  ui.runUiSuite = vi.fn(async (opts) => {
+    opts.onProgress?.({ title: "正在定位保存按钮", status: "running", caseId: "tc_a" });
+    started.resolve();
+    return execution;
+  }) as any;
+  const orch = new Orchestrator({ engine, ui, secretEnv, agent: vi.fn() });
+  const run = orch.runUiRegression("p1", "test");
+  await started.promise;
+  const snapshot = orch.uiTasks();
+  expect(snapshot).toHaveLength(1);
+  expect(snapshot[0]).toMatchObject({ projectId: "p1", env: "test", status: "running", stage: "执行脚本步骤", detail: "正在定位保存按钮" });
+  snapshot[0].status = "completed";
+  expect(orch.uiTasks()[0].status).toBe("running");
+  finish({ exitCode: 1, htmlReport: "", stderr: "", results: [{ case_id: "tc_a", status: "failed", duration: 0, message: "failed", reviews: [], evidence_paths: [] }] });
+  await run;
+  expect(orch.uiTasks()[0]).toMatchObject({ status: "failed", runId: "run_1", finishedAt: expect.any(String) });
+});
+
+it("tracks stopping until the active task actually exits", async () => {
+  const { engine, ui, secretEnv } = setup([]);
+  const started = Promise.withResolvers<void>();
+  ui.runUiSuite = vi.fn(async ({ signal }) => new Promise((_resolve, reject) => {
+    signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    started.resolve();
+  })) as any;
+  const orch = new Orchestrator({ engine, ui, secretEnv, agent: vi.fn() });
+  const run = orch.runUiRegression("p1", "test");
+  await started.promise;
+  expect(() => orch.stopUiTask("other", "test")).toThrow("不属于");
+  orch.stopUiTask("p1", "test");
+  expect(orch.uiTasks()[0].status).toBe("stopping");
+  await expect(run).rejects.toThrow("UI_TASK_STOPPED");
+  expect(orch.uiTasks()[0].status).toBe("stopped");
+});

@@ -21,7 +21,9 @@ def _key(config, kind):
 
 def prepare(env, request, kwargs):
     config = env.get("api_crypto") or {}
-    headers = {**config.get("headers", {}), **kwargs.get("headers", {})}
+    request_headers = kwargs.get("headers", {})
+    overridden = {k.lower() for k in request_headers}
+    headers = {**{k: v for k, v in config.get("headers", {}).items() if k.lower() not in overridden}, **request_headers}
     kwargs = {**kwargs, "headers": headers}
     enabled = request.get("encrypt", False) or any(k.lower() == "isencrypt" and str(v).lower() == "true" for k, v in headers.items())
     if not enabled:

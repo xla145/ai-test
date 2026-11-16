@@ -6,7 +6,7 @@ import { EnvCredentials } from "../components/EnvCredentials";
 import { EnvSelect, useEnvChoice } from "../components/EnvPicker";
 import { PageHeader } from "../components/PageHeader";
 import { EnvTable, useProjects } from "../components/ProjectSettings";
-import { useLoad, useNarrow } from "../hooks";
+import { useLoad } from "../hooks";
 import { Usage } from "./OpsPage";
 import { Roles } from "./UiPage";
 
@@ -19,14 +19,13 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
   const childKey = projects.filter((p) => p.parent_id === group.id).map((p) => `${p.id}:${p.name}`).join(",");
   const overview = useLoad(() => api().projectOverview(group.id), [group.id, childKey]);
   const [env, setEnv] = useEnvChoice(group);
-  const [ref, narrow] = useNarrow<HTMLDivElement>();
   const children = overview.data?.children ?? [];
   const totalCases = children.reduce((n, c) => n + c.cases, 0);
   const monthTokens = children.reduce((n, c) => n + c.month_tokens, 0);
   const budget = overview.data?.budget;
 
   return (
-    <div ref={ref}>
+    <div className="section-page">
       <PageHeader
         title={group.name}
         description="大项目存放共享的执行环境、凭据、角色账号与预算，子项目自动继承；用例、脚本与执行记录在各子项目中。"
@@ -50,7 +49,7 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
         </Card>
       </div>
       <Tabs
-        tabPosition={narrow ? "top" : "left"}
+        tabPosition="top"
         items={[
           { key: "children", label: "子项目", children: (
             <Card size="small">
@@ -93,7 +92,7 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
           { key: "secrets", label: "环境凭据", children: <EnvCredentials project={group} env={env} onEnvChange={setEnv} /> },
           { key: "roles", label: "角色与登录", children: (
             <>
-              <Space style={{ marginBottom: 12 }}>
+              <Space wrap style={{ marginBottom: 12 }}>
                 <Typography.Text type="secondary">登录方式按环境配置：</Typography.Text>
                 <EnvSelect project={group} value={env} onChange={setEnv} width={180} />
               </Space>

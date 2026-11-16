@@ -89,6 +89,12 @@ export function CaseDrawer({ caseId, onClose, extra, data }: {
               <Typography.Title level={5} style={{ marginTop: 16 }}>{detail.api_flow?.length ? "接口流程" : "接口请求"}</Typography.Title>
               <Table size="small" pagination={false} rowKey={(_, i) => String(i)} scroll={{ x: 480 }}
                 dataSource={detail.api_flow?.length ? detail.api_flow : [detail.api!]}
+                expandable={{ expandedRowRender: (step: ApiStep) => <pre className="api-response-code">{JSON.stringify({
+                  path_params: step.path_params ?? {}, query: step.query ?? {}, headers: step.headers ?? {}, body: step.body ?? null,
+                  auth: step.auth !== false, role: step.role ?? "默认", expected_status: step.expected_status,
+                  expected_fields: step.expected_fields ?? {}, assertions: step.assertions ?? [], extract: step.extract ?? {},
+                  response_schema: step.response_schema, db_setup: step.db_setup, db_checks: step.db_checks,
+                }, null, 2)}</pre>, columnTitle: "详情", columnWidth: 48 }}
                 columns={[
                   { title: "#", width: 36, render: (_: unknown, __: unknown, i: number) => i + 1 },
                   { title: "步骤", render: (_: unknown, s: ApiStep) => (
