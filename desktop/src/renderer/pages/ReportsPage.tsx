@@ -11,6 +11,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Card,
   Col,
@@ -170,6 +171,11 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
   const d = detail.data;
   const resolvePath = (p: string) => (/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${project.workspace_path}/${p}`);
   const rows: ResultRow[] = (d?.results ?? []).filter((x: ResultRow) => !onlyFailed || ["failed", "error"].includes(x.status));
+  const suspectPasses = (d?.results ?? []).filter((x: ResultRow) => x.status === "passed" && x.api_trace?.steps?.some((step) => {
+    const body = step.response?.body;
+    return body && typeof body === "object" && !Array.isArray(body) && "code" in body && ("msg" in body || "message" in body)
+      && !["0", "200"].includes(String(body.code));
+  })).length;
 
   return (
     <Drawer
@@ -192,7 +198,14 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             { key: "t", label: "时间", children: fmt(d.run.started_at) },
             { key: "e", label: "环境", children: d.run.base_url ? <Tooltip title={d.run.base_url}>{d.run.env}</Tooltip> : d.run.env },
             { key: "d", label: "耗时", children: `${d.summary.duration.toFixed(1)} 秒` },
+            ...(d.run.framework === "pytest" ? [
+              { key: "identity", label: "批量调用身份", children: d.run.prefer_env_token ? "环境登录态（手动 token）" : d.run.selected_role || "按用例 / 环境默认（未统一指定）" },
+              { key: "business", label: "业务码校验", children: d.run.check_business_code === undefined ? "未记录" : d.run.check_business_code ? "已启用" : "已关闭" },
+            ] : []),
           ]} />
+          {suspectPasses > 0 && <Alert type="warning" showIcon style={{ marginTop: 12 }}
+            message={`有 ${suspectPasses} 条通过项返回了非成功业务码，请核对业务断言`}
+            description="这些可能是预期错误的反例，也可能只校验了 HTTP 200。原始执行结果保留；可关闭“仅看失败”查看响应，新执行建议启用业务码校验。" />}
           <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
             <Col xs={12} md={6}><Card size="small"><Statistic title="执行通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
             <Col xs={12} md={6}><Card size="small"><Statistic title="执行成功" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>

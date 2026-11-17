@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { BrowserSession, checkData, initCi, runAppSuite, runEngine, runUiSuite, seedData } from "@ai-test/mcp-servers";
 import yaml from "js-yaml";
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell, WebContentsView } from "electron";
+import { DirectStore } from "./directStore.js";
 import { evaluateCommand, evaluateFileChange, evaluateMcpElicitation, isInside, type ApprovalContext, type Verdict } from "./approval.js";
 import { CodexAppServer } from "./codex/appServer.js";
 import { buildCodexConfig } from "./codex/config.js";
@@ -25,7 +26,7 @@ import {
   type GlobalSettings,
 } from "./settings.js";
 import { readEvidenceImage } from "./evidence.js";
-import { browserClientHeaders, browserToken, requestToken } from "./browserToken.js";
+import { browserClientHeaders, currentBrowserCredential, requestToken } from "./browserToken.js";
 import { Orchestrator } from "./orchestrator.js";
 import { Updater } from "./updater.js";
 import { SecretStore, secretEnvFor, saveBrowserEnvSecret, startSecretBroker, type Broker } from "./secrets.js";
@@ -119,6 +120,7 @@ let viewShown = false;
 let broker: Broker | undefined;
 let codex: CodexAppServer | undefined;
 let executionOrchestrator: Orchestrator | undefined;
+let directStore: DirectStore | undefined;
 let secretStore: SecretStore;
 let approvalContext: ApprovalContext = { workspace: "", allowedHosts: [], productionHosts: [] };
 const pendingApprovals = new Map<string, (accept: boolean) => void>();
@@ -450,9 +452,34 @@ async function saveAs(defaultName: string, filters: { name: string; extensions: 
   return r.filePath;
 }
 
-function registerIpc(orch: Orchestrator): void {
+function registerIpc(orch: Orchestrator, ds: DirectStore): void {
   const handlers: Record<string, (...a: any[]) => unknown> = {
-    listProjects: async () => rememberParents(await orch.listProjects()),
+    // ---- 直连 SQLite 的只读查询（不再 spawn Python 子进程） ----
+    listProjects: () => rememberParents(ds.listProjects()),
+    listCases: (p: string, filters: any) => ds.listCases(p, filters),
+    pageCases: (p: string, q: any) => ds.pageCases(p, q),
+    pageIssues: (p: string, q: any) => ds.pageIssues(p, q),
+    pageProposals: (p: string, q: any) => ds.pageProposals(p, q),
+    pageReviews: (p: string, q: any) => ds.pageReviews(p, q),
+    pageAttributions: (p: string, q: any) => ds.pageAttributions(p, q),
+    getCase: (c: string) => ds.getCase(c),
+    caseTitles: (p: string, ids: string[]) => ds.caseTitles(p, ids),
+    scriptMap: (framework: string) => ds.scriptMap(framework),
+    listRoles: (p: string) => ds.listRoles(p),
+    listRuns: (p: string, framework?: "pytest" | "playwright") => ds.listRuns(p, 100, framework),
+    tokenUsage: (p: string) => ds.tokenUsage(p),
+    getSettings: (p: string) => ds.getSettings(p),
+    getSettingsDetail: (p: string) => ds.getSettingsDetail(p),
+    metrics: (p: string) => ds.metrics(p),
+    stability: (p: string) => ds.stability(p),
+    usageReport: (p: string, days?: number) => ds.usageReport(p, days),
+    checkBudget: (p: string) => ds.checkBudget(p),
+    caseHistory: (id: string) => ds.caseHistory(id),
+    performanceHistory: (p: string) => ds.performanceHistory(p),
+    listAttributions: (p: string, pendingOnly?: boolean) => ds.pageAttributions(p, { page: 1, pageSize: 10000, pending: pendingOnly ?? true }).items,
+    // ---- 仍需 Python 引擎的写操作与复杂业务逻辑 ----
+    // 覆盖分析需要读取脚本、映射及执行版本证据，不能用 SQLite 数量统计替代。
+    coverage: (p: string, env?: string) => orch.coverage(p, env),
     createProject: async (name: string, ws: string, envs, opts?: Parameters<Orchestrator["createProject"]>[3]) => {
       const out = await orch.createProject(name, ws, envs, opts);
       await refreshParents(orch);
@@ -464,15 +491,8 @@ function registerIpc(orch: Orchestrator): void {
       return out;
     },
     projectOverview: (g: string) => orch.projectOverview(g),
-    getSettingsDetail: (p: string) => orch.getSettingsDetail(p),
     importExcel: (p: string, f: string) => orch.importExcel(p, f),
     lint: (p: string) => orch.lint(p),
-    listCases: (p: string, filters) => orch.listCases(p, filters),
-    pageCases: (p: string, q) => orch.pageCases(p, q),
-    pageIssues: (p: string, q) => orch.pageIssues(p, q),
-    pageProposals: (p: string, q) => orch.pageProposals(p, q),
-    pageReviews: (p: string, q) => orch.pageReviews(p, q),
-    pageAttributions: (p: string, q) => orch.pageAttributions(p, q),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
     listApiDefinitions: (p: string) => orch.listApiDefinitions(p),
@@ -500,13 +520,12 @@ function registerIpc(orch: Orchestrator): void {
       await setApprovalContext(orch, p);
       return orch.runRegression(p, env, opts);
     },
-    tokenUsage: (p: string) => orch.tokenUsage(p),
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
       secretStore.set(SecretStore.ref(p, env), { authToken, authHeader }),
     openApiLogin: async (p: string, env: string, loginUrl: string, authHeader = "Authorization") => {
       if (orch.uiBusy()) throw new Error("请先结束正在执行的 UI 任务或调试");
-      const project = (await orch.listProjects()).find((item) => item.id === p);
-      const cfg = project?.environments[env];
+      const project = ds.getProject(p);
+      const cfg = project?.environments[env] as { base_url: string; production?: boolean } | undefined;
       if (!cfg) throw new Error("项目或环境不存在");
       const url = new URL(loginUrl || "/", cfg.base_url);
       if (!/^https?:$/.test(url.protocol)) throw new Error("登录页必须使用 HTTP 或 HTTPS");
@@ -545,10 +564,12 @@ function registerIpc(orch: Orchestrator): void {
       const cookies = [...new Map(cookieLists.flat().map((cookie) => [cookie.name + "|" + cookie.domain + "|" + cookie.path, cookie])).values()];
       const captured = apiLoginTokens.get(`${p}:${env}:api-login`);
       const fromRequest = !options.key?.trim() && captured?.header.toLowerCase() === header.toLowerCase() ? captured.value : undefined;
-      const authToken = fromRequest ?? browserToken([...storage, ...cookies.map((c): [string, string] => [c.name, c.value])], options.key?.trim(), options.prefix ?? "Bearer ");
+      const { authToken, clientHeaders } = currentBrowserCredential(storage,
+        cookies.map((c): [string, string] => [c.name, c.value]),
+        fromRequest ? { value: fromRequest, clientHeaders: captured?.clientHeaders } : undefined,
+        options.key?.trim(), options.prefix ?? "Bearer ");
       const owner = project.inherited_environments?.[env] ?? p;
       const { envCfg } = await orch.environmentOwner(p, env);
-      const clientHeaders = browserClientHeaders(authToken, fromRequest ? captured?.clientHeaders : undefined);
       const login = (envCfg as unknown as { api_login?: Record<string, unknown> }).api_login;
       if (Object.keys(clientHeaders).length || login?.default_role) {
         const apiLogin = login ? { ...login } : undefined;
@@ -586,7 +607,6 @@ function registerIpc(orch: Orchestrator): void {
       }
       return status;
     },
-    listRoles: (p: string) => orch.listRoles(p),
     setEnvironment: (p: string, env: string, cfg) => orch.setEnvironment(p, env, cfg),
     deleteEnvironment: async (p: string, env: string) => {
       const out = await orch.deleteEnvironment(p, env);
@@ -603,9 +623,6 @@ function registerIpc(orch: Orchestrator): void {
       await refreshParents(orch);
       return out;
     },
-    getCase: (c: string) => orch.getCase(c),
-    scriptMap: (framework: string) => orch.scriptMap(framework),
-    caseTitles: (p: string, ids: string[]) => orch.caseTitles(p, ids),
     exploreUiCase: async (p: string, env: string, caseId: string, opts?: { confirmProduction?: boolean; selectedRole?: string }) => {
       await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId, opts);
@@ -638,23 +655,15 @@ function registerIpc(orch: Orchestrator): void {
       return orch.reviseUiScript(p, env, id, feedback, opts);
     },
     listProposals: (status?: string) => orch.listProposals(status),
-    // ---- 三期 ----
-    usageReport: (p: string, days?: number) => orch.usageReport(p, days),
-    checkBudget: (p: string) => orch.checkBudget(p),
-    getSettings: (p: string) => orch.getSettings(p),
+    // ---- 三期：写操作仍走 Python ----
     setSettings: (p: string, settings) => orch.setSettings(p, settings),
-    metrics: (p: string) => orch.metrics(p),
     runPerformance: (p: string, env: string, options) => orch.runPerformance(p, env, options),
-    performanceHistory: (p: string) => orch.performanceHistory(p),
-    caseHistory: (id: string) => orch.caseHistory(id),
-    coverage: (p: string, env?: string) => orch.coverage(p, env),
-    stability: (p: string) => orch.stability(p),
-    listAttributions: (p: string, pendingOnly?: boolean) => orch.listAttributions(p, pendingOnly ?? true),
     confirmAttribution: (runId: string, caseId: string, type: string) => orch.confirmAttribution(runId, caseId, type),
     exportWorkspace: (p: string) => orch.exportWorkspace(p),
     importWorkspace: (dir: string) => orch.importWorkspace(dir),
-    initCi: async (p: string, provider: "github" | "gitlab", toolRepo: string, env: string) => {
-      const project = await orch.project(p);
+    initCi: (p: string, provider: "github" | "gitlab", toolRepo: string, env: string) => {
+      const project = ds.getProject(p);
+      if (!project) throw new Error(`项目不存在：${p}`);
       return initCi(project.workspace_path, provider, toolRepo, env);
     },
     modelPresets: () => PRESETS,
@@ -712,9 +721,12 @@ function registerIpc(orch: Orchestrator): void {
       const parent = projectParents.get(p);
       return name in { ...(parent ? secretStore.dbPasswords(parent, env) : {}), ...secretStore.dbPasswords(p, env) };
     },
-    readEvidenceImage: async (projectId: string, path: string) => readEvidenceImage((await orch.project(projectId)).workspace_path, path),
-    // ---- 测试报告 ----
-    listRuns: (p: string, framework?: "pytest" | "playwright") => orch.listRuns(p, framework),
+    readEvidenceImage: async (projectId: string, path: string) => {
+      const project = ds.getProject(projectId);
+      if (!project) throw new Error(`项目不存在：${projectId}`);
+      return readEvidenceImage(project.workspace_path, path);
+    },
+    // ---- 测试报告（runDetail 需读磁盘证据，仍走 Python） ----
     runDetail: (runId: string) => orch.runDetail(runId),
     exportReport: async (runIds: string[], format: "html" | "xlsx" | "json") => {
       const ext = format === "html" ? "html" : format === "json" ? "json" : "xlsx";
@@ -781,6 +793,7 @@ function rememberParents<T extends { id: string; parent_id?: string }[]>(project
 }
 
 async function refreshParents(orch: Orchestrator): Promise<void> {
+  if (directStore) { rememberParents(directStore.listProjects()); return; }
   rememberParents(await orch.listProjects());
 }
 
@@ -818,7 +831,19 @@ function scheduleUpdateChecks(u: Updater): void {
   setInterval(() => auto() && void u.check(), 4 * 60 * 60_000);
 }
 
+function setApprovalContextFromDs(projectId: string): void {
+  const p = directStore?.getProject(projectId);
+  if (!p) return;
+  const hosts = (prod: boolean) =>
+    Object.values(p.environments as Record<string, any>)
+      .filter((e: any) => Boolean(e.production) === prod)
+      .map((e: any) => new URL(e.base_url).hostname);
+  approvalContext = { workspace: p.workspace_path, allowedHosts: hosts(false), productionHosts: hosts(true) };
+}
+
 async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
+  // 优先直连 SQLite，仅在 DirectStore 未初始化时回退到 Python
+  if (directStore) { setApprovalContextFromDs(projectId); return; }
   const p = await orch.project(projectId);
   const hosts = (prod: boolean) =>
     Object.values(p.environments)
@@ -855,6 +880,9 @@ app.whenReady().then(async () => {
     taskFile: join(paths.data(), "execution-tasks.json"),
   });
   executionOrchestrator = orch;
+  // 直连 SQLite 的只读查询层：替代高频读操作的 Python 子进程调用
+  const ds = new DirectStore(paths.db());
+  directStore = ds;
   await refreshParents(orch).catch(() => undefined);
   orch.on("progress", (p) => {
     if ((p.stage === "ui-step" || p.stage === "ui-debug") && p.role) {
@@ -863,7 +891,7 @@ app.whenReady().then(async () => {
     }
     mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p });
   });
-  registerIpc(orch);
+  registerIpc(orch, ds);
   createWindow();
   updater = createUpdater();
   scheduleUpdateChecks(updater);
@@ -872,5 +900,6 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   codex?.stop();
   void broker?.close();
+  directStore?.close();
   if (process.platform !== "darwin") app.quit();
 });

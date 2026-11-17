@@ -1,6 +1,6 @@
 import type { ApiDefinition } from "../../shared/apiWorkspace";
 import { ChromeOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Collapse, Progress, Select, Space, Statistic, Switch, Table, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Progress, Select, Space, Statistic, Switch, Table, Tooltip, Typography } from "antd";
 import { useState } from "react";
 import { api, type Project, type TestCase } from "../api";
 import { ApiCasePicker } from "../components/ApiCasePicker";
@@ -32,6 +32,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
   const [available, setAvailable] = useState<TestCase[]>([]);
   const [preparing, setPreparing] = useState(false);
   const [autoTriage, setAutoTriage] = useState(true);
+  const [checkBusinessCode, setCheckBusinessCode] = useState(true);
   const [selectedRole, setSelectedRole] = useState<string>();
   const roles = useLoad(async () => {
     const [names, status] = await Promise.all([api().listRoles(project.id), api().roleSecretStatus(project.id)]);
@@ -41,7 +42,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
     }));
   }, [project.id]);
   useProjectChanged(project.id, () => { void roles.reload(); });
-  const identityReady = selectedRole !== undefined && (selectedRole === "" || !!roles.data?.some((r) => r.value === selectedRole && !r.disabled));
+  const identityReady = selectedRole !== undefined && (selectedRole === "" || selectedRole === "__case" || !!roles.data?.some((r) => r.value === selectedRole && !r.disabled));
   const { busy, run } = useAction();
 
   if (!envs.length) return <NoEnvironment project={project} purpose="执行接口回归" />;
@@ -62,12 +63,12 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
           <Space><Typography.Text type="secondary">环境</Typography.Text><EnvSelect project={project} value={env} onChange={setEnv} showUrl disabled={busy} /></Space>
           <Space><Typography.Text type="secondary">调用身份</Typography.Text><Select aria-label="批量执行调用身份" placeholder="请选择调用身份"
             style={{ minWidth: 200 }} value={selectedRole} onChange={setSelectedRole} loading={roles.loading} disabled={busy}
-            options={[{ value: "", label: "按用例 / 环境默认" }, ...(roles.data ?? [])]} /></Space>
+            options={[{ value: "", label: "环境登录态（手动 token）" }, { value: "__case", label: "按用例角色 / 鉴权设置" }, ...(roles.data ?? [])]} /></Space>
           <Button icon={<ChromeOutlined />} onClick={() => api().openTestPage(project.environments[env].base_url)}>打开测试页面</Button>
           <RunButton project={project} env={env} loading={busy} disabled={preparing || !env || !identityReady || !available.length}
             onRun={(confirmProduction) => run(async () => {
               await api().writeReviewedApiSuite(project.id);
-              setResult((await api().runRegression(project.id, env, { confirmProduction, autoTriage, selectedRole: selectedRole || undefined, caseIds: available.map((c) => c.id) })) as RunResult);
+              setResult((await api().runRegression(project.id, env, { confirmProduction, autoTriage, checkBusinessCode, preferEnvToken: selectedRole === "", selectedRole: selectedRole && selectedRole !== "__case" ? selectedRole : undefined, caseIds: available.map((c) => c.id) })) as RunResult);
               notifyProjectChanged(project.id);
             })}>
             {definitions ? "接口范围回归" : "全量回归"}（{available.length}）
@@ -75,8 +76,10 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
         </>}
       />
       <Typography.Paragraph type="secondary">
-        {selectedRole ? `本次调用身份：${selectedRole}。未指定角色的请求统一携带该身份的鉴权；流程中已指定的角色保留。需要验证不携带鉴权的请求时，请选择“按用例 / 环境默认”。`
-          : "执行前请选择调用身份；选择“按用例 / 环境默认”时保留各请求原有的鉴权设置。角色凭据可在下方“多账号”中配置。"}
+        {selectedRole === undefined ? "执行前请选择调用身份。" : selectedRole === ""
+          ? "统一使用所选环境手动保存的 token，覆盖用例角色及默认不携带鉴权的设置；请先在当前环境手动登录并保存 token。"
+          : selectedRole === "__case" ? "保留用例自身的角色及鉴权设置，适用于多角色流程和未鉴权反例。"
+          : `本次调用身份：${selectedRole}。未指定角色的请求统一携带该身份的鉴权；流程中已指定的角色保留。`}
       </Typography.Paragraph>
       {definitions && <Alert type="info" showIcon style={{ marginBottom: 16 }} message={`当前范围：${definitions.length} 个接口`} description={<>{definitions.map((d) => `${d.method} ${d.path}`).join("、")}。仅执行这些接口的已审核单接口用例；业务场景请在全量范围中单独选择。</>} action={<Button disabled={busy} onClick={onClearScope}>清除接口范围</Button>} />}
       <ApiCasePicker definitions={definitions} projectId={project.id} selected={selected} onSelect={setSelected} onAvailable={setAvailable}
@@ -86,12 +89,15 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
           disabled={preparing || !env || !identityReady || !selected.length || selected.some((id) => !available.some((c) => c.id === id))}
           onRun={(confirmProduction) => run(async () => {
             await api().writeReviewedApiSuite(project.id);
-            setResult((await api().runRegression(project.id, env, { confirmProduction, autoTriage, selectedRole: selectedRole || undefined, caseIds: selected })) as RunResult);
+            setResult((await api().runRegression(project.id, env, { confirmProduction, autoTriage, checkBusinessCode, preferEnvToken: selectedRole === "", selectedRole: selectedRole && selectedRole !== "__case" ? selectedRole : undefined, caseIds: selected })) as RunResult);
             notifyProjectChanged(project.id);
           })}>
           执行选中项（{selected.length} 条）
         </RunButton>
         <Typography.Text type="secondary">仅向选中用例涉及的接口发送请求</Typography.Text>
+        <Tooltip title="响应包含 code 和 msg/message 时，默认仅将 code=0 或 200 判为业务成功；用例明确配置的业务码断言优先。其他响应结构不受影响。">
+          <Space><Switch aria-label="校验业务码" checked={checkBusinessCode} onChange={setCheckBusinessCode} disabled={busy} /><Typography.Text type="secondary">校验业务码</Typography.Text></Space>
+        </Tooltip>
         <Switch checked={autoTriage} disabled={busy} onChange={setAutoTriage} aria-label="未知失败使用 AI 分析" />
         <Typography.Text type="secondary">未知失败使用 AI 分析（消耗模型用量）</Typography.Text>
       </Space>

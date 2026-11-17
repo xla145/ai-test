@@ -199,7 +199,7 @@ function ApiWorkspace({ project }: { project: Project }) {
       children: renderDirectory(node.children ?? []),
     };
   });
-  const directory = <aside className="api-directory"><div className="api-directory-top"><Space size={8}><span>接口目录</span><span className="api-mono api-muted">{currentDefinitions.length}</span></Space><Button type="text" size="small" icon={<PlusOutlined />} aria-label="导入接口定义" title="导入接口定义" onClick={() => setImportOpen(true)} /></div>
+  const directory = <aside className="api-directory"><div className="api-directory-top"><Space size={8}><span>接口目录</span><span className="api-mono api-muted">{currentDefinitions.length}</span></Space></div>
     <Input aria-label="搜索接口" prefix={<SearchOutlined />} placeholder="搜索名称或路径" value={search} onChange={(e) => setSearch(e.target.value)} allowClear />
     <div className="api-directory-batch">
       <div className="api-directory-selection"><span className="api-selection-count">{checkedDefinitions.length ? <>已选 <strong>{checkedDefinitions.length}</strong> 个接口</> : "勾选接口以批量操作"}</span><Button type="text" size="small" disabled={busy || !checkedIds.length} onClick={() => setCheckedIds([])}>清空</Button></div>

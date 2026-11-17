@@ -26,7 +26,7 @@ export function ApiCaseList({ project, env, rows, onEdit, onChanged }: {
   }, "审核通过，可批量执行");
   return <>
     <Space wrap style={{ marginBlock: 12 }}>
-      <Typography.Text type="secondary">点击用例名称查看步骤、参数与预期</Typography.Text>
+      <Typography.Text type="secondary">点击用例名称查看步骤、参数与预期；执行选中仅运行确定性接口脚本</Typography.Text>
       <Button disabled={busy || !chosen.length || !chosen.every(reviewable)} loading={activeKey === "review"}
         onClick={() => review(chosen)}>审核选中（{chosen.length}）</Button>
       <RunButton project={project} env={env} loading={activeKey === "run"}
@@ -34,7 +34,7 @@ export function ApiCaseList({ project, env, rows, onEdit, onChanged }: {
         onRun={(confirmProduction) => run("run", async () => {
           setResult(undefined);
           await api().writeReviewedApiSuite(project.id);
-          const out = await api().runRegression(project.id, env, { confirmProduction, caseIds: chosen.map((c) => c.id) }) as { run: NonNullable<typeof result> };
+          const out = await api().runRegression(project.id, env, { confirmProduction, caseIds: chosen.map((c) => c.id), autoTriage: false }) as { run: NonNullable<typeof result> };
           setResult(out.run);
           notifyProjectChanged(project.id);
           await onChanged();

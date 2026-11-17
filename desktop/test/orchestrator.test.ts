@@ -33,20 +33,27 @@ describe("Orchestrator", () => {
     expect(orch.uiTasks()).toEqual([]);
     const runCall = calls.find(([a]) => a[0] === "run-api-suite")!;
     expect(runCall[0]).toEqual(["run-api-suite", "--project", "p1", "--env", "test"]);
-    expect(runCall[1]).toEqual({ AITEST_AUTH_TOKEN: "Bearer s" });
+    expect(runCall[1]).toEqual({ AITEST_AUTH_TOKEN: "Bearer s", AITEST_API_PREFER_ENV_TOKEN: "1" });
   });
 
   it("injects the selected API identity only into this run and keeps the selected environment", async () => {
     const { engine, calls } = fakeEngine({ run_id: "r1", total: 1, passed: 1, needs_agent: [] });
     const secretEnv = vi.fn(() => ({ AITEST_ROLE_TOKENS: '{"运营":"test-token"}' }));
     const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv });
-    await orch.runRegression("p1", "test", { selectedRole: "运营", caseIds: ["case1"] });
+    await orch.runRegression("p1", "test", { selectedRole: "运营", checkBusinessCode: true, caseIds: ["case1"] });
     const call = calls.find(([a]) => a[0] === "run-api-suite")!;
     expect(call[0]).toEqual(["run-api-suite", "--project", "p1", "--env", "test", "--case-ids", '["case1"]']);
-    expect(call[1]).toEqual({ AITEST_ROLE_TOKENS: '{"运营":"test-token"}', AITEST_API_SELECTED_ROLE: "运营" });
+    expect(call[1]).toEqual({ AITEST_ROLE_TOKENS: '{"运营":"test-token"}', AITEST_API_SELECTED_ROLE: "运营", AITEST_API_CHECK_BUSINESS_CODE: "1" });
     expect(secretEnv).toHaveBeenCalledWith("p1", "test", ["*"]);
     await orch.runRegression("p1", "test");
     expect(calls.filter(([a]) => a[0] === "run-api-suite")[1][1]).not.toHaveProperty("AITEST_API_SELECTED_ROLE");
+  });
+
+  it("preserves case identity mode without enabling environment-token override", async () => {
+    const { engine, calls } = fakeEngine({ run_id: "r1", total: 1, passed: 1, needs_agent: [] });
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({ AITEST_AUTH_TOKEN: "manual-token" }) });
+    await orch.runRegression("p1", "test", { preferEnvToken: false });
+    expect(calls.find(([args]) => args[0] === "run-api-suite")![1]).toEqual({ AITEST_AUTH_TOKEN: "manual-token", AITEST_API_PREFER_ENV_TOKEN: "0" });
   });
 
   it("sends only undetermined failures to a dedicated triage thread and records tokens", async () => {

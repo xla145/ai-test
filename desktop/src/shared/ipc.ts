@@ -188,8 +188,12 @@ export interface ApiTestSet {
 }
 
 export interface ApiRunOptions {
+  /** 优先使用当前环境手动保存的 token；false 表示按用例角色鉴权。 */
+  preferEnvToken?: boolean;
   /** 本次未指定角色的请求使用此身份；不修改用例与脚本。 */
   selectedRole?: string;
+  /** 校验 code + msg/message 响应中的业务码，显式业务码断言优先。 */
+  checkBusinessCode?: boolean;
   confirmProduction?: boolean;
   /** 默认启用；关闭后仅执行确定性脚本与规则分类，不调用模型。 */
   autoTriage?: boolean;

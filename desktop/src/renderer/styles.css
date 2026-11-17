@@ -1459,7 +1459,6 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-tree-module-title-input.ant-input { flex: 1; min-width: 0; font-size: 13px; }
 .api-tree-module-name { cursor: text; }
 
-.api-catalog-layout .api-directory-top > .ant-btn { width: 30px; height: 30px; padding: 0; border-radius: 7px; }
 
 /* 文档操作与目录控件按各自行的视觉中心对齐。 */
 .api-definition-actions > .ant-space .ant-btn { width: 36px; height: 36px; padding: 0; border-radius: 7px; }

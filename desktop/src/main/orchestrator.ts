@@ -451,7 +451,9 @@ export class Orchestrator extends EventEmitter {
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env,
         ...opt("--case-ids", opts.caseIds === undefined ? undefined : JSON.stringify(opts.caseIds))],
-      { ...this.deps.secretEnv(projectId, env, ["*"]), ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}) },
+      { ...this.deps.secretEnv(projectId, env, ["*"]), ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}),
+        ...(!opts.selectedRole ? { AITEST_API_PREFER_ENV_TOKEN: opts.preferEnvToken === false ? "0" : "1" } : {}),
+        ...(opts.checkBusinessCode !== undefined ? { AITEST_API_CHECK_BUSINESS_CODE: opts.checkBusinessCode ? "1" : "0" } : {}) },
     );
     let triage: TriageItem[] | undefined;
     let analysis: { status: "completed" | "failed"; error?: string } | undefined;
