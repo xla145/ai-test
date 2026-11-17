@@ -120,9 +120,11 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
     """Execute one request. Trace always records the failure before it propagates."""
     where = f"{label}：" if label else ""
     entry = trace if trace is not None else {}
+    use_env_token = bool(env.get("prefer_env_token") and env.get("auth_token"))
     selected_role = env.get("selected_role") if not step.get("role") else None
     entry.update({"name": step.get("name") or f"{step['method']} {step['path']}",
-                  "role": step.get("role") or selected_role or "", "status": "running", "assertions": []})
+                  "role": "" if use_env_token else step.get("role") or selected_role or "",
+                  "auth_source": "environment" if use_env_token else "case", "status": "running", "assertions": []})
     start = time.monotonic()
     secrets = [env.get("auth_token", ""), *sensitive_values((env.get("api_crypto") or {}).get("headers", {}))]
     secrets.extend(str(v) for k, v in variables.items() if _SENSITIVE.search(k))
@@ -141,9 +143,9 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
         if not path.startswith("/") or path.startswith("//") or "://" in path:
             raise ValueError("接口路径必须为当前环境的相对路径")
         headers = {k: str(v) for k, v in (resolved.get("headers") or {}).items()}
-        if selected_role or resolved.get("auth", True):
-            role = resolved.get("role") or selected_role or env.get("default_login_role")
-            token = auth_for(role) if role else env.get("auth_token", "")
+        if use_env_token or selected_role or resolved.get("auth", True):
+            role = None if use_env_token else resolved.get("role") or selected_role or env.get("default_login_role")
+            token = env.get("auth_token", "") if use_env_token else (auth_for(role) if role else env.get("auth_token", ""))
             if token:
                 auth_header = env.get("auth_header", "Authorization")
                 headers = {k: v for k, v in headers.items() if k.lower() != auth_header.lower()}
@@ -181,10 +183,21 @@ def execute(step, client, env, variables, auth_for, label="", trace=None):
         def check(name, actual, expected, passed):
             entry["assertions"].append({"name": name, "actual": actual, "expected": expected, "passed": bool(passed)})
             if not passed:
+                if name == "业务码":
+                    raise AssertionError(f"{where}业务码 {actual} 不在成功码 {expected} 中")
                 raise AssertionError(f"{where}状态码 {actual} 不在预期 {expected} 中" if name == "HTTP 状态码" else f"{where}{name}不符合预期")
 
         if step.get("expected_status"):
             check("HTTP 状态码", response.status_code, step["expected_status"], response.status_code in step["expected_status"])
+        # Only recognize the common code + msg/message response envelope. An
+        # explicit business-code expectation takes precedence for negative cases.
+        if env.get("check_business_code") and isinstance(body, dict) and "code" in body and ("msg" in body or "message" in body):
+            explicit_code = "code" in (resolved.get("expected_fields") or {}) or any(
+                a.get("path") == "code" and a.get("operator") not in ("exists", "not_empty")
+                for a in (resolved.get("assertions") or [])
+            )
+            if not explicit_code:
+                check("业务码", body["code"], [0, 200], str(body["code"]) in ("0", "200"))
         if step.get("response_schema"):
             errors = validate(body, step["response_schema"])
             check("响应结构", errors, [], not errors)

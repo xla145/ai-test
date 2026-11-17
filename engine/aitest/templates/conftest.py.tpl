@@ -46,6 +46,8 @@ def aitest_env():
         "auth_header": os.environ.get("AITEST_AUTH_HEADER", "Authorization"),
         "auth_token": os.environ.get("AITEST_AUTH_TOKEN", ""),
         "selected_role": os.environ.get("AITEST_API_SELECTED_ROLE", ""),
+        "prefer_env_token": os.environ.get("AITEST_API_PREFER_ENV_TOKEN") == "1",
+        "check_business_code": os.environ.get("AITEST_API_CHECK_BUSINESS_CODE") == "1",
         "default_login_role": json.loads(os.environ.get("AITEST_API_LOGIN") or "{}").get("default_role"),
         "timeout": float(os.environ.get("AITEST_TIMEOUT", "30")),
         "api_crypto": json.loads(os.environ.get("AITEST_API_CRYPTO") or "{}"),

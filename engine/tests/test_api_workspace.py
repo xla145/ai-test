@@ -342,3 +342,39 @@ def test_batch_selected_identity_authenticates_unbound_requests_and_keeps_explic
     assert [step['role'] for step in result['steps']] == ['operator', 'operator', 'other']
     assert steps[0]['auth'] is False and 'role' not in steps[0]
     assert 'selected-token' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('auth', [True, False])
+def test_environment_token_takes_precedence_over_case_role_when_requested(auth):
+    from aitest.api_runtime import auth_resolver
+    seen = []
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(lambda r: (seen.append(r.headers.get('Authorization')) or httpx.Response(200, json={'code': 200, 'msg': 'ok'})))) as client:
+        resolver = auth_resolver(client, {'auth_token': 'manual-token', 'prefer_env_token': True}, tokens={})
+        result = execute_case({'title': '普通请求', 'category': '功能测试', 'steps': [{'method': 'GET', 'path': '/x', 'role': '超级管理员', 'auth': auth, 'expected_status': [200]}]}, client,
+                              {'auth_token': 'manual-token', 'prefer_env_token': True}, {}, resolver)
+    assert result['status'] == 'passed'
+    assert seen == ['manual-token']
+    assert result['steps'][0]['role'] == ''
+    assert result['steps'][0]['auth_source'] == 'environment'
+    assert 'manual-token' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('body,expected_fields,assertions,enabled,passed', [
+    ({'code': 401, 'msg': '认证失败'}, {}, [], True, False),
+    ({'code': 500, 'msg': '错误'}, {}, [], True, False),
+    ({'code': 200, 'msg': '成功'}, {}, [], True, True),
+    ({'code': '0', 'message': 'ok'}, {}, [], True, True),
+    ({'code': 401, 'msg': '认证失败'}, {'code': 401}, [], True, True),
+    ({'code': 500, 'msg': '错误'}, {}, [{'path': 'code', 'operator': 'eq', 'value': 500}], True, True),
+    ({'code': 401, 'msg': '认证失败'}, {}, [{'path': 'code', 'operator': 'exists'}], True, False),
+    ({'code': 401, 'msg': '认证失败'}, {}, [], False, True),
+    ({'code': 500, 'product': 'example'}, {}, [], True, True),
+])
+def test_batch_business_code_check(body, expected_fields, assertions, enabled, passed):
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body))) as client:
+        result = execute_case({'method': 'GET', 'path': '/test', 'auth': False, 'expected_status': [200],
+                               'expected_fields': expected_fields, 'assertions': assertions},
+                              client, {'check_business_code': enabled}, {}, lambda _: '')
+    assert (result['status'] == 'passed') == passed
+    if not passed:
+        assert any(a['name'] == '业务码' and not a['passed'] for a in result['steps'][0]['assertions'])

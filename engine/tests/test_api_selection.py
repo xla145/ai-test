@@ -70,10 +70,15 @@ def test_cli_selected_run_and_persistent_test_sets(tmp_path, demo_server, capsys
     assert "先生成已审核脚本" in call("run-api-suite", "--project", p, "--env", "test", "--case-ids", ids, ok=False)
     call("write-api-suite", "--project", p, "--reviewed-only")
     monkeypatch.setenv("AITEST_AUTH_TOKEN", TOKEN)
+    monkeypatch.setenv("AITEST_API_SELECTED_ROLE", "operator")
+    monkeypatch.setenv("AITEST_ROLE_TOKENS", json.dumps({"operator": TOKEN}))
+    monkeypatch.setenv("AITEST_API_CHECK_BUSINESS_CODE", "1")
     result = call("run-api-suite", "--project", p, "--env", "test", "--case-ids", ids)
     assert result["total"] == result["passed"] == 1
     assert handler.next_id == 2 and not handler.users
     detail = call("run-detail", "--run", result["run_id"])
+    assert detail["run"]["selected_role"] == "operator"
+    assert detail["run"]["check_business_code"] is True
     artifact = detail["results"][0]["artifact"]
     assert artifact["case_id"] == flow["id"] and artifact["env"] == "test"
     script = tmp_path / "ws" / artifact["script_path"]
@@ -96,16 +101,67 @@ def test_cli_selected_run_and_persistent_test_sets(tmp_path, demo_server, capsys
     assert "不属于当前项目" in call("save-api-test-set", "--project", foreign, "--name", "错误引用", "--case-ids", ids, ok=False)
 
 
-def test_generated_suite_uses_selected_identity_without_changing_case_auth(tmp_path, demo_server):
+@pytest.mark.parametrize('use_environment', [False, True])
+def test_generated_suite_uses_selected_identity_without_changing_case_auth(tmp_path, demo_server, use_environment):
     url, handler = demo_server
     _, case = cases()
     case.api.auth = False  # Generated definitions may not declare OpenAPI security.
+    if use_environment:
+        case.api.role = '超级管理员'  # Environment mode must not attempt role login.
     write_pytest_suite([case], tmp_path)
-    run, results = run_pytest(tmp_path, EnvConfig(url), case_ids=[case.id], extra_env={
-        'AITEST_API_SELECTED_ROLE': 'operator',
-        'AITEST_ROLE_TOKENS': json.dumps({'operator': TOKEN}),
-    })
+    extra = {'AITEST_API_PREFER_ENV_TOKEN': '1'} if use_environment else {
+        'AITEST_API_SELECTED_ROLE': 'operator', 'AITEST_ROLE_TOKENS': json.dumps({'operator': TOKEN})}
+    run, results = run_pytest(tmp_path, EnvConfig(url, auth_token=TOKEN if use_environment else ''),
+                              case_ids=[case.id], extra_env=extra)
     assert run.result['passed'] == 1
     assert [(r.case_id, r.status) for r in results] == [(case.id, 'passed')]
     assert handler.next_id == 2
     assert case.api.auth is False
+
+
+def test_preflight_checks_explicit_and_batch_roles_including_cleanup():
+    from aitest.api_selection import validate_run_auth
+    case = TestCase(title='roles', api=ApiSpec(method='GET', path='/users', auth=False),
+                    api_cleanup=[ApiSpec(method='DELETE', path='/users/1', role='cleanup')])
+    with pytest.raises(ValueError, match='operator.*cleanup|cleanup.*operator'):
+        validate_run_auth([case], 'operator', {}, {}, [])
+    with pytest.raises(ValueError, match='当前环境未配置接口登录'):
+        validate_run_auth([case], 'operator', {}, {'cleanup': 'cleanup-token'},
+                          [{'role': 'operator', 'username': 'u', 'password': 'p'}])
+    validate_run_auth([case], 'operator', {'api_login': {'path': '/login'}}, {'cleanup': 'cleanup-token'},
+                      [{'role': 'operator', 'username': 'u', 'password': 'p'}])
+    validate_run_auth([case], None, {}, {'cleanup': 'cleanup-token'}, [])
+
+
+def test_cli_missing_role_configuration_blocks_before_business_requests(tmp_path, demo_server, capsys):
+    url, handler = demo_server
+    db = str(tmp_path / 'auth.sqlite')
+    def call(*args):
+        code = main(['--db', db, *args])
+        return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    _, data = call('init-project', '--name', 'preflight', '--workspace', str(tmp_path / 'ws'),
+                   '--environments', json.dumps({'test': {'base_url': url}}))
+    project = data['data']['id']
+    first, second = cases()
+    second.api.role = 'missing-role'
+    for case in (first, second):
+        call('create-case', '--project', project, '--json', json.dumps(case.to_dict()))
+    call('write-api-suite', '--project', project, '--reviewed-only')
+    code, result = call('run-api-suite', '--project', project, '--env', 'test')
+    assert code != 0 and '执行前鉴权检查未通过' in result['error']
+    assert 'missing-role' in result['error']
+    assert handler.next_id == 1 and not handler.users
+
+
+def test_business_auth_failure_is_classified_without_agent():
+    from aitest.runner import classify_failure
+    assert classify_failure('第 1 步：业务码 401 不在成功码 [0, 200] 中') == 'auth'
+    assert classify_failure('角色「tester」没有接口凭据') == 'auth'
+
+
+def test_environment_token_preflight_bypasses_unconfigured_case_roles():
+    from aitest.api_selection import validate_run_auth
+    case = TestCase(title='environment', api=ApiSpec(method='GET', path='/x', role='超级管理员'))
+    validate_run_auth([case], None, {}, {}, [], has_env_token=True)
+    with pytest.raises(ValueError, match='超级管理员'):
+        validate_run_auth([case], None, {}, {}, [], has_env_token=False)

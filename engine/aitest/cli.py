@@ -325,10 +325,19 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
         for data_file in (suite_dir / "data").glob("*.json"):
             compiled_ids.update(item.get("case_id") for item in json.loads(data_file.read_text(encoding="utf-8")))
     selected_ids = set(case_ids) if case_ids is not None else compiled_ids
-    for case in store.list_cases(p.id, execution_mode="api"):
+    selected_cases = [case for case in store.list_cases(p.id, execution_mode="api") if case.id in selected_ids]
+    for case in selected_cases:
         if case.api_variable_scope == "case" and case.id in selected_ids:
             api_selection.validate_selection(store, p.id, [case.id])
             expected_revisions[case.id] = case.api_revision
+    if os.environ.get("AITEST_API_PREFER_ENV_TOKEN") == "1" and not os.environ.get("AITEST_AUTH_TOKEN", "").strip():
+        raise ValueError("当前环境尚未保存接口 token，请先手动登录并保存登录态，或选择按用例角色 / 鉴权设置执行")
+    api_selection.validate_run_auth(
+        selected_cases, os.environ.get("AITEST_API_SELECTED_ROLE"), env_cfg,
+        json.loads(os.environ.get("AITEST_ROLE_TOKENS") or "{}"),
+        json.loads(os.environ.get("AITEST_ROLES") or "[]"),
+        bool(os.environ.get("AITEST_AUTH_TOKEN")) and os.environ.get("AITEST_API_PREFER_ENV_TOKEN") == "1",
+    )
     # 入库校验需要的数据库连接（密码来自 AITEST_DB_PASSWORDS，只传给脚本进程）
     db_env = db.runtime_env(db.configs_for_env(env_cfg))
     if expected_revisions:
@@ -336,6 +345,13 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
     snapshots = api_snapshot(store, p, a.env, env_cfg, selected_ids)
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
                                      report_dir=Path(p.workspace_path) / "reports", extra_env=db_env, case_ids=case_ids)
+    # Keep the execution identity visible in the run summary without persisting credentials.
+    if os.environ.get("AITEST_API_SELECTED_ROLE"):
+        run.result["selected_role"] = os.environ["AITEST_API_SELECTED_ROLE"]
+    if "AITEST_API_PREFER_ENV_TOKEN" in os.environ:
+        run.result["prefer_env_token"] = os.environ["AITEST_API_PREFER_ENV_TOKEN"] == "1"
+    if "AITEST_API_CHECK_BUSINESS_CODE" in os.environ:
+        run.result["check_business_code"] = os.environ["AITEST_API_CHECK_BUSINESS_CODE"] == "1"
     for result in results:
         if result.case_id in snapshots:
             result.execution_context["artifact"] = snapshots[result.case_id]
