@@ -55,6 +55,16 @@ it('restores both role sessions in isolated headless tests, five times per role'
     expect(out.results).toHaveLength(10);
     expect(out.results.every(r=>r.status === 'passed')).toBe(true);
     expect(host.isConnected()).toBe(true);
+    const adminPage = host.contexts().flatMap(c => c.pages()).find(p => p.url().includes('/dashboard'))!;
+    // Simulate a newly created marker view after an app restart: cookies and
+    // origin storage persist, but the visible document is initially blank.
+    await adminPage.goto('about:blank');
+    await adminPage.evaluate(() => { (window as any).__aitestViewMarker = 'restarted-admin'; });
+    const restarted = await runUiSuite({ workspace, baseUrl: `${app.url}/dashboard`, caseIds: [caseIds[0]], roleBindings: bindings,
+      sessionSource: { cdpEndpoint: `http://127.0.0.1:${port}`, viewMarkers: { admin: 'restarted-admin' } } });
+    expect(restarted.results[0].status, JSON.stringify(restarted)).toBe('passed');
+    // Keep the original marker for the subsequent role-isolation checks.
+    await adminPage.evaluate(() => { (window as any).__aitestViewMarker = 'export-admin'; });
     for (const result of out.results) {
       expect(result.execution_context?.sessions).toEqual([expect.objectContaining({
         role: bindings[result.case_id], mode: 'isolated', restored: true, pageUrl: `${app.url}/dashboard`, sessionId: out.sessionId,
@@ -70,3 +80,19 @@ it('restores both role sessions in isolated headless tests, five times per role'
     expect(missing.results[0].message).toContain('AUTH_REQUIRED');
   } finally { await host.close(); await app.close(); rmSync(workspace,{recursive:true,force:true}); }
 }, 90_000);
+
+it('classifies an unconfigured login redirect as auth blocking instead of a missing business locator', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'aitest-expired-'));
+  const app = await startDemoApp();
+  mkdirSync(join(workspace, 'scripts/ui'), { recursive: true });
+  writeFileSync(join(workspace, 'scripts/ui/tc_expired.spec.ts'), `import { test, expect } from '@playwright/test';
+    test('tc_expired protected', async ({page}) => {
+      await page.goto('/dashboard');
+      await expect(page.getByTestId('current-role')).toBeVisible();
+    });`);
+  try {
+    const out = await runUiSuite({workspace, baseUrl:app.url, caseIds:['tc_expired']});
+    expect(out.results[0]).toMatchObject({status:'failed', acceptance_status:'blocked', reason_code:'auth_required', failure_type:'auth'});
+    expect(out.results[0].message).toContain('AUTH_REQUIRED');
+  } finally { await app.close(); rmSync(workspace,{recursive:true,force:true}); }
+}, 30_000);

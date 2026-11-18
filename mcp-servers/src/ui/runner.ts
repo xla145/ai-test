@@ -151,6 +151,13 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
           }
           if (matches.length !== 1) continue;
           const page = matches[0];
+          // A newly recreated Electron view starts on a marker document while
+          // its persistent partition still owns the user's login. Initialize
+          // only that blank view; never navigate an existing role's live page.
+          if (page.url() === 'about:blank' || page.url().startsWith('data:text/html')) {
+            await page.goto(opts.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            await page.evaluate(marker => { (window as any).__aitestViewMarker = marker; }, marker);
+          }
           if (!page.url().startsWith(base.origin + "/")) continue;
           const current = new URL(page.url()), login = recipe && new URL(recipe.url, opts.baseUrl);
           if (login && current.pathname === login.pathname && current.hash === login.hash) continue;
@@ -215,7 +222,7 @@ export async function runUiSuite(opts: UiRunOptions): Promise<UiRunOutput> {
     if (result.status !== "passed") continue;
     try {
       const meta = JSON.parse(readFileSync(join(dir, `${result.case_id}.steps.json`), "utf8")) as StepsFile;
-      if (!meta.source || meta.specHash !== sha256(readFileSync(join(dir, `${result.case_id}.spec.ts`), "utf8")) || coverageIssues(meta.steps, meta.source).length) throw new Error("incomplete");
+      if (!meta.source || meta.specHash !== sha256(readFileSync(join(dir, `${result.case_id}.spec.ts`), "utf8")) || coverageIssues(meta.steps, { ...meta.source, preconditionChecks: meta.preconditionChecks }).length) throw new Error("incomplete");
     } catch { result.acceptance_status = "incomplete"; result.reason_code = "incomplete"; }
   }
   const errors = raw ? reportErrors(raw) : [];
@@ -246,6 +253,8 @@ export function caseIdFromTitle(title: string, file: string): string {
 }
 
 export function classifyUiFailure(message: string): string | undefined {
+  if (uiReason(message) === 'auth_required') return 'auth';
+  if (uiReason(message) === 'precondition_missing') return 'data';
   if (/net::ERR_|ECONNREFUSED|Executable doesn't exist|browserType\.launch/.test(message)) return "environment";
   return undefined; // 交给 agent：页面改版（脚本错误）还是产品缺陷
 }

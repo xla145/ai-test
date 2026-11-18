@@ -157,7 +157,8 @@ it("replays the generated spec in a fresh browser and fails when only another fi
     writeUiScript(workspace, { caseId: "tc_scope", title: "下拉字段身份", baseUrl: url, steps: session.recording() });
     await session.close();
     const run = () => runUiSuite({ workspace, baseUrl: url, caseIds: ["tc_scope"], workers: 1, env: { AITEST_TEST_TIMEOUT: "8000", AITEST_ACTION_TIMEOUT: "1000", AITEST_EXPECT_TIMEOUT: "500" } });
-    expect((await run()).results[0].status).toBe("passed");
+    const initial = await run();
+    expect(initial.results[0].status, JSON.stringify(initial)).toBe("passed");
     wrong = true;
     const failed = (await run()).results[0];
     expect(failed.status).toBe("failed");

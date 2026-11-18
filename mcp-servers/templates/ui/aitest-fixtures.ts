@@ -43,14 +43,17 @@ export function recordSession(page: Page, role: string, restored: boolean) {
 export function prepareSessionPage(page: Page) {
   const recipe = JSON.parse(process.env.AITEST_LOGIN || "null");
   const isLogin = (url: string) => {
-    if (!recipe) return false;
+    if (!recipe) {
+      const u = new URL(url, process.env.AITEST_BASE_URL);
+      return /(?:^|[\/#])(?:login|signin|sign-in)(?:[\/?#]|$)/i.test(u.pathname + u.hash);
+    }
     const u = new URL(url, process.env.AITEST_BASE_URL), l = new URL(recipe.url, process.env.AITEST_BASE_URL);
     return u.origin === l.origin && u.pathname === l.pathname && u.hash === l.hash;
   };
   const goto = page.goto.bind(page);
   page.goto = async (url, options) => {
     const target = new URL(url, process.env.AITEST_BASE_URL).href;
-    const result = await goto(target, options);
+    const result = await goto(target, { waitUntil: 'domcontentloaded', ...options });
     if (!isLogin(target) && isLogin(page.url())) throw new Error("AUTH_REQUIRED: 登录态失效，请重新登录执行角色");
     return result;
   };

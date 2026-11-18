@@ -212,6 +212,7 @@ export class BrowserSession {
         await page.goto(this.opts.baseUrl);
       }
       await this.checkRequiredLogin(page, role);
+      this.recordRoleEntry(page, role);
       return { role, loggedIn: true, reusedState: true };
     }
     this.requiredLogin.delete(role);
@@ -223,7 +224,15 @@ export class BrowserSession {
         await page.context().storageState({ path: opts.storageStatePath });
       }
     }
+    if (reusedState) this.recordRoleEntry(page, role);
     return { role, loggedIn, reusedState };
+  }
+
+  /** A reused embedded page still needs an explicit entry in a fresh replay. */
+  private recordRoleEntry(page: Page, role: string): void {
+    if (/^https?:/.test(page.url()) && !this.steps.some(step => step.role === role)) {
+      this.record({ action: "goto", url: page.url(), role });
+    }
   }
 
   async page(role = this.currentRole): Promise<Page> {
@@ -244,10 +253,14 @@ export class BrowserSession {
       const onLogin = login ? current.pathname === login.pathname && current.hash === login.hash
         : /(?:^|[\/#])(?:login|signin|sign-in)(?:[\/?#]|$)/i.test(current.href);
       const passwordVisible = await page.locator('input[type="password"]:visible').count() > 0;
+      // API keys and other secret settings also use password inputs. A secret
+      // field alone is not a login form; require an explicit login submission.
+      const loginSubmitVisible = await page.getByRole('button', { name: /^(?:登\s*录|log\s*in|sign\s*in)$/i }).filter({ visible: true }).count() > 0
+        || await page.locator('input[type="submit"]:visible').evaluateAll(elements => elements.some(el => /^(?:登\s*录|log\s*in|sign\s*in)$/i.test((el as HTMLInputElement).value.trim())));
       // 文件存在不代表会话有效；没有成功标志时，至少要求站点已建立存储且没有登录表单。
       const hasState = (await page.context().cookies(current.origin)).length > 0
         || await page.evaluate(() => localStorage.length > 0 || sessionStorage.length > 0);
-      valid = current.origin === base.origin && !onLogin && !passwordVisible
+      valid = current.origin === base.origin && !onLogin && !(passwordVisible && loginSubmitVisible)
         && (hasState || Boolean(recipe?.success && page.url().includes(recipe.success)));
     } catch { /* 无法确认登录时不执行需要登录的步骤 */ }
     if (!valid) throw new Error(`登录前置条件未满足：角色「${role}」未登录、登录已失效或无法确认。当前用例不能执行，请在「角色与登录」中完成登录后重试。`);
@@ -265,7 +278,7 @@ export class BrowserSession {
 
   async navigate(url: string): Promise<{ url: string; title: string }> {
     const page = await this.page();
-    await page.goto(this.absolute(url));
+    await page.goto(this.absolute(url), { waitUntil: 'domcontentloaded' });
     this.record({ action: "goto", url: this.absolute(url) });
     return { url: page.url(), title: await page.title() };
   }
@@ -342,6 +355,11 @@ export class BrowserSession {
       }
     }
     return undefined;
+  }
+
+  async waitUntilReady(timeoutMs = 15000): Promise<void> {
+    const page = await this.page();
+    await this.readiness.get(page)?.wait(timeoutMs);
   }
 
   /**
@@ -562,6 +580,16 @@ export class BrowserSession {
     else await loc.waitFor({ state: "hidden", timeout: EXPLORE_ASSERT_TIMEOUT_MS });
     const recorded = this.recordAssertion({ action: visible ? "expectVisible" : "expectHidden", target: spec, role });
     return { locator: spec, ...(recorded ? {} : { note: "与已录入的断言相同，未重复录入" }) };
+  }
+
+  async expectEnabled(ref: string, enabled = true) {
+    const { page, spec, role } = await this.target(ref, { independent: true });
+    const loc = toLocator(page, spec);
+    if (!await poll(async () => await loc.isEnabled({ timeout: EXPLORE_ASSERT_TIMEOUT_MS }) === enabled, EXPLORE_ASSERT_TIMEOUT_MS)) {
+      throw new Error(`ASSERTION_FAILED: 控件未处于${enabled ? "可用" : "禁用"}状态`);
+    }
+    this.recordAssertion({ action: "expectEnabled", target: spec, enabled, role });
+    return { locator: spec, enabled };
   }
 
   async expectText(ref: string, text: string, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS) {
@@ -795,7 +823,7 @@ export class BrowserSession {
     const loc = "target" in step ? toLocator(page, step.target) : undefined;
     switch (step.action) {
       case "goto":
-        await page.goto(this.absolute(step.url), { timeout: Math.max(timeout, 30_000) });
+        await page.goto(this.absolute(step.url), { waitUntil: 'domcontentloaded', timeout: Math.max(timeout, 30_000) });
         return {};
       case "click":
         if (step.scroll === "center") {
@@ -824,6 +852,9 @@ export class BrowserSession {
         return {};
       case "expectHidden":
         await loc!.waitFor({ state: "hidden", timeout }).catch(() => { throw new Error("断言不成立：元素在超时内仍然可见"); });
+        return {};
+      case "expectEnabled":
+        if (!await poll(async () => await loc!.isEnabled({ timeout }) === step.enabled, timeout)) throw new Error("ASSERTION_FAILED: 控件可用状态不匹配");
         return {};
       case "expectText": {
         let actual = "";

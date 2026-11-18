@@ -1,4 +1,4 @@
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,38 @@ import { UiReadiness } from '../src/ui/readiness.js';
 
 const checks: PreconditionCheck[] = ['first', 'second'].map((text, i) => ({ id: `P1.${i + 1}`, sourceIndices: [1], sourceQuotes: [text], statement: text, expected: text, method: 'ui', dependsOn: i ? ['P1.1'] : [] }));
 const evidence = (id: string): UiStep => ({ action: 'expectVisible', target: { kind: 'testid', value: id }, preconditionIndices: [1], preconditionCheckIds: [id] });
+
+it('waits without repeating the action and only recovers transient readiness blocks', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'guard-wait-'));
+  const source = { preconditions: [], steps: ['open'], expected: ['visible'] };
+  const contract = { version: 1, status: 'ready', issues: [], preconditions: [], preconditionChecks: [],
+    steps: [{ index: 1, source: 'open', actions: [{ action: 'observe', instruction: 'read' }], expected: ['visible'] }] };
+  const dir = join(workspace, '.aitest/ui-contracts'); mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sha256(JSON.stringify(['p', 'test', 'c']))}.json`), JSON.stringify({ sourceHash: caseHash(source), contract }));
+  const session = { configure() {}, resetRecording() {}, recording: () => [], currentPreconditionChecks: [],
+    targetIdentity: () => 'target', click: vi.fn(async () => {}), snapshotAfterAction: vi.fn(),
+    waitUntilReady: vi.fn(async () => {}), snapshot: async () => ({ text: 'loaded' }) };
+  const tools = UI_SERVERS.find(s => s.name === 'browser')!.tools({ session, secrets: {}, engine: async (args: string[]) =>
+    args[0] === 'get-project' ? { id: 'p', name: 'p', workspace_path: workspace, environments: { test: { base_url: 'http://sut' } } }
+      : args[0] === 'get-case' ? source : [] } as any);
+  const call = (name: string, input = {}): Promise<any> => tools.find(t => t.name === name)!.handler(input);
+  try {
+    await call('open_project', { project_id: 'p', env: 'test', case_id: 'c' });
+    session.snapshotAfterAction.mockRejectedValueOnce(new Error('UI_RESULT_NOT_READY: loading'));
+    await expect(call('click', { ref: 'e1' })).rejects.toThrow('UI_RESULT_NOT_READY');
+    await expect(call('click', { ref: 'e1' })).rejects.toThrow('UI_RESULT_NOT_READY');
+    expect(session.click).toHaveBeenCalledTimes(1);
+    session.waitUntilReady.mockRejectedValueOnce(new Error('UI_RESULT_NOT_READY: loading'));
+    await expect(call('wait_ready')).rejects.toThrow('UI_RESULT_NOT_READY');
+    await expect(call('wait_ready', { timeout_ms: 500 })).resolves.toMatchObject({ ready: true });
+    expect(session.waitUntilReady).toHaveBeenLastCalledWith(500);
+    expect(session.click).toHaveBeenCalledTimes(1);
+    session.snapshotAfterAction.mockRejectedValueOnce(new Error('UI_ENVIRONMENT_BLOCKED: 502'));
+    await expect(call('click', { ref: 'e1' })).rejects.toThrow('UI_ENVIRONMENT_BLOCKED');
+    await expect(call('wait_ready')).rejects.toThrow('UI_ENVIRONMENT_BLOCKED');
+    expect(session.waitUntilReady).toHaveBeenCalledTimes(2);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
+});
 
 it('requires atomic evidence, enforces dependencies and revokes evidence after undo', () => {
   const gate = new ExecutionGuard('c', checks);

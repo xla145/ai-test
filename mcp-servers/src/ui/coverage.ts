@@ -17,6 +17,27 @@ export function coverageIssues(steps: UiStep[], source: CoverageSource): string[
   check(source.steps ?? [], 'caseStep', false);
   check(source.expected ?? [], 'expectedIndices', true);
   check(source.preconditions ?? [], 'preconditionIndices', true);
+  // These are deliberately narrow checks for explicit, machine-verifiable
+  // requirements. Coverage indices alone are not evidence of state or count.
+  const semantic = (values: string[], field: 'expectedIndices' | 'preconditionIndices') => {
+    values.forEach((value, i) => {
+      const mapped = steps.filter(s => s[field]?.includes(i + 1));
+      const label = `${field === 'expectedIndices' ? '预期' : '前置条件'} ${i + 1}`;
+      const alternativeMessage = value.split(/或.*?提示/)[1]?.trim().replace(/[。；;]$/, '');
+      if (/(?:按钮|控件).{0,12}(?:不可用|禁用|不可点击)/.test(value)
+        && !mapped.some(s => s.action === 'expectEnabled' && !s.enabled)
+        && !mapped.some(s => s.action === 'visualCheck')
+        && !(alternativeMessage && mapped.some(s => s.action === 'expectText' && s.text.includes(alternativeMessage)))) {
+        issues.push(`${label} 要求禁用状态，不能以可见断言代替，请使用 expect_enabled`);
+      }
+      if (/(?:仅保留|仅有|仅剩|恰好)(?:一|1)(?:条|个|项|行)(?!时)/.test(value)
+        && !mapped.some(s => s.action === 'expectCollection' && s.rule.minCount === 1 && s.rule.maxCount === 1)) {
+        issues.push(`${label} 要求精确数量，请使用数量上下界均为 1 的集合断言`);
+      }
+    });
+  };
+  semantic(source.expected ?? [], 'expectedIndices');
+  semantic(source.preconditions ?? [], 'preconditionIndices');
   if (source.preconditionChecks) {
     const bodyStart = steps.findIndex(s => s.caseStep !== undefined);
     for (const check of source.preconditionChecks) {

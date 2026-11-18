@@ -22,6 +22,7 @@ export type Step = Base &
     | { action: "press"; key: string }
     | { action: "expectVisible"; target: LocatorSpec }
     | { action: "expectHidden"; target: LocatorSpec }
+    | { action: "expectEnabled"; target: LocatorSpec; enabled: boolean }
     | { action: "expectText"; target: LocatorSpec; text: string; exact?: boolean }
     | { action: "expectNoText"; target: LocatorSpec; text: string }
     | { action: "expectValue"; target: LocatorSpec; value: string }
@@ -161,6 +162,9 @@ export function generateSpec(input: SpecInput): string {
       case "expectHidden":
         wrap(`await expect(${loc}).toBeHidden();`);
         break;
+      case "expectEnabled":
+        wrap(`await expect(${loc}).${st.enabled ? "toBeEnabled" : "toBeDisabled"}();`);
+        break;
       case "expectText":
         // 与录制、调试时的校验一致：按页面可见文本（innerText，单元格之间有空白）比较
         wrap(`await expect(${loc}).${st.exact ? "toHaveText" : "toContainText"}(${s(st.text)}, { useInnerText: true });`);
@@ -296,6 +300,7 @@ export function describeStep(st: Step): string {
     case "check": return `${st.checked ? "勾选" : "取消勾选"} ${describeTarget(st.target)}`;
     case "press": return `按键 ${st.key}`;
     case "expectVisible": return `断言可见 ${describeTarget(st.target)}`;
+    case "expectEnabled": return `断言${st.enabled ? "可用" : "禁用"} ${describeTarget(st.target)}`;
     case "expectHidden": return `断言隐藏 ${describeTarget(st.target)}`;
     case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;

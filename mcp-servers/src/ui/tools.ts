@@ -206,6 +206,18 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       },
     },
     {
+      name: "wait_ready",
+      description: "页面加载超时 UI_RESULT_NOT_READY 后只等待数据和加载提示结束，不重复点击。成功后解除这一临时阻塞；网关错误、前置失败和恢复次数耗尽不能解除。",
+      input: { timeout_ms: z.number().int().min(300).max(30000).optional() },
+      handler: async ({ timeout_ms }) => {
+        const { guard } = active(ctx);
+        if (guard?.blocked && !guard.blocked.startsWith('UI_RESULT_NOT_READY:')) guard.assertActive();
+        await s.waitUntilReady(timeout_ms);
+        if (guard?.blocked?.startsWith('UI_RESULT_NOT_READY:')) guard.blocked = undefined;
+        return { ready: true, snapshot: await s.snapshot() };
+      },
+    },
+    {
       name: "snapshot",
       description: "获取页面快照：可交互元素（带 ref、role、name、testId）与可见文本。navigate / click / select / press 的返回值已带操作后的快照，"
         + "unchanged=true 时复用上次快照与 ref；默认返回前90个元素，有 next_offset 时传 offset 继续，limit 最多300。只有页面还在变化或需要更多内容时才单独调用。表格单元格、状态徽标等非交互文字不在元素列表里，用 find_text 取 ref",
@@ -252,6 +264,12 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       description: "断言元素可见（visible=false 断言不可见）。调用前先用 assertion_coverage 声明它证明的原文预期/前置条件序号；断言会立即验证，通过后录入脚本",
       input: { ref, visible: z.boolean().optional() },
       handler: ({ ref, visible }) => s.expectVisible(ref, visible ?? true),
+    },
+    {
+      name: "expect_enabled",
+      description: "断言控件可用或禁用（enabled=false）。不能用可见断言替代禁用断言；不强制点击禁用按钮。调用前先声明 assertion_coverage",
+      input: { ref, enabled: z.boolean().default(true) },
+      handler: ({ ref, enabled }) => s.expectEnabled(ref, enabled),
     },
     { name: "expect_text", description: "断言元素包含文本。调用前先用 assertion_coverage 声明它证明的原文预期/前置条件序号", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectText(ref, text) },
     { name: "expect_no_text", description: "断言元素不包含文本（如筛选后列表中不再出现某类记录）。调用前先用 assertion_coverage 声明它证明的原文预期/前置条件序号", input: { ref, text: z.string() }, handler: ({ ref, text }) => s.expectNoText(ref, text) },

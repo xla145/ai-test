@@ -40,6 +40,31 @@ export interface ContractCase { preconditions?: string[]; steps?: string[]; expe
 
 /** 结构与覆盖检查不调用模型；语义不明由转换阶段明确报告，不能继续浏览器探索。 */
 export function validateExecutionContract(value: unknown, source: ContractCase, roles: string[]): ExecutionContract {
+  // Models occasionally emit JSON-friendly issue objects or zero-based source
+  // indexes despite the contract examples. Normalize those two harmless
+  // representations before schema validation; all semantic checks below still
+  // apply after normalization.
+  if (value && typeof value === "object") {
+    const candidate = value as Record<string, unknown>;
+    const issues = Array.isArray(candidate.issues)
+      ? candidate.issues.map((issue) => typeof issue === "string" ? issue
+        : issue && typeof issue === "object" && typeof (issue as Record<string, unknown>).message === "string"
+          ? (issue as Record<string, unknown>).message as string
+          : issue)
+      : candidate.issues;
+    const rawChecks = candidate.preconditionChecks;
+    const conditions = source.preconditions ?? [];
+    // Index base belongs to the whole response, not each individual check.
+    // Require a zero plus matching verbatim quotes for every shifted reference;
+    // mixed bases, fractions and invalid references remain validation errors.
+    const zeroBased = Array.isArray(rawChecks) && rawChecks.some(check => check?.sourceIndices?.includes(0))
+      && rawChecks.every(check => check && Array.isArray(check.sourceIndices) && check.sourceIndices.length
+        && check.sourceIndices.every((i: unknown) => typeof i === "number" && Number.isInteger(i) && i >= 0 && i < conditions.length)
+        && Array.isArray(check.sourceQuotes) && check.sourceQuotes.length
+        && check.sourceQuotes.every((quote: unknown) => typeof quote === "string" && check.sourceIndices.some((i: number) => conditions[i].includes(quote))));
+    const checks = zeroBased ? rawChecks.map(check => ({ ...check, sourceIndices: check.sourceIndices.map((i: number) => i + 1) })) : rawChecks;
+    value = { ...candidate, issues, preconditionChecks: checks };
+  }
   // 待澄清结果不是可执行计划：模型可能返回部分 target，保留原因与原始用例，
   // 只移除无法执行的定位字段，避免把合理阻塞变成 JSON 校验失败并反复花费 token。
   if (value && typeof value === "object" && "status" in value && value.status === "needs_clarification"

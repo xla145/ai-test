@@ -121,3 +121,25 @@ it("reuses a signed-in hash-route page instead of submitting credentials again",
     expect(await page.evaluate(() => sessionStorage.getItem("session"))).toBe("kept");
   } finally { await session.close(); await context.close(); }
 }, 30_000);
+
+it("accepts secret-setting fields while rejecting an inline login form with retained storage", async () => {
+  const session = new BrowserSession({ baseUrl: app.url, executablePath: chooseBrowser().executablePath });
+  try {
+    const page = await session.page();
+    await page.goto(`${app.url}/login`);
+    await page.locator('#username').fill('alice');
+    await page.locator('#password').fill('pw-admin');
+    await page.locator('#login').click();
+    await page.waitForURL('**/dashboard');
+    await page.setContent('<main>新增渠道<input type="password" aria-label="API Key"><button>保存</button></main>');
+    await expect(session.newRoleContext('default', { requireLogin: true })).resolves.toMatchObject({ loggedIn: true });
+    expect(session.recording()).toMatchObject([{ action: 'goto', role: 'default', url: `${app.url}/` }]);
+    await session.newRoleContext('default', { requireLogin: true });
+    expect(session.recording()).toHaveLength(1);
+    await expect(session.page()).resolves.toBe(page);
+    await page.setContent('<form><input aria-label="用户名"><input type="password"><button>登 录</button></form>');
+    await expect(session.page()).rejects.toThrow('登录前置条件未满足');
+    await page.setContent('<form><input type="password"><input type="submit" value="Sign in"></form>');
+    await expect(session.page()).rejects.toThrow('登录前置条件未满足');
+  } finally { await session.close(); }
+}, 30_000);
