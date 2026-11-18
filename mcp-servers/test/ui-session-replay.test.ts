@@ -16,7 +16,12 @@ beforeAll(async () => {
   app = await startDemoApp();
   host = await chromium.launch({ executablePath: chooseBrowser().executablePath, args: [`--remote-debugging-port=${port}`] });
 });
-afterAll(async () => { await host?.close(); await app?.close(); });
+afterAll(async () => {
+  await Promise.race([
+    Promise.allSettled([host?.close(), app?.close()]),
+    new Promise<void>(r => setTimeout(() => { try { host?.process()?.kill("SIGKILL"); } catch {} r(); }, 5000)),
+  ]);
+});
 
 it.each(["default", "admin"])("MCP trial preserves the manually logged-in %s page without storageState or valid credentials", async role => {
   const workspace = mkdtempSync(join(tmpdir(), "aitest-session-replay-"));
@@ -60,6 +65,11 @@ it.each(["default", "admin"])("MCP trial preserves the manually logged-in %s pag
     expect(await page.evaluate(() => sessionStorage.getItem("session-only"))).toBe("preserved");
     expect(sparePage.url()).toBe("about:blank"); // 不把已登录角色复制到另一个角色
     expect(host.isConnected()).toBe(true);
+    await context.clearCookies();
+    const expired: any = await tools.find(t => t.name === "run_playwright_script")!.handler({ case_ids: ["tc_session"] });
+    expect(expired.exit_code).not.toBe(0);
+    expect(JSON.stringify(expired)).toContain("登录态已失效或未登录");
+
   } finally {
     await session.close(); await context.close(); await spareContext.close(); rmSync(workspace, { recursive: true, force: true });
   }
@@ -87,5 +97,49 @@ it("blocks login-required exploration with expired state, but allows anonymous l
     await page.context().clearCookies();
     await page.goto(`${app.url}/tags`);
     await expect(session.page()).rejects.toThrow("登录前置条件未满足");
+  } finally { await session.close(); }
+}, 30_000);
+
+it("reuses a signed-in hash-route page instead of submitting credentials again", async () => {
+  const context = await host.newContext();
+  const page = await context.newPage();
+  const session = new BrowserSession({ cdpEndpoint: `http://127.0.0.1:${port}`, baseUrl: app.url,
+    reuseExistingSession: true, openView: async () => {
+      await page.evaluate(() => { (window as any).__aitestViewMarker = "hash-role"; });
+      return "hash-role";
+    } });
+  try {
+    await page.goto(`${app.url}/login#/workspace`);
+    await page.setContent('<main>Signed in</main>');
+    await page.evaluate(() => sessionStorage.setItem("session", "kept"));
+    const result = await session.newRoleContext("admin", {
+      login: { url: "/login#/login", username: "#absent-user", password: "#absent-password", submit: "#absent-submit" },
+      credentials: { username: "invalid", password: "invalid" },
+    });
+    expect(result.reusedState).toBe(true);
+    expect(page.url()).toBe(`${app.url}/login#/workspace`);
+    expect(await page.evaluate(() => sessionStorage.getItem("session"))).toBe("kept");
+  } finally { await session.close(); await context.close(); }
+}, 30_000);
+
+it("accepts secret-setting fields while rejecting an inline login form with retained storage", async () => {
+  const session = new BrowserSession({ baseUrl: app.url, executablePath: chooseBrowser().executablePath });
+  try {
+    const page = await session.page();
+    await page.goto(`${app.url}/login`);
+    await page.locator('#username').fill('alice');
+    await page.locator('#password').fill('pw-admin');
+    await page.locator('#login').click();
+    await page.waitForURL('**/dashboard');
+    await page.setContent('<main>新增渠道<input type="password" aria-label="API Key"><button>保存</button></main>');
+    await expect(session.newRoleContext('default', { requireLogin: true })).resolves.toMatchObject({ loggedIn: true });
+    expect(session.recording()).toMatchObject([{ action: 'goto', role: 'default', url: `${app.url}/` }]);
+    await session.newRoleContext('default', { requireLogin: true });
+    expect(session.recording()).toHaveLength(1);
+    await expect(session.page()).resolves.toBe(page);
+    await page.setContent('<form><input aria-label="用户名"><input type="password"><button>登 录</button></form>');
+    await expect(session.page()).rejects.toThrow('登录前置条件未满足');
+    await page.setContent('<form><input type="password"><input type="submit" value="Sign in"></form>');
+    await expect(session.page()).rejects.toThrow('登录前置条件未满足');
   } finally { await session.close(); }
 }, 30_000);

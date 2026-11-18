@@ -8,7 +8,7 @@ describe("项目测试端", () => {
   ] as const)("%s displays its own test tabs and keeps common capabilities", (type, web, app) => {
     expect(visibleProjectTab("ui", type)).toBe(web);
     expect(visibleProjectTab("app", type)).toBe(app);
-    for (const key of ["import", "api", "cases", "run", "db", "reports", "ops"]) {
+    for (const key of ["import", "api", "cases", "run", "performance", "db", "reports", "ops"]) {
       expect(visibleProjectTab(key, type)).toBe(true);
     }
   });

@@ -1,6 +1,6 @@
 import { CaretRightFilled, CheckCircleFilled, CloseCircleFilled, LoadingOutlined, MinusCircleOutlined, StopOutlined } from "@ant-design/icons";
 import { Alert, Button, Empty, Segmented, Tag, Tooltip, Typography } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { UiScriptDetail, UiStepView } from "../../shared/ipc";
 
 export interface StepRunState { status: "running" | "passed" | "failed" | "skipped"; error?: string; note?: string }
@@ -20,8 +20,14 @@ const ACTION_KIND: Record<string, { label: string; color?: string }> = {
   press: { label: "按键" }, startCapture: { label: "捕获" }, installClock: { label: "时钟" }, fastForward: { label: "时钟" },
   expectVisible: { label: "断言", color: "blue" }, expectHidden: { label: "断言", color: "blue" }, expectText: { label: "断言", color: "blue" }, expectNoText: { label: "断言", color: "blue" }, expectValue: { label: "断言", color: "blue" },
   expectUrl: { label: "断言", color: "blue" }, expectRequest: { label: "断言", color: "blue" }, expectDb: { label: "断言", color: "blue" },
+  readValue: { label: "读取" }, reveal: { label: "显示区域" }, expectNumber: { label: "数值断言", color: "blue" }, expectObserved: { label: "值比较", color: "blue" },
   visualCheck: { label: "复核", color: "purple" },
 };
+
+/** 原始用例常带「【1】1.」这类文档编号，界面已有自己的层级编号，展示时只去掉重复前缀。 */
+function displayText(value: string): string {
+  return value.replace(/^\s*【\s*\d+\s*】\s*/, "").replace(/^\s*\d+\s*[.、](?!\d)\s*/, "").trim();
+}
 
 function StatusIcon({ state }: { state?: StepRunState }) {
   if (!state) return <MinusCircleOutlined className="step-icon idle" />;
@@ -31,7 +37,7 @@ function StatusIcon({ state }: { state?: StepRunState }) {
   return <CloseCircleFilled className="step-icon failed" />;
 }
 
-function StepRow({ step, state, multiRole, debug }: { step: UiStepView; state?: StepRunState; multiRole: boolean; debug?: StepDebug }) {
+function StepRow({ step, state, multiRole, debug, showMapping = true }: { step: UiStepView; state?: StepRunState; multiRole: boolean; debug?: StepDebug; showMapping?: boolean }) {
   const kind = ACTION_KIND[step.action] ?? { label: step.action };
   const atCursor = debug?.cursor === step.id;
   const breakpoint = debug?.breakpoints.includes(step.id);
@@ -52,6 +58,9 @@ function StepRow({ step, state, multiRole, debug }: { step: UiStepView; state?: 
           {multiRole && step.role && <Tag bordered={false} style={{ marginInlineStart: 6 }}>{step.role}</Tag>}
           {step.source && step.source !== "ai" && <Tooltip title="人工补充或修正的步骤"><Tag bordered={false} color="gold" style={{ marginInlineStart: 6 }}>人工</Tag></Tooltip>}
         </div>
+        {showMapping && (step.expectedIndices?.length || step.preconditionIndices?.length) ? <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {step.expectedIndices?.length ? `预期 ${step.expectedIndices.join("、")}` : ""} {step.preconditionIndices?.length ? `前置条件 ${step.preconditionIndices.join("、")}` : ""}
+        </Typography.Text> : null}
         {state?.note && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{state.note}</Typography.Text>}
         {state?.status === "failed" && state.error && (
           <Typography.Paragraph type="danger" className="mono" style={{ margin: "4px 0 0", fontSize: 12 }}
@@ -72,17 +81,18 @@ function StepRow({ step, state, multiRole, debug }: { step: UiStepView; state?: 
  * 脚本步骤与用例步骤对照：按用例步骤分组，执行时显示每步状态；
  * 没有对应脚本步骤的用例步骤会被标出，便于发现漏掉的操作或断言。
  */
-export function ScriptSteps({ caseSteps, expected, detail, states, debug }: {
+export function ScriptSteps({ caseSteps, expected, preconditions = [], detail, states, debug }: {
   caseSteps: string[];
   expected: string[];
+  preconditions?: string[];
   detail?: UiScriptDetail | null;
   states: Record<string, StepRunState>;
   debug?: StepDebug;
 }) {
   const steps = detail?.steps;
-  const [view, setView] = useState<"steps" | "code">("steps");
+  const [view, setView] = useState<"compare" | "steps" | "code">("compare");
   // 旧脚本或脚本被改过时，以代码为准；调试时固定显示步骤
-  useEffect(() => { setView(detail && (!steps || !detail.synced) ? "code" : "steps"); }, [detail, steps]);
+  useEffect(() => { setView(detail && (!steps || !detail.synced) ? "code" : detail ? "compare" : "steps"); }, [detail?.path]);
   useEffect(() => { if (debug && steps) setView("steps"); }, [Boolean(debug), steps]); // eslint-disable-line react-hooks/exhaustive-deps
   // 游标移动时滚动到可见位置
   useEffect(() => {
@@ -108,9 +118,9 @@ export function ScriptSteps({ caseSteps, expected, detail, states, debug }: {
     <div className="script-steps">
       {detail && (
         <div className="script-steps-head">
-          <Segmented size="small" value={view} onChange={(v) => setView(v as "steps" | "code")}
-            options={[{ label: "步骤", value: "steps", disabled: !steps }, { label: "代码", value: "code", disabled: Boolean(debug) }]} />
-          <Typography.Text type="secondary" className="mono" ellipsis style={{ fontSize: 12, minWidth: 0 }}>{detail.path}</Typography.Text>
+          <Segmented size="small" value={view} onChange={(v) => setView(v as "compare" | "steps" | "code")}
+            options={[{ label: "用例对照", value: "compare", disabled: !steps }, { label: "脚本步骤", value: "steps", disabled: !steps }, { label: "代码", value: "code", disabled: Boolean(debug) }]} />
+          <Typography.Text type="secondary" className="mono" ellipsis title={detail.path} style={{ fontSize: 12, minWidth: 0 }}>{detail.path}</Typography.Text>
         </div>
       )}
       {detail && !steps && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="该脚本没有结构化步骤（较早生成），重新生成后可按步骤对照查看" />}
@@ -120,6 +130,40 @@ export function ScriptSteps({ caseSteps, expected, detail, states, debug }: {
       )}
       {view === "code" && detail ? (
         <pre className="script-code mono">{detail.code}</pre>
+      ) : view === "compare" && detail && steps ? (
+        <div className="script-compare">
+          <Typography.Paragraph type="secondary" className="script-compare-note">关联仅表示脚本声明覆盖；请核对目标、输入与断言值，执行结果以试跑报告为准。</Typography.Paragraph>
+          {(!detail.source || JSON.stringify(detail.source.steps ?? []) !== JSON.stringify(caseSteps) || JSON.stringify(detail.source.expected ?? []) !== JSON.stringify(expected) || JSON.stringify(detail.source.preconditions ?? []) !== JSON.stringify(preconditions)) && <Alert type="warning" showIcon message={detail.source ? "用例已变化：以下为历史映射，请重新生成或核对" : "缺少生成时的用例快照：无法确认映射版本"} />}
+          <div className="script-compare-head"><span>原始用例</span><span>生成脚本 · 动作与断言</span></div>
+          {([
+            { label: "前置条件", values: preconditions, field: "preconditionIndices" },
+            { label: "步骤", values: caseSteps, field: "caseStep" },
+            { label: "预期", values: expected, field: "expectedIndices" },
+          ] as const).map(section => <section key={section.field} aria-label={`${section.label}对照`}>
+            <div className="script-compare-section"><span>{section.label}</span><span className="script-compare-count">{section.values.length} 项</span></div>
+            {!section.values.length && <div className="script-compare-note">未声明{section.label}</div>}
+            {section.values.map((text, i) => {
+              const own = steps.filter(st => section.field === "caseStep" ? st.caseStep === i + 1 : st[section.field]?.includes(i + 1) && (st.action.startsWith("expect") || st.action === "visualCheck"));
+              return <div className="script-compare-row" key={i}>
+              <div className="script-compare-source"><div className="script-compare-source-text"><span className="case-group-index">{i + 1}</span><span>{displayText(text)}</span></div>
+                  <Tag bordered={false} color={own.length ? "blue" : "orange"}>{own.length ? `已关联 ${own.length} 个${section.field === "caseStep" ? "步骤" : "断言"}` : "未关联"}</Tag>
+                </div>
+                <div className="script-compare-generated">
+                  {!own.length && <Typography.Text type="warning">{section.field === "caseStep" ? "没有对应脚本动作" : "没有能证明此项的关联断言"}</Typography.Text>}
+                  {own.map(st => <div key={st.id}>
+                    <StepRow step={st} state={states[st.id]} multiRole={multiRole} showMapping={false} />
+                    {st.action === "expectObserved" && <Typography.Text type="secondary">不等于验证正确或执行通过</Typography.Text>}
+                    {st.action === "visualCheck" && <Typography.Text type="secondary">截图需人工复核</Typography.Text>}
+                  </div>)}
+                </div>
+              </div>;
+            })}
+          </section>)}
+          {steps.some(st => !st.caseStep && !st.expectedIndices?.length && !st.preconditionIndices?.length) && <section aria-label="未关联步骤">
+            <div className="script-compare-section">准备 / 未关联步骤 · 请核对必要性</div>
+            {steps.filter(st => !st.caseStep && !st.expectedIndices?.length && !st.preconditionIndices?.length).map(st => <StepRow key={st.id} step={st} state={states[st.id]} multiRole={multiRole} showMapping={false} />)}
+          </section>}
+        </div>
       ) : (
         <>
           {mapped && groups.before.length > 0 && (
@@ -135,8 +179,8 @@ export function ScriptSteps({ caseSteps, expected, detail, states, debug }: {
                 <div className="case-group-head">
                   <span className="case-group-index">{i + 1}</span>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div>{text}</div>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>预期：{expected[i] ?? "请补充预期结果"}</Typography.Text>
+                    <div>{displayText(text)}</div>
+                    {expected.length === caseSteps.length && <Typography.Text type="secondary" className="case-expected">预期：{displayText(expected[i])}</Typography.Text>}
                   </div>
                   {mapped && !own.length && <Tag bordered={false} color="orange">无对应脚本步骤</Tag>}
                   {mapped && own.length > 0 && !own.some((s) => (ACTION_KIND[s.action]?.color)) && (
@@ -153,6 +197,10 @@ export function ScriptSteps({ caseSteps, expected, detail, states, debug }: {
               {(mapped ? groups.loose : steps!).map((st) => <StepRow key={st.id} step={st} state={states[st.id]} multiRole={multiRole} debug={debug} />)}
             </div>
           )}
+          {expected.length > 0 && expected.length !== caseSteps.length && <div className="case-group">
+            <div className="case-group-head">预期结果</div>
+            {expected.map((text, i) => <div className="case-expected-item" key={i}><span className="case-group-index">{i + 1}</span><span>{displayText(text)}</span></div>)}
+          </div>}
           {!caseSteps.length && !steps?.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="用例没有步骤" />}
         </>
       )}

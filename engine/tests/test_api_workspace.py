@@ -301,3 +301,80 @@ def test_login_client_id_follows_role_token_without_duplicate_headers():
         assert execute_case(case, client, env, {}, resolver)['status'] == 'passed'
     assert calls == ['/login', '/business', '/business']
     assert env['api_crypto']['headers'] == {'ClientId': 'stale-client'}
+
+
+def test_batch_generation_limits_scope_and_deduplicates(catalog):
+    store, p, preview = catalog
+    definitions = ws.import_document(store, p.id, preview)["definitions"]
+    chosen = definitions[:2]
+    assert len(chosen) == 2 and len(definitions) > 2
+    ids = [d["id"] for d in chosen]
+    result = ws.generate_cases(store, p.id, ids + ids)
+    generated = [store.get_case(i) for i in result["case_ids"]]
+    assert result["generated"] == len(generated) > 0
+    assert {c.api.definition_id for c in generated} == set(ids)
+    assert all(c.status == "draft" for c in generated)
+    again = ws.generate_cases(store, p.id, ids)
+    assert again["generated"] == 0 and again["skipped"] == len(generated)
+    before = len(store.list_cases(p.id))
+    with pytest.raises(ValueError, match="有效的接口"):
+        ws.generate_cases(store, p.id, ids + ["missing"])
+    assert len(store.list_cases(p.id)) == before
+
+
+def test_batch_selected_identity_authenticates_unbound_requests_and_keeps_explicit_roles():
+    from aitest.api_runtime import auth_resolver
+    headers = []
+    def handle(request):
+        headers.append(request.headers.get('Authorization'))
+        return httpx.Response(200, json={})
+    env = {'selected_role': 'operator', 'default_login_role': 'tester', 'auth_token': 'environment-token'}
+    steps = [
+        {'method': 'GET', 'path': '/generated', 'auth': False, 'expected_status': [200]},
+        {'method': 'GET', 'path': '/default', 'expected_status': [200]},
+        {'method': 'GET', 'path': '/explicit', 'role': 'other', 'expected_status': [200]},
+    ]
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(handle)) as client:
+        resolver = auth_resolver(client, env, tokens={'operator': 'selected-token', 'other': 'other-token'})
+        result = execute_case({'steps': steps}, client, env, {}, resolver)
+    assert result['status'] == 'passed'
+    assert headers == ['selected-token', 'selected-token', 'other-token']
+    assert [step['role'] for step in result['steps']] == ['operator', 'operator', 'other']
+    assert steps[0]['auth'] is False and 'role' not in steps[0]
+    assert 'selected-token' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('auth', [True, False])
+def test_environment_token_takes_precedence_over_case_role_when_requested(auth):
+    from aitest.api_runtime import auth_resolver
+    seen = []
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(lambda r: (seen.append(r.headers.get('Authorization')) or httpx.Response(200, json={'code': 200, 'msg': 'ok'})))) as client:
+        resolver = auth_resolver(client, {'auth_token': 'manual-token', 'prefer_env_token': True}, tokens={})
+        result = execute_case({'title': '普通请求', 'category': '功能测试', 'steps': [{'method': 'GET', 'path': '/x', 'role': '超级管理员', 'auth': auth, 'expected_status': [200]}]}, client,
+                              {'auth_token': 'manual-token', 'prefer_env_token': True}, {}, resolver)
+    assert result['status'] == 'passed'
+    assert seen == ['manual-token']
+    assert result['steps'][0]['role'] == ''
+    assert result['steps'][0]['auth_source'] == 'environment'
+    assert 'manual-token' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('body,expected_fields,assertions,enabled,passed', [
+    ({'code': 401, 'msg': '认证失败'}, {}, [], True, False),
+    ({'code': 500, 'msg': '错误'}, {}, [], True, False),
+    ({'code': 200, 'msg': '成功'}, {}, [], True, True),
+    ({'code': '0', 'message': 'ok'}, {}, [], True, True),
+    ({'code': 401, 'msg': '认证失败'}, {'code': 401}, [], True, True),
+    ({'code': 500, 'msg': '错误'}, {}, [{'path': 'code', 'operator': 'eq', 'value': 500}], True, True),
+    ({'code': 401, 'msg': '认证失败'}, {}, [{'path': 'code', 'operator': 'exists'}], True, False),
+    ({'code': 401, 'msg': '认证失败'}, {}, [], False, True),
+    ({'code': 500, 'product': 'example'}, {}, [], True, True),
+])
+def test_batch_business_code_check(body, expected_fields, assertions, enabled, passed):
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body))) as client:
+        result = execute_case({'method': 'GET', 'path': '/test', 'auth': False, 'expected_status': [200],
+                               'expected_fields': expected_fields, 'assertions': assertions},
+                              client, {'check_business_code': enabled}, {}, lambda _: '')
+    assert (result['status'] == 'passed') == passed
+    if not passed:
+        assert any(a['name'] == '业务码' and not a['passed'] for a in result['steps'][0]['assertions'])

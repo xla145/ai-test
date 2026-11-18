@@ -20,8 +20,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await host?.close();
-  await app?.close();
+  await Promise.race([
+    Promise.allSettled([host?.close(), app?.close()]),
+    new Promise<void>(r => setTimeout(() => { try { host?.process()?.kill("SIGKILL"); } catch {} r(); }, 5000)),
+  ]);
 });
 
 describe("CDP mode (embedded browser)", () => {
@@ -53,6 +55,52 @@ describe("CDP mode (embedded browser)", () => {
       expect(progress.map(p => p.role).filter(Boolean)).toEqual(expect.arrayContaining(["admin", "viewer"]));
       expect(JSON.stringify(progress)).not.toContain("pw-admin");
       expect(JSON.stringify(progress)).not.toContain("pw-viewer");
+    } finally { for (const context of contexts) await context.close(); rmSync(dir, { recursive: true, force: true }); }
+  }, 60_000);
+
+  it("binds legacy default steps to the selected live session while preserving explicit roles", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "aitest-selected-session-"));
+    const contexts = [];
+    const views: Record<string, any> = {};
+    const viewMarkers: Record<string, string> = {};
+    for (const role of ["default", "admin", "viewer"]) {
+      const context = await host.newContext(); contexts.push(context);
+      const page = await context.newPage(); views[role] = page;
+      await page.goto(`${app.url}/login`);
+      if (role !== "default") {
+        await page.locator("#username").fill(role === "admin" ? "alice" : "bob");
+        await page.locator("#password").fill(role === "admin" ? "pw-admin" : "pw-viewer");
+        await page.locator("#login").click();
+        await page.waitForURL("**/dashboard");
+      }
+      viewMarkers[role] = `selected-${role}-${Date.now()}`;
+      await page.evaluate((marker: string) => {
+        (window as any).__aitestViewMarker = marker;
+        sessionStorage.setItem("preserved", marker);
+      }, viewMarkers[role]);
+    }
+    mkdirSync(join(dir, "scripts/ui"), { recursive: true });
+    const source = generateSpec({ caseId: "tc_selected", title: "session binding", steps: [
+      { action: "goto", url: "/dashboard" },
+      { action: "expectVisible", target: { kind: "testid", value: "menu-tags" } },
+      { action: "goto", role: "viewer", url: "/dashboard" },
+      { action: "expectHidden", role: "viewer", target: { kind: "testid", value: "menu-tags" } },
+    ] });
+    const path = join(dir, "scripts/ui/tc_selected.spec.ts"); writeFileSync(path, source);
+    const progress: string[] = [];
+    try {
+      const out = await runUiSuite({ workspace: dir, baseUrl: app.url, caseIds: ["tc_selected"],
+        cdpEndpoint: `http://127.0.0.1:${PORT}`, viewMarkers, defaultRole: "admin",
+        onProgress: e => { if (e.role) progress.push(e.role); }, env: {
+          AITEST_ROLES: JSON.stringify([{ role: "admin", username: "invalid", password: "invalid" }]),
+          AITEST_LOGIN: JSON.stringify({ url: "/login", username: "#username", password: "#password", submit: "#login", success: "/dashboard" }),
+        } });
+      expect(out.results, out.stderr).toMatchObject([{ case_id: "tc_selected", status: "passed" }]);
+      expect(progress).toEqual(expect.arrayContaining(["admin", "viewer"]));
+      expect(progress).not.toContain("default");
+      expect(views.default.url()).toBe(`${app.url}/login`);
+      expect(await views.admin.evaluate(() => sessionStorage.getItem("preserved"))).toBe(viewMarkers.admin);
+      expect(readFileSync(path, "utf8")).toBe(source);
     } finally { for (const context of contexts) await context.close(); rmSync(dir, { recursive: true, force: true }); }
   }, 60_000);
 

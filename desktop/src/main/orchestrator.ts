@@ -1,8 +1,11 @@
+import { listPerformance, performancePlan, readPerformanceResult, runPerformance as executePerformance } from "./performance.js";
+import type { PerformanceOptions, PerformanceResult } from "../shared/performance.js";
+import { bindPerformanceDefinition } from "../shared/performanceSource.js";
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "../shared/apiWorkspace.js";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   checkData as CheckData,
   LoginRecipe,
@@ -26,11 +29,12 @@ import {
 } from "./prompts.js";
 import type { TurnResult } from "./codex/appServer.js";
 import type { ThreadStartParams } from "./codex/protocol.js";
+import { uiContractThreadConfig } from "./codex/config.js";
 import type { ApiRunOptions, ApiTestSet, CaseQuery, Page, PageQuery, ProjectType } from "../shared/ipc.js";
 import type { UiTaskRecord, UiRunOptions, UiScriptState } from "../shared/ipc.js";
-import { UiWorkflow } from "./uiWorkflow.js";
+import { UiWorkflow, type WorkflowReview } from "./uiWorkflow.js";
 import { UiExecutionContracts } from "./uiExecutionContract.js";
-import { caseHash, sha256, writeUiScript } from "@ai-test/mcp-servers";
+import { coverageIssues, uiRuntimeHash, caseHash, sha256, writeUiScript } from "@ai-test/mcp-servers";
 import { deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups.js";
 import type { UiCaseGroup, UiDeriveResult } from "../shared/ipc.js";
 import { UiDebugSession, type DebugBrowser } from "./uiDebug.js";
@@ -95,7 +99,7 @@ export interface UiDeps {
   runUiSuite: typeof RunUiSuite;
   checkData: typeof CheckData;
   seedData: typeof SeedData;
-  prepareEmbedded?: (projectId: string, env: string, roles: string[]) => Promise<{ cdpEndpoint: string; viewMarkers: Record<string, string> }>;
+  prepareEmbedded?: (projectId: string, env: string, roles: string[], selectedRole?: string, show?: boolean) => Promise<{ cdpEndpoint: string; viewMarkers: Record<string, string> }>;
   /** 单步调试：连接内嵌浏览器的会话（BrowserSession） */
   createDebugBrowser?: (projectId: string, env: string, opts: { baseUrl: string; testIdAttribute?: string }) => DebugBrowser & {
     newRoleContext(role: string, opts?: { login?: LoginRecipe; credentials?: { username: string; password: string } }): Promise<unknown>;
@@ -108,6 +112,9 @@ interface CaseRow {
   execution_mode: string;
   status: string;
   data_refs: string[];
+  preconditions?: string[];
+  steps?: string[];
+  expected?: string[];
   lint_status?: string;
 }
 
@@ -167,6 +174,8 @@ export interface OrchestratorDeps {
   /** 单次 agent 任务的 token 上限 */
   tokenLimit?: number;
   uiLocateStrategy?: "dom-first" | "midscene-first";
+  /** 可选的本地任务快照；未提供时保持测试/临时编排器的内存行为。 */
+  taskFile?: string;
 }
 
 export interface AppDeps {
@@ -181,8 +190,21 @@ export class Orchestrator extends EventEmitter {
   private uiTaskActive = false;
   private uiTaskSeq = 0;
   private taskRecords: UiTaskRecord[] = [];
+  private agentControllers = new Map<string, AbortController>();
   uiTasks(): UiTaskRecord[] { return structuredClone(this.taskRecords); }
-  private uiAbort?: { projectId: string; env: string; controller: AbortController };
+  private persistTasks() {
+    const file = this.deps.taskFile;
+    if (!file) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.taskRecords, null, 2));
+      renameSync(tmp, file);
+    } catch {
+      for (const task of this.taskRecords) task.persistenceError = "任务历史保存失败；当前状态仅保留在内存中";
+    }
+  }
+  private uiAbort?: { projectId: string; env: string; controller: AbortController; taskId: string };
   private uiDebug?: UiDebugSession;
   private async withUiTask<T>(projectId: string, env: string, fn: (signal: AbortSignal) => Promise<T>, kind = "UI 执行", caseIds: string[] = []): Promise<T> {
     if (this.uiTaskActive) throw new Error("已有 UI 任务正在执行，请等待完成后再操作");
@@ -190,9 +212,10 @@ export class Orchestrator extends EventEmitter {
     this.uiTaskActive = true;
     const controller = new AbortController();
     const taskId = `ui-${Date.now()}-${++this.uiTaskSeq}`;
-    this.uiAbort = { projectId, env, controller };
-    const task: UiTaskRecord = { id: taskId, projectId, env, kind, caseIds, status: "running", stage: "准备执行", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    this.uiAbort = { projectId, env, controller, taskId };
+    const task: UiTaskRecord = { id: taskId, projectId, env, kind, caseIds, status: "running", stage: "准备执行", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: "ui", canStop: true };
     this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    this.persistTasks();
     this.emit("progress", { projectId, env, stage: "ui-task", taskId, status: "running" });
     try {
       const result = await fn(controller.signal);
@@ -216,8 +239,34 @@ export class Orchestrator extends EventEmitter {
     if (!task) return;
     if (task.projectId !== projectId || task.env !== env) throw new Error("当前执行的 UI 任务不属于此项目或环境");
     task.controller.abort();
-    const record = this.taskRecords.find(t => t.status === "running");
+    const record = this.taskRecords.find(t => (t.source ?? "ui") === "ui" && t.projectId === projectId && t.env === env && t.status === "running");
     if (record) this.emit("progress", { projectId, env, stage: "ui-task", taskId: record.id, status: "stopping" });
+  }
+  stopExecutionTask(taskId: string): void {
+    const task = this.taskRecords.find(t => t.id === taskId);
+    if (!task) throw new Error("任务不存在");
+    if (!["running", "stopping"].includes(task.status)) return;
+    const controller = this.agentControllers.get(taskId);
+    if (controller) {
+      task.status = "stopping";
+      controller.abort();
+      this.emit("progress", { projectId: task.projectId, env: task.env, stage: "agent-task", taskId, status: "stopping" });
+    } else if (this.uiAbort?.taskId === taskId) this.stopUiTask(task.projectId, task.env);
+    else throw new Error("当前任务不支持停止");
+  }
+  recordAgentEvent(event: { method: string; params?: any }): string | undefined {
+    if (typeof event.params?.threadId !== "string") return;
+    const task = this.taskRecords.find(t => t.threadId === event.params.threadId);
+    if (!task) return;
+    const item = event.params?.item;
+    const detail = item?.type === "mcpToolCall" && ["item/started", "item/completed"].includes(event.method)
+      ? `${event.method === "item/started" ? "调用工具" : item.status === "failed" || item.error ? "工具失败" : "工具完成"} ${item.server ?? ""}.${item.tool ?? ""}`
+      : item?.type === "contextCompaction" ? event.method === "item/completed" ? "上下文压缩完成" : "正在压缩上下文" : undefined;
+    if (detail) {
+      task.events = [...(task.events ?? []), { time: new Date().toISOString(), detail }].slice(-100);
+      this.persistTasks();
+    }
+    return task.id;
   }
   constructor(private readonly deps: OrchestratorDeps) {
     super();
@@ -230,11 +279,26 @@ export class Orchestrator extends EventEmitter {
         task.status = p.status;
         if (p.error) task.detail = p.error;
         if (!["running", "stopping"].includes(task.status)) task.finishedAt = task.updatedAt;
+      } else if (p.stage === "agent-task") {
+        task.status = p.status ?? task.status;
+        if (p.error) task.detail = p.error;
+        if (!["running", "stopping"].includes(task.status)) task.finishedAt = task.updatedAt;
       } else {
-        task.stage = ({ ui_contract: "整理执行计划", explore: "探索并生成脚本", "ui-run": "执行脚本", "ui-step": "执行脚本步骤", revise: "修正脚本", heal: "分析失败原因" } as Record<string, string>)[p.stage] ?? task.stage;
+        task.stage = ({ ui_contract: "整理执行计划", case_gen: "生成测试用例", api_script: "补充接口脚本", explore: "探索并生成脚本", "ui-run": "执行脚本", "ui-step": "执行脚本步骤", revise: "修正脚本", heal: "分析失败原因", triage: "分析失败原因", app_explore: "探索 App 用例", performance: "准备性能测试" } as Record<string, string>)[p.stage] ?? task.stage;
         if (p.title) task.detail = p.title;
       }
+      this.persistTasks();
     });
+    if (deps.taskFile && existsSync(deps.taskFile)) {
+      try {
+        const previous = JSON.parse(readFileSync(deps.taskFile, "utf8")) as UiTaskRecord[];
+        this.taskRecords = Array.isArray(previous) ? previous.slice(0, 100).map(task =>
+          ["running", "stopping"].includes(task.status)
+            ? { ...task, status: "failed", detail: "应用重启时任务未确认完成（PROCESS_RESTARTED）", finishedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+            : task) : [];
+      } catch { this.taskRecords = []; }
+      this.persistTasks();
+    }
   }
 
   listProjects(): Promise<ProjectInfo[]> {
@@ -377,7 +441,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 回归直接执行脚本；只有原因不明的失败才调 agent 归因。 */
-  async runRegression(projectId: string, env: string, opts: ApiRunOptions & { autoTriage?: boolean } = {}) {
+  async runRegression(projectId: string, env: string, opts: ApiRunOptions = {}) {
     if (opts.caseIds !== undefined && !opts.caseIds.length) throw new Error("请至少选择一条接口用例");
     const project = await this.project(projectId);
     const envCfg = project.environments[env];
@@ -385,19 +449,31 @@ export class Orchestrator extends EventEmitter {
     if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     this.emit("progress", { projectId, stage: "run", env });
     // 接口多账号：注入全部角色的凭据（账号密码与固定 token），流程中每步按角色鉴权
+    const apiSecrets = this.deps.secretEnv(projectId, env, ["*"]);
+    const preferEnvToken = opts.preferEnvToken ?? Boolean(apiSecrets.AITEST_AUTH_TOKEN?.trim());
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env,
         ...opt("--case-ids", opts.caseIds === undefined ? undefined : JSON.stringify(opts.caseIds))],
-      this.deps.secretEnv(projectId, env, ["*"]),
+      { ...apiSecrets, ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}),
+        ...(!opts.selectedRole ? { AITEST_API_PREFER_ENV_TOKEN: preferEnvToken ? "1" : "0" } : {}),
+        ...(opts.checkBusinessCode !== undefined ? { AITEST_API_CHECK_BUSINESS_CODE: opts.checkBusinessCode ? "1" : "0" } : {}) },
     );
     let triage: TriageItem[] | undefined;
+    let analysis: { status: "completed" | "failed"; error?: string } | undefined;
     if (opts.autoTriage !== false && run.needs_agent.length) {
-      triage = await this.triage(projectId, run.run_id);
+      try {
+        triage = await this.triage(projectId, run.run_id, env);
+        analysis = { status: "completed" };
+      } catch (error) {
+        // AI 分析失败不能覆盖已经完成的确定性接口报告；调用方仍应看到原始 run。
+        analysis = { status: "failed", error: String((error as Error)?.message ?? error).slice(0, 300) };
+        this.emit("progress", { projectId, env, stage: "analysis", status: "failed", error: analysis.error, runId: run.run_id });
+      }
     }
-    return { run, triage };
+    return { run, triage, analysis };
   }
 
-  async triage(projectId: string, runId: string): Promise<TriageItem[]> {
+  async triage(projectId: string, runId: string, env?: string): Promise<TriageItem[]> {
     const failures = await this.deps.engine<FailureBrief[]>(["summarize-failures", "--run", runId]);
     const unknown = failures.filter((f) => f.failure_type === "unknown");
     const settled: TriageItem[] = failures
@@ -405,8 +481,16 @@ export class Orchestrator extends EventEmitter {
       .map((f) => ({ case_id: f.case_id, failure_type: f.failure_type ?? "unknown", reason: "确定性规则判定" }));
     await this.recordAttributions(runId, settled, "rule");
     if (!unknown.length) return settled;
-    const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown));
-    const judged = parseTriage(turn.message);
+    const turn = await this.agentTask(projectId, "triage", triagePrompt(projectId, runId, unknown), undefined, 0, { env, caseIds: unknown.map(c => c.case_id), runId });
+    if (turn.status !== "completed") throw new Error(`AI 归因未完成：${turn.status}`);
+    const wanted = new Set(unknown.map(f => f.case_id));
+    const parsed = parseTriage(turn.message).filter(item => wanted.has(item.case_id));
+    if (!parsed.length) throw new Error("AI 未返回有效的失败归因，原始失败仍待分析");
+    // 同一用例只接受一个结论；冲突或缺失保留 unknown，不能污染其他运行的用例。
+    const judged = unknown.map(failure => {
+      const matches = parsed.filter(item => item.case_id === failure.case_id);
+      return matches.length === 1 ? matches[0] : { case_id: failure.case_id, failure_type: "unknown", reason: matches.length ? "AI 返回了重复或冲突结论，需人工核对" : "AI 未提供此用例的归因" };
+    });
     await this.recordAttributions(runId, judged, "agent");
     return [...settled, ...judged];
   }
@@ -414,16 +498,17 @@ export class Orchestrator extends EventEmitter {
   // ------------------------------------------------------------------ UI 测试（二期）
 
   /** 探索模式：agent 在内嵌浏览器里走通用例并生成确定性脚本 */
-  async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean } = {}) {
+  async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean; selectedRole?: string } = {}) {
     return this.withUiTask(projectId, env, async (signal) => {
       const row = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
       const brief: ExploreCaseBrief = { title: row.title, steps: row.steps, expected: row.expected, preconditions: row.preconditions, data_refs: row.data_refs };
       const p = await this.project(projectId);
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+      if (opts.selectedRole && !roles.includes(opts.selectedRole)) throw new Error(`所选角色「${opts.selectedRole}」未配置，请重新选择登录态`);
       const empty = { threadId: "", turnId: "", status: "completed", tokens: 0 };
       if (!brief.steps?.length || !brief.expected?.length) return { ...empty, scriptGenerated: false,
         message: "用例缺少步骤或预期，请先补充；未调用 AI。", needsClarification: true };
-      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env]);
+      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env], opts.selectedRole);
       const workflow = new UiWorkflow(p.workspace_path);
       const existing = (await this.uiScriptStates(projectId, env))[caseId];
       const binding = (state: UiScriptState | undefined) => {
@@ -433,13 +518,14 @@ export class Orchestrator extends EventEmitter {
       };
       const before = binding(existing);
       const cached = contracts.read();
-      if (cached?.contract.status === "ready" && before && JSON.stringify(cached.script) === JSON.stringify(before)) {
-        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。`, scriptGenerated: true, reused: true };
+      const covered = (path: string, plan: NonNullable<typeof cached>["contract"]) => !coverageIssues(workflow.stepsFile(path).steps, { ...brief, preconditionChecks: plan.preconditionChecks }).length;
+      if (cached?.contract.status === "ready" && before && covered(before.path, cached.contract) && JSON.stringify(cached.script) === JSON.stringify(before)) {
+        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。\n中间计划：${contracts.artifactPath}`, scriptGenerated: true, reused: true };
       }
       let contract = cached?.contract;
       let converted: TurnResult | undefined;
       if (!contract) {
-        converted = await this.agentTask(projectId, "ui_contract", uiContractPrompt(brief, roles), signal);
+        converted = await this.agentTask(projectId, "ui_contract", uiContractPrompt(brief, roles, opts.selectedRole), signal);
         signal.throwIfAborted();
         if (converted.status !== "completed") return { ...converted, scriptGenerated: false };
         try { contract = contracts.parse(converted.message); }
@@ -452,18 +538,21 @@ export class Orchestrator extends EventEmitter {
         const latest = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
         const latestProject = await this.project(projectId);
         const latestRoles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map(r => r.role_name);
-        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId, latest, latestRoles, latestProject.environments[env]).fingerprint;
+        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId, latest, latestRoles, latestProject.environments[env], opts.selectedRole).fingerprint;
       };
       if (!await stillCurrent()) return { ...(converted ?? empty), scriptGenerated: false, message: "转换期间用例或环境已变化，请重新生成；未启动 UI 探索。" };
-      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy, contract), signal, converted?.tokens ?? 0);
+      // Activate a historical cache entry for the browser process without another AI conversion.
+      contracts.save(contract);
+      const result = await this.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy, contract, opts.selectedRole), signal, converted?.tokens ?? 0);
       signal.throwIfAborted();
       // 保存发生在浏览器工具中，只有本次生成、内容仍匹配的脚本才能绑定缓存。
       const after = binding((await this.uiScriptStates(projectId, env))[caseId]);
       const unchanged = await stillCurrent();
-      const scriptGenerated = Boolean(unchanged && after && after.stepsHash !== before?.stepsHash);
+      const scriptGenerated = Boolean(unchanged && after && covered(after.path, contract) && after.stepsHash !== before?.stepsHash);
       if (scriptGenerated && result.status === "completed") contracts.save(contract, after);
       return { ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated, contractReused: Boolean(cached),
-        message: scriptGenerated ? result.message : [unchanged ? "未生成当前版本的新脚本。" : "用例或环境配置已变化，未复用本次脚本。", result.message].join("\n") };
+        message: [cached ? "中间计划命中缓存，本次未重复 AI 转换。" : `中间计划已转换并持久化（${contracts.cacheReason}）。`, `计划产物：${contracts.artifactPath}`,
+          scriptGenerated ? result.message : [unchanged ? "未生成当前版本的新脚本。" : "用例或环境配置已变化，未复用本次脚本。", result.message].join("\n")].join("\n") };
     }, "生成脚本", [caseId]);
   }
 
@@ -474,7 +563,7 @@ export class Orchestrator extends EventEmitter {
     const app = this.requireApp();
     if (!app.pinkyEnabled?.()) throw new Error("未启用 Pinky：请先安装 Pinky，并在「全局设置 → 运行环境」中启用");
     const envCfg = await this.appEnv(projectId, env, platform, opts.confirmProduction);
-    return this.agentTask(projectId, "app_explore", appExplorePrompt(projectId, env, platform, caseId, envCfg.app![platform]!));
+    return this.agentTask(projectId, "app_explore", appExplorePrompt(projectId, env, platform, caseId, envCfg.app![platform]!), undefined, 0, { env, caseIds: [caseId] });
   }
 
   /** App 回归：Maestro 直接执行脚本，不调用模型；失败按规则归因，等待人工确认 */
@@ -551,6 +640,14 @@ export class Orchestrator extends EventEmitter {
     return this.withUiTask(projectId, env, (signal) => this.executeUiRegression(projectId, env, opts, signal), opts.mode === "validate" ? "试跑校验" : "UI 回归", opts.caseIds);
   }
 
+  private uiFingerprints(envCfg: EnvironmentInfo, cases: CaseRow[]) {
+    return Object.fromEntries(cases.map(c => [c.id, sha256(JSON.stringify({ runtime: uiRuntimeHash(), environment: envCfg, case: { title: c.title, steps: c.steps, expected: c.expected, preconditions: c.preconditions, data_refs: c.data_refs, execution_mode: c.execution_mode } }))]));
+  }
+
+  private async uiReviewContext(projectId: string) {
+    return this.deps.engine<WorkflowReview[]>(["list-reviews", "--project", projectId]);
+  }
+
   private async executeUiRegression(projectId: string, env: string,
     opts: UiRunOptions & { autoHeal?: boolean; headed?: boolean }, signal: AbortSignal) {
     const ui = this.requireUi();
@@ -563,7 +660,8 @@ export class Orchestrator extends EventEmitter {
     const cases = (await this.listCases(projectId)) as CaseRow[];
     const workflow = new UiWorkflow(project.workspace_path);
     const projectIds = new Set(cases.map((c) => c.id));
-    const states = opts.mode ? workflow.states(env, Object.fromEntries([...uiScripts].filter(([id]) => projectIds.has(id)))) : {};
+    const context = { fingerprints: this.uiFingerprints(envCfg, cases), reviews: await this.uiReviewContext(projectId), roles: {} as Record<string, string> };
+    const states = opts.mode ? workflow.states(env, Object.fromEntries([...uiScripts].filter(([id]) => projectIds.has(id))), context) : {};
     const requested = opts.caseIds ? new Set(opts.caseIds) : undefined;
     if (requested && (!requested.size || [...requested].some((id) => !projectIds.has(id) || !uiScripts.has(id)))) throw new Error("请选择当前项目中已生成脚本的用例");
     if (opts.mode === "validate" && !requested) throw new Error("试跑校验需要指定用例");
@@ -577,16 +675,24 @@ export class Orchestrator extends EventEmitter {
       && (opts.mode !== "regression" || (states[c.id]?.status === "confirmed" && c.status === "reviewed")));
     if (requested && runnable.length !== requested.size) throw new Error("选中的用例已废弃、尚未审核或不支持 UI 执行");
     if (!runnable.length) throw new Error("没有已确认的 UI 脚本，请先在内嵌浏览器中校验并确认");
+    const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
+    if (opts.embedded && !ui.prepareEmbedded) throw new Error("当前运行环境不支持内嵌浏览器校验");
+    if (opts.selectedRole && !roles.includes(opts.selectedRole)) throw new Error(`所选角色「${opts.selectedRole}」未配置，请重新选择登录态`);
+    const versions = opts.mode === "validate" ? Object.fromEntries(runnable.map((c) => [c.id, workflow.hash(uiScripts.get(c.id)!)])) : {};
+    if (opts.mode === "validate") {
+      for (const c of runnable) context.roles[c.id] = opts.selectedRole ?? "default";
+      workflow.begin(env, versions, context.fingerprints);
+    }
     signal.throwIfAborted();
     const { missing, degraded } = await this.prepareData(projectId, env, runnable, signal);
     signal.throwIfAborted();
     const caseIds = runnable.filter((c) => !degraded.includes(c.id)).map((c) => c.id);
-    if (!caseIds.length) throw new Error(`用例依赖的测试数据缺失：${missing.join("、")}`);
 
-    const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
-    if (opts.embedded && !ui.prepareEmbedded) throw new Error("当前运行环境不支持内嵌浏览器校验");
-    const embedded = opts.embedded ? await ui.prepareEmbedded!(projectId, env, roles) : undefined;
-    const versions = opts.mode === "validate" ? Object.fromEntries(runnable.map((c) => [c.id, workflow.hash(uiScripts.get(c.id)!)])) : {};
+
+    const roleBindings = Object.fromEntries(caseIds.map(id => [id, opts.mode === "regression" ? states[id]?.executionRole ?? "default" : opts.selectedRole ?? "default"]));
+    if (Object.values(roleBindings).some(role => role !== "default" && !roles.includes(role))) throw new Error("AUTH_REQUIRED: 脚本绑定的角色已删除，请重新选择角色校验");
+    const embedded = opts.embedded ? await ui.prepareEmbedded!(projectId, env, roles, opts.selectedRole) : undefined;
+    const sessionSource = !opts.embedded && ui.prepareEmbedded ? await ui.prepareEmbedded(projectId, env, roles, undefined, false) : undefined;
     const secretEnv = this.deps.secretEnv(projectId, env, roles);
     // UI 脚本中的数据库断言需要的连接配置（含密码，只注入脚本进程）
     const dbRuntime = envCfg.databases && Object.keys(envCfg.databases).length
@@ -594,19 +700,75 @@ export class Orchestrator extends EventEmitter {
       : {};
     this.emit("progress", { projectId, stage: "ui-run", env, cases: caseIds.length });
     signal.throwIfAborted();
-    const out = await ui.runUiSuite({
+    const artifacts = new Map(runnable.map(c => {
+      let scriptHash: string | null = null;
+      try { scriptHash = workflow.hash(uiScripts.get(c.id)!); } catch { /* 缺失版本明确保留为空。 */ }
+      return [c.id, { schema_version: 1, project_id: projectId, case_id: c.id, env,
+        case_revision: caseHash(c), source_revision: null, script_hash: scriptHash,
+        script_path: uiScripts.get(c.id), environment_fingerprint: sha256(JSON.stringify(envCfg)),
+        role: roleBindings[c.id] ?? null, session_policy: opts.mode === "validate" ? "isolated" : opts.embedded ? "embedded" : "isolated" }];
+    }));
+    const out = caseIds.length ? await ui.runUiSuite({
       signal,
       workspace: project.workspace_path,
       baseUrl: envCfg.base_url,
       caseIds,
       headed: opts.headed,
       ...(!opts.embedded && opts.workers && opts.workers > 1 ? { workers: Math.min(8, Math.floor(opts.workers)) } : {}),
-      ...embedded,
+      ...(opts.mode === "validate" ? {} : embedded),
+      defaultRole: opts.selectedRole,
+      roleBindings,
+      // Trials remain isolated but must restore the selected role's login.
+      // Previously validation discarded the session source entirely.
+      ...((embedded ?? sessionSource) ? { sessionSource: embedded ?? sessionSource } : {}),
       onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
-    });
+    }) : { exitCode: 0, results: [] as UiCaseResult[], errors: [], stderr: "", htmlReport: "", reportJson: "" };
     signal.throwIfAborted();
-    if (!out.results.length && (out.errors?.length || out.stderr)) throw new Error(`UI 执行失败：${(out.errors ?? []).join("；") || out.stderr}`);
+    for (const c of runnable) {
+      if (!out.results.some(r => r.case_id === c.id)) out.results.push({ case_id: c.id,
+        status: degraded.includes(c.id) ? "skipped" : "error", duration: 0,
+        message: degraded.includes(c.id) ? `PRECONDITION_MISSING: ${missing.join("、")}` : `执行器没有返回用例结果：${out.errors?.join("；") || out.stderr}`,
+        acceptance_status: degraded.includes(c.id) ? "blocked" : "incomplete", reason_code: degraded.includes(c.id) ? "precondition_missing" : "incomplete", evidence_paths: [], reviews: [] });
+    }
+    const validationIssues: Record<string, string> = {};
+    const eligible: string[] = [];
+    const reviewCounts: Record<string, number> = {};
+    if (opts.mode === "validate") {
+      for (const id of Object.keys(versions)) {
+        const results = out.results.filter(r => r.case_id === id);
+        let reason: string | undefined;
+        if (degraded.includes(id)) reason = "测试数据未就绪，本次未执行";
+        else if (out.exitCode !== 0 || out.errors?.length) reason = "执行器未正常完成，请检查运行报告后重新试跑";
+        else if (out.results.some(r => !runnable.some(c => c.id === r.case_id))) reason = "执行报告包含未请求的用例，请检查脚本与用例的关联";
+        else if (!results.length) reason = "本次缺少该用例的执行结果，请重新试跑";
+        else if (results.some(r => r.status !== "passed")) reason = "本次用例存在失败、错误或跳过的测试，请检查报告";
+
+        if (!reason) {
+          try {
+            const meta = workflow.stepsFile(uiScripts.get(id)!);
+            const source = runnable.find(c => c.id === id)!;
+            const issues = coverageIssues(meta.steps, { ...source, preconditionChecks: meta.preconditionChecks });
+            if (meta.caseHash !== caseHash(source)) issues.unshift("脚本未绑定当前用例版本");
+            if (issues.length) reason = `COVERAGE_INCOMPLETE: ${issues.join("；")}`;
+          } catch { reason = "COVERAGE_INCOMPLETE: 缺少与脚本一致的结构化步骤，请重新生成"; }
+        }
+        reviewCounts[id] = results.reduce((n, r) => n + (r.reviews?.length ?? 0), 0);
+        if (reason) validationIssues[id] = reason;
+        else eligible.push(id);
+      }
+    }
+    for (const result of out.results) {
+      if (artifacts.has(result.case_id)) result.execution_context = {
+        ...result.execution_context, sessions: result.execution_context?.sessions ?? [], artifact: artifacts.get(result.case_id),
+      };
+      if (validationIssues[result.case_id] && result.status === "passed") {
+        result.acceptance_status = "incomplete";
+        result.reason_code = "incomplete";
+      } else if (opts.mode === "validate" && eligible.includes(result.case_id)) {
+        result.acceptance_status = result.reviews?.length ? "pending_review" : "verified_pass";
+      }
+    }
     const file = join(mkdtempSync(join(tmpdir(), "aitest-run-")), "results.json");
     writeFileSync(file, JSON.stringify(out.results));
     const run = await this.deps.engine<RunSummary & { reviews: number }>([
@@ -614,7 +776,13 @@ export class Orchestrator extends EventEmitter {
       "--html-report", out.htmlReport,
     ]);
     signal.throwIfAborted();
-    if (opts.mode === "validate") workflow.record(env, run.run_id, versions, out.results.filter((r) => r.status === "passed").map((r) => r.case_id));
+    if (opts.mode === "validate") {
+      workflow.record(env, run.run_id, versions, eligible, context, validationIssues, reviewCounts);
+      const fresh = workflow.states(env, Object.fromEntries([...uiScripts].filter(([id]) => id in versions)), {
+        ...context, reviews: await this.uiReviewContext(projectId),
+      });
+      for (const [id, state] of Object.entries(fresh)) if (state.validationReason) validationIssues[id] = state.validationReason;
+    }
     let heal: TriageItem[] | undefined;
     if (opts.autoHeal === true && run.needs_agent.length) {
       heal = await this.healUi(projectId, env, run.run_id, out.results, uiScripts, signal);
@@ -631,15 +799,16 @@ export class Orchestrator extends EventEmitter {
           failure_type: h?.failure_type ?? r.failure_type ?? "unknown", ...(h?.reason ? { reason: h.reason } : {}),
         };
       });
-    return { run, heal, failures, degraded, missingData: missing, htmlReport: out.htmlReport };
+    return { run, heal, failures, degraded, missingData: missing, htmlReport: out.htmlReport, validationIssues, sessionId: out.sessionId };
   }
 
   async uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>> {
     const p = await this.project(projectId);
     if (!p.environments[env]) throw new Error("项目未配置该环境");
-    const ids = new Set(((await this.listCases(projectId)) as CaseRow[]).map((c) => c.id));
+    const cases = (await this.listCases(projectId)) as CaseRow[];
+    const ids = new Set(cases.map((c) => c.id));
     const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
-    return new UiWorkflow(p.workspace_path).states(env, Object.fromEntries(scripts.filter((s) => s.framework === "playwright" && ids.has(s.case_id)).map((s) => [s.case_id, s.path])));
+    return new UiWorkflow(p.workspace_path).states(env, Object.fromEntries(scripts.filter((s) => s.framework === "playwright" && ids.has(s.case_id)).map((s) => [s.case_id, s.path])), { fingerprints: this.uiFingerprints(p.environments[env], cases), reviews: await this.uiReviewContext(projectId) });
   }
 
   private async uiCases(projectId: string) {
@@ -677,11 +846,14 @@ export class Orchestrator extends EventEmitter {
     for (const c of group.cases) {
       if (c.id === sourceCaseId || states[c.id] || (wanted && !wanted.has(c.id))) continue;
       if (c.lint_status === "blocked") { out.skipped.push({ caseId: c.id, reason: "用例被规范检查阻断" }); continue; }
+      if (file.preconditionChecks?.length && JSON.stringify(c.preconditions) !== JSON.stringify(file.source?.preconditions)) {
+        out.skipped.push({ caseId: c.id, reason: "前置条件不同，需绑定目标用例的原子检查计划" }); continue;
+      }
       const derived = deriveSteps(file.steps, scriptParams(group, sourceCaseId), scriptParams(group, c.id));
       if (!derived.ok) { out.skipped.push({ caseId: c.id, reason: derived.reason }); continue; }
       const { path } = writeUiScript(p.workspace_path, {
         caseId: c.id, title: c.title, steps: derived.steps, baseUrl: file.baseUrl,
-        caseSteps: c.steps, expected: c.expected, caseHash: caseHash({ title: c.title, steps: c.steps, expected: c.expected }), derivedFrom: sourceCaseId,
+        caseSteps: c.steps, expected: c.expected, preconditions: c.preconditions, preconditionChecks: file.preconditionChecks, caseHash: caseHash(c), derivedFrom: sourceCaseId,
       });
       await this.deps.engine(["register-script", "--project", projectId, "--case", c.id, "--path", path]);
       out.derived.push(c.id);
@@ -697,7 +869,10 @@ export class Orchestrator extends EventEmitter {
     const scripts = await this.deps.engine<{ case_id: string; path: string; framework: string }[]>(["list-scripts"]);
     const script = scripts.find((s) => s.case_id === caseId && s.framework === "playwright");
     if (!script) throw new Error("用例还没有 Playwright 脚本");
-    new UiWorkflow(p.workspace_path).confirm(env, caseId, script.path, hash);
+    new UiWorkflow(p.workspace_path).confirm(env, caseId, script.path, hash, {
+      fingerprints: this.uiFingerprints(p.environments[env], (await this.listCases(projectId)) as CaseRow[]),
+      reviews: await this.uiReviewContext(projectId),
+    });
   }
 
   /** 脚本代码与结构化步骤（界面对照用例步骤显示） */
@@ -800,7 +975,7 @@ export class Orchestrator extends EventEmitter {
     const briefs: UiFailureBrief[] = pending.map((r) => ({
       case_id: r.case_id, message: r.message, script: scriptMap.get(r.case_id), evidence_paths: r.evidence_paths ?? [],
     }));
-    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs), signal);
+    const turn = await this.agentTask(projectId, "heal", healPrompt(projectId, env, runId, briefs), signal, 0, { env, caseIds: pending.map(c => c.case_id), runId });
     const judged = parseTriage(turn.message);
     await this.recordAttributions(runId, judged, "agent");
     return judged;
@@ -933,8 +1108,92 @@ export class Orchestrator extends EventEmitter {
     return this.deps.engine(["metrics", "--project", projectId]);
   }
 
+  caseHistory(caseId: string) { return this.deps.engine<any[]>(["case-history", "--case", caseId]); }
+
+  coverage(projectId: string, env?: string) {
+    return this.deps.engine(["coverage", "--project", projectId, ...(env ? ["--env", env] : [])]);
+  }
+
+  async performanceHistory(projectId: string) {
+    return listPerformance((await this.project(projectId)).workspace_path);
+  }
+
+  async runPerformance(projectId: string, env: string, options: PerformanceOptions) {
+    const p = await this.project(projectId);
+    const config = p.environments[env];
+    if (!config) throw new Error("未配置环境");
+    if (config.production) throw new Error("性能测试不允许在生产环境执行");
+    if (options.definitionId) {
+      const definition = (await this.listApiDefinitions(projectId)).find(d => d.id === options.definitionId);
+      if (!definition) throw new Error("接口不属于当前项目或已删除，请重新从接口列表选择");
+      options = bindPerformanceDefinition(definition, options);
+    } else if (!options.scenarioSteps?.length) {
+      throw new Error("请从当前项目的接口列表选择性能测试目标");
+    }
+    performancePlan(config.base_url, options);
+    if (this.taskRecords.some(t => t.source === "performance" && ["running", "stopping"].includes(t.status))) throw new Error("已有性能任务执行中，请先等待或停止");
+    const method = options.method ?? "GET";
+    const now = new Date().toISOString(), taskId = `performance-${Date.now()}-${++this.uiTaskSeq}`;
+    const controller = new AbortController();
+    const task: UiTaskRecord = { id: taskId, projectId, env, caseIds: [], kind: "k6 性能测试", source: "performance", status: "running", stage: `执行 ${method} 压测`, canStop: true, startedAt: now, updatedAt: now };
+    this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    this.agentControllers.set(taskId, controller);
+    this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: "running" });
+    // Inject auth credentials so k6 can authenticate — tokens never written to the script file.
+    const secrets = options.auth !== false ? this.deps.secretEnv(projectId, env, options.role ? [options.role] : []) : undefined;
+    // Merge crypto headers from env config into the options so the script carries them.
+    const cryptoHeaders = (config.api_crypto?.headers ?? {}) as Record<string, string>;
+    const merged: PerformanceOptions = Object.keys(cryptoHeaders).length
+      ? { ...options, headers: { ...cryptoHeaders, ...options.headers } } : options;
+    try {
+      const result = await executePerformance(p.workspace_path, env, config.base_url, merged, controller.signal, secrets);
+      task.runId = result.id;
+      task.detail = result.message ?? `${method} · 请求 ${result.requests ?? "—"} · P95 ${result.p95Ms ?? "—"} ms`;
+      this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: result.status === "passed" ? "completed" : result.status === "stopped" ? "stopped" : "failed" });
+      return result;
+    } catch (error) {
+      this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: controller.signal.aborted ? "stopped" : "failed", error: String((error as Error).message) });
+      throw error;
+    } finally { this.agentControllers.delete(taskId); this.persistTasks(); }
+  }
+
   stability(projectId: string) {
     return this.deps.engine(["stability", "--project", projectId]);
+  }
+
+  // ------------------------------------------------------------------ 性能：二期 + 三期
+
+  /** 二期：从用例编译性能场景步骤 */
+  async perfCompile(projectId: string, caseId: string) {
+    return this.deps.engine<{ steps: Array<{ name: string; method: string; path: string; body?: unknown; headers?: Record<string, string>; extract?: Record<string, string>; role?: string }> }>(
+      ["perf-compile", "--case", caseId]);
+  }
+
+  /** 三期：设定性能基线 */
+  async perfSetBaseline(projectId: string, targetKey: string, resultId: string) {
+    const project = await this.project(projectId);
+    const result = readPerformanceResult(project.workspace_path, resultId);
+    if (!result) throw new Error("当前项目中找不到该性能执行记录");
+    if (result.status !== "passed" || !result.thresholdsPassed || !Number.isFinite(result.requests) || !(result.requests! > 0)) {
+      throw new Error("只能将已完整执行且通过门槛的结果设为基线");
+    }
+    const expectedTarget = result.options.scenarioId ? `scenario:${result.options.scenarioId}` : `${result.options.method ?? "GET"}:${result.options.path}`;
+    if (targetKey !== expectedTarget) throw new Error("基线必须属于同一测试目标");
+    await this.deps.engine(["perf-save-baseline", "--project", projectId, "--target", targetKey, "--result", resultId]);
+  }
+
+  /** 三期：读取引用的完整结果，保持与 renderer 的 PerformanceResult 契约一致。 */
+  async perfGetBaseline(projectId: string, targetKey: string): Promise<PerformanceResult | null> {
+    const project = await this.project(projectId);
+    const record = await this.deps.engine<{ result_id: string } | null>(["perf-get-baseline", "--project", projectId, "--target", targetKey]);
+    return record ? readPerformanceResult(project.workspace_path, record.result_id) : null;
+  }
+
+  /** 三期：性能趋势数据 */
+  async perfTrend(projectId: string, targetPath?: string) {
+    const p = await this.project(projectId);
+    return this.deps.engine<Array<{ id: string; startedAt: string; p95Ms: number | null; requestsPerSecond: number | null; failureRate: number | null; status: string }>>(
+      ["perf-trend", "--workspace", p.workspace_path, ...(targetPath ? ["--path", targetPath] : [])]);
   }
 
   /** 团队共享：导出项目元数据与用例到 workspace 并提交 git */
@@ -996,7 +1255,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 导出单文件 HTML 汇总报告或 Excel 明细；可合并多次执行 */
-  exportReport(runIds: string[], format: "html" | "xlsx", out?: string) {
+  exportReport(runIds: string[], format: "html" | "xlsx" | "json", out?: string) {
     if (!runIds.length) throw new Error("请选择要导出的执行记录");
     return this.deps.engine<{ path: string }>([
       "export-report", ...runIds.flatMap((id) => ["--run", id]), "--format", format, ...(out ? ["--out", out] : []),
@@ -1018,7 +1277,7 @@ export class Orchestrator extends EventEmitter {
   }
 
   /** 一个任务 = 一个 Codex thread；记录 AgentSession 与 token 用量 */
-  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0): Promise<TurnResult> {
+  private async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0, metadata: { env?: string; caseIds?: string[]; runId?: string } = {}): Promise<TurnResult> {
     const project = await this.project(projectId);
     const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
       ["check-budget", "--project", projectId],
@@ -1027,29 +1286,56 @@ export class Orchestrator extends EventEmitter {
       throw new BudgetExceededError(`本月模型预算已用完（${budget.month_used}/${budget.monthly_budget} tokens），日常回归不受影响`);
     }
     const limits = [this.deps.tokenLimit, budget.per_task_limit].filter((x): x is number => typeof x === "number" && x > 0);
-    const tokenLimit = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    const taskRemaining = limits.length ? Math.min(...limits) - spentTokens : undefined;
+    const monthRemaining = budget.monthly_budget ? budget.monthly_budget - budget.month_used : undefined;
+    const remaining = [taskRemaining, monthRemaining].filter((value): value is number => value !== undefined);
+    const tokenLimit = remaining.length ? Math.min(...remaining) : undefined;
     if (tokenLimit !== undefined && tokenLimit <= 0) throw new BudgetExceededError("用例转换已达到单任务 token 上限；转换结果已缓存，下次可直接执行");
     signal?.throwIfAborted();
-    const agent = await this.deps.agent();
-    const threadId = await agent.startThread({
-      cwd: project.workspace_path,
-      approvalPolicy: "on-request",
-      sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
-    });
-    const session = await this.deps.engine<{ id: string }>([
-      "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
-    ]);
-    this.emit("progress", { projectId, stage: purpose, threadId });
-    signal?.throwIfAborted();
-    const result = await agent.runTurn(threadId, prompt, { tokenLimit, ...(signal ? { signal } : {}) });
-    await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
-    return result;
+    const now = new Date().toISOString();
+    const taskId = `agent-${Date.now()}-${++this.uiTaskSeq}`;
+    const task: UiTaskRecord = { id: taskId, projectId, env: "", kind: ({ case_gen: "生成测试用例", api_script: "生成接口脚本", ui_contract: "整理 UI 执行计划", explore: "探索 UI 用例", triage: "分析失败原因", heal: "修正失败脚本", revise: "修正脚本", app_explore: "探索 App 用例", performance: "性能测试 Agent" } as Record<string, string>)[purpose] ?? `Agent：${purpose}`, caseIds: [], status: "running", stage: "准备 Agent 任务", startedAt: now, updatedAt: now, source: purpose === "performance" ? "performance" : "agent", canStop: false };
+    this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
+    const controller = new AbortController();
+    this.agentControllers.set(taskId, controller);
+    const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    task.canStop = true;
+    task.purpose = purpose;
+    task.env = metadata.env ?? ""; task.caseIds = metadata.caseIds ?? []; task.runId = metadata.runId;
+    const parent = signal && this.uiAbort?.controller.signal === signal ? this.taskRecords.find(t => t.id === this.uiAbort?.taskId) : undefined;
+    if (parent) { task.parentTaskId = parent.id; task.env = parent.env; task.caseIds = parent.caseIds; }
+    this.emit("progress", { projectId, env: "", stage: "agent-task", taskId, status: "running" });
+    try {
+      const agent = await this.deps.agent();
+      const threadId = await agent.startThread({
+        cwd: project.workspace_path,
+        approvalPolicy: "on-request",
+        sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
+        ...(purpose === "ui_contract" ? { config: uiContractThreadConfig() } : {}),
+      });
+      task.threadId = threadId;
+      const session = await this.deps.engine<{ id: string }>([
+        "agent-session", "--project", projectId, "--thread", threadId, "--purpose", purpose,
+      ]);
+      this.emit("progress", { projectId, env: "", stage: purpose, taskId, threadId });
+      combinedSignal.throwIfAborted();
+      const result = await agent.runTurn(threadId, prompt, { tokenLimit, signal: combinedSignal });
+      task.tokens = result.tokens;
+      task.detail = result.message?.slice(0, 2000);
+      await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);
+      this.emit("progress", { projectId, env: task.env, stage: "agent-task", taskId, status: combinedSignal.aborted ? "stopped" : result.status === "completed" ? "completed" : "failed", ...(result.status !== "completed" ? { error: result.status } : {}) });
+      combinedSignal.throwIfAborted();
+      return result;
+    } catch (error) {
+      this.emit("progress", { projectId, env: task.env, stage: "agent-task", taskId, status: combinedSignal.aborted ? "stopped" : "failed", error: String((error as Error)?.message ?? error).slice(0, 300) });
+      throw error;
+    } finally { this.agentControllers.delete(taskId); this.persistTasks(); }
   }
 }
 
 export class BudgetExceededError extends Error {}
 
-const ATTRIBUTION_TYPES = new Set(["product_bug", "script_error", "environment"]);
+const ATTRIBUTION_TYPES = new Set(["product_bug", "script_error", "environment", "data", "auth", "model"]);
 
 /** 从 agent 最终回复中取出 JSON 数组 */
 export function parseTriage(message: string): TriageItem[] {
@@ -1057,7 +1343,10 @@ export function parseTriage(message: string): TriageItem[] {
   const raw = fenced?.[1] ?? message.slice(message.indexOf("["), message.lastIndexOf("]") + 1);
   try {
     const items = JSON.parse(raw) as TriageItem[];
-    return Array.isArray(items) ? items.filter((i) => i && typeof i.case_id === "string") : [];
+    return Array.isArray(items) ? items.filter((i) => i && typeof i.case_id === "string" && i.case_id.trim()
+      && (ATTRIBUTION_TYPES.has(i.failure_type) || i.failure_type === "unknown")
+      && (i.reason === undefined || typeof i.reason === "string")
+      && (i.suggestion === undefined || typeof i.suggestion === "string")) : [];
   } catch {
     return [];
   }

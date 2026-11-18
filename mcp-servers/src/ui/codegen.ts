@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { toCode, type LocatorSpec } from "./locator.js";
+import { toCode, validateReplayTarget, type LocatorSpec } from "./locator.js";
 
 /**
  * 探索录制 → 确定性 Playwright 脚本（架构文档第 7 节）。
@@ -10,6 +10,7 @@ import { toCode, type LocatorSpec } from "./locator.js";
  */
 export const DEFAULT_ROLE = "default";
 
+import { validateObservedExpectation, type ValueSource, type CollectionRule } from "./components.js";
 type Base = { role?: string };
 export type Step = Base &
   (
@@ -21,9 +22,15 @@ export type Step = Base &
     | { action: "press"; key: string }
     | { action: "expectVisible"; target: LocatorSpec }
     | { action: "expectHidden"; target: LocatorSpec }
+    | { action: "expectEnabled"; target: LocatorSpec; enabled: boolean }
     | { action: "expectText"; target: LocatorSpec; text: string; exact?: boolean }
     | { action: "expectNoText"; target: LocatorSpec; text: string }
     | { action: "expectValue"; target: LocatorSpec; value: string }
+    | { action: "expectNumber"; target: LocatorSpec; value: string | number; tolerance?: string | number }
+    | { action: "expectCollection"; target: LocatorSpec; rule: CollectionRule }
+    | { action: "readValue"; target: LocatorSpec; name: string; valueSource: ValueSource }
+    | { action: "expectObserved"; target: LocatorSpec; name?: string; expected?: unknown; valueSource: ValueSource; normalize?: "exact" | "trim" | "number" | "set" }
+    | { action: "reveal"; target: LocatorSpec }
     | { action: "expectUrl"; pattern: string }
     | { action: "startCapture"; name: string; urlPattern: string }
     | { action: "expectRequest"; name: string; fields: Record<string, unknown>; forbidden?: string[] }
@@ -44,7 +51,7 @@ export interface DbCheck {
 }
 
 /** 可视化编辑用的步骤：在 Step 基础上带稳定 id 与对应的用例步骤序号（从 1 开始） */
-export type UiStep = Step & { id?: string; caseStep?: number; source?: "ai" | "user" | "pick"; note?: string };
+export type UiStep = Step & { id?: string; caseStep?: number; expectedIndices?: number[]; preconditionIndices?: number[]; preconditionCheckIds?: string[]; source?: "ai" | "user" | "pick"; note?: string };
 
 /**
  * scripts/ui/<case>.steps.json：脚本的结构化来源。spec.ts 由它生成；
@@ -59,18 +66,22 @@ export interface StepsFile {
   /** 用例内容指纹；一致时可直接复用脚本而无需重新调用 AI。 */
   caseHash?: string;
   generationId?: string;
+  preconditionChecks?: import('./executionGuard.js').PreconditionCheck[];
+  source?: { steps?: string[]; expected?: string[]; preconditions?: string[] };
   /** 由同组另一条用例的脚本按参数替换生成时，记录模板用例 ID */
   derivedFrom?: string;
   steps: UiStep[];
 }
 
 export interface SpecInput {
+  preconditionChecks?: import('./executionGuard.js').PreconditionCheck[];
   caseId: string;
   title: string;
   steps: UiStep[];
   baseUrl?: string;
   /** 用例步骤与预期，写进注释便于反向追溯 */
   caseSteps?: string[];
+  preconditions?: string[];
   expected?: string[];
   /** 用例内容指纹，避免同一用例重复触发 AI 探索。 */
   caseHash?: string;
@@ -94,6 +105,15 @@ function escapeRegExp(v: string): string {
 }
 
 export function generateSpec(input: SpecInput): string {
+  const observedNames = new Set<string>();
+  for (const step of input.steps) {
+    if (step.action === "readValue") observedNames.add(step.name);
+    if (step.action === "expectObserved") {
+      validateObservedExpectation(step);
+      if (step.name && !observedNames.has(step.name)) throw new Error("VALUE_INVALID: 尚未录制来源值");
+    }
+    if ("target" in step) validateReplayTarget(step.target);
+  }
   const roles = [...new Set(input.steps.map((st) => st.role ?? DEFAULT_ROLE))];
   const singleNamedRole = roles.length === 1 && roles[0] !== DEFAULT_ROLE ? roles[0] : undefined;
   const pageVars = new Map<string, string>();
@@ -101,7 +121,7 @@ export function generateSpec(input: SpecInput): string {
     pageVars.set(r, r === DEFAULT_ROLE || r === singleNamedRole ? "page" : `rolePage${i + 1}`);
   });
   const helpers = new Set<string>();
-  const body: string[] = [];
+  const body: string[] = input.steps.some(st => st.action === "readValue" || st.action === "expectObserved") ? ["const observed = new Map<string, unknown>();"] : [];
 
   for (const r of roles) {
     if (pageVars.get(r) !== "page") {
@@ -142,6 +162,9 @@ export function generateSpec(input: SpecInput): string {
       case "expectHidden":
         wrap(`await expect(${loc}).toBeHidden();`);
         break;
+      case "expectEnabled":
+        wrap(`await expect(${loc}).${st.enabled ? "toBeEnabled" : "toBeDisabled"}();`);
+        break;
       case "expectText":
         // 与录制、调试时的校验一致：按页面可见文本（innerText，单元格之间有空白）比较
         wrap(`await expect(${loc}).${st.exact ? "toHaveText" : "toContainText"}(${s(st.text)}, { useInnerText: true });`);
@@ -151,6 +174,25 @@ export function generateSpec(input: SpecInput): string {
         break;
       case "expectValue":
         wrap(`await expect(${loc}).toHaveValue(${s(st.value)});`);
+        break;
+      case "expectCollection":
+        helpers.add('expectCollection');
+        wrap(`await expectCollection(${loc}, ${s(st.rule)});`);
+        break;
+      case "readValue":
+        helpers.add("readValue");
+        wrap(`observed.set(${s(st.name)}, await readValue(${loc}, ${s(st.valueSource)}));`);
+        break;
+      case "expectObserved":
+        helpers.add("expectObserved");
+        wrap(`await expectObserved(${loc}, ${st.name ? `observed.get(${s(st.name)})` : s(st.expected)}, ${s(st.valueSource)}, ${s(st.normalize ?? "exact")});`);
+        break;
+      case "reveal":
+        wrap(`await ${loc}.scrollIntoViewIfNeeded();`);
+        break;
+      case "expectNumber":
+        helpers.add("expectNumber");
+        wrap(`await expectNumber(${loc}, ${s(st.value)}${st.tolerance !== undefined ? `, ${s(st.tolerance)}` : ""});`);
         break;
       case "expectUrl":
         wrap(`await expect(${p}).toHaveURL(new RegExp(${s(escapeRegExp(relativeUrl(st.pattern, input.baseUrl)))}));`);
@@ -258,10 +300,16 @@ export function describeStep(st: Step): string {
     case "check": return `${st.checked ? "勾选" : "取消勾选"} ${describeTarget(st.target)}`;
     case "press": return `按键 ${st.key}`;
     case "expectVisible": return `断言可见 ${describeTarget(st.target)}`;
+    case "expectEnabled": return `断言${st.enabled ? "可用" : "禁用"} ${describeTarget(st.target)}`;
     case "expectHidden": return `断言隐藏 ${describeTarget(st.target)}`;
     case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;
     case "expectValue": return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
+    case "expectCollection": return `验证 ${describeTarget(st.target)} 内集合规则 ${JSON.stringify(st.rule)}`;
+    case "readValue": return `读取 ${describeTarget(st.target)} 到 ${st.name}`;
+    case "expectObserved": return `比较 ${describeTarget(st.target)}（读取 ${st.valueSource}，${st.normalize ?? "exact"}）与 ${st.name ? `来源变量「${st.name}」` : JSON.stringify(st.expected)}`;
+    case "reveal": return `滚动显示 ${describeTarget(st.target)}`;
+    case "expectNumber": return `断言 ${describeTarget(st.target)} 的数值为 ${st.value}${st.tolerance !== undefined ? `（容差 ${st.tolerance}）` : ""}`;
     case "expectUrl": return `断言 URL 包含 ${st.pattern}`;
     case "startCapture": return `开始捕获请求 ${st.urlPattern}`;
     case "expectRequest": return `断言请求 ${st.name} 含 ${JSON.stringify(st.fields)}`;
@@ -275,7 +323,12 @@ export function describeStep(st: Step): string {
 // --------------------------------------------------------------------------- scaffold
 
 const TEMPLATE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "templates", "ui");
-export const SCAFFOLD_FILES = ["playwright.config.ts", "global-setup.ts", "aitest-fixtures.ts", "aitest-embedded.ts", "aitest-reporter.ts"];
+export const SCAFFOLD_FILES = ["playwright.config.ts", "global-setup.ts", "aitest-fixtures.ts", "aitest-embedded.ts", "aitest-reporter.ts", "aitest-values.cjs", "aitest-runtime.ts"];
+
+/** Semantic runtime version for confirmation invalidation, including bundled helper implementations. */
+export function uiRuntimeHash(): string {
+  return sha256(SCAFFOLD_FILES.map(f => `${f}\n${readFileSync(join(TEMPLATE_DIR, f), "utf8")}`).join("\n"));
+}
 
 /** 在 workspace/scripts/ui 下写入 Playwright 配置、全局登录与辅助函数（已存在且未改动时覆盖为最新模板） */
 export function ensureUiScaffold(workspace: string): string {
@@ -302,8 +355,8 @@ export function stepsPath(workspace: string, caseId: string): { abs: string; rel
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** 只由会影响 UI 执行的用例内容计算指纹；标题、步骤或预期变化都会使旧脚本失效。 */
-export function caseHash(input: { title?: string; steps?: string[]; expected?: string[] }): string {
-  return sha256(JSON.stringify({ title: input.title ?? "", steps: input.steps ?? [], expected: input.expected ?? [] }));
+export function caseHash(input: { title?: string; steps?: string[]; expected?: string[]; preconditions?: string[] }): string {
+  return sha256(JSON.stringify({ title: input.title ?? "", steps: input.steps ?? [], expected: input.expected ?? [], preconditions: input.preconditions ?? [] }));
 }
 
 /** 由步骤生成 spec，同时写出 steps.json（脚本的结构化来源），返回 spec 的相对路径 */
@@ -315,7 +368,7 @@ export function writeUiScript(workspace: string, input: SpecInput): { path: stri
   const meta = stepsPath(workspace, input.caseId);
   writeFileSync(spec.abs, code);
   const file: StepsFile = { version: 1, generationId: randomUUID(), caseId: input.caseId, title: input.title, baseUrl: input.baseUrl, specHash: sha256(code), ...(input.caseHash ? { caseHash: input.caseHash } : {}),
-    ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}), steps };
+    ...(input.derivedFrom ? { derivedFrom: input.derivedFrom } : {}), ...(input.preconditionChecks ? { preconditionChecks: input.preconditionChecks } : {}), source: { steps: input.caseSteps, expected: input.expected, preconditions: input.preconditions }, steps };
   writeFileSync(meta.abs, JSON.stringify(file, null, 2) + "\n");
   return { path: spec.rel, stepsPath: meta.rel };
 }

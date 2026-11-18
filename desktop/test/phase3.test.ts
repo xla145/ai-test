@@ -83,7 +83,7 @@ describe("cost control and attribution", () => {
     const runTurn = vi.fn(async () => ({ threadId: "t", turnId: "u", status: "completed", tokens: 10, message: "" }));
     const orch = new Orchestrator({ engine, agent: async () => ({ startThread: async () => "t", runTurn }), secretEnv: () => ({}), tokenLimit: 5000 });
     await orch.generateCases("p1", "req.md");
-    expect((runTurn.mock.calls[0] as unknown[])[2]).toEqual({ tokenLimit: 800 });
+    expect((runTurn.mock.calls[0] as unknown[])[2]).toEqual({ tokenLimit: 800, signal: expect.any(AbortSignal) });
   });
 
   it("persists rule and agent attributions for later human confirmation", async () => {

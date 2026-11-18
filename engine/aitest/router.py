@@ -29,8 +29,16 @@ def route(case: TestCase) -> str:
         return ExecutionMode.API.value
     if case.type == "app":
         return ExecutionMode.APP.value
-    text = " ".join([case.title, *case.preconditions, *case.steps, *case.expected])
+    # Choose the executor from the operation, not from data labels in expected
+    # results (e.g. a web chart displaying Android/iOS consumption).
+    text = " ".join([case.title, *case.steps])
+    # API Key is a form field/credential name, not evidence of an HTTP test.
+    text = re.sub(r"API[\s_-]*Key", "凭据", text, flags=re.I)
+    browser_action = re.search(r"(?:点击|输入|选择|勾选|打开|查看).{0,30}(?:按钮|输入框|页面|菜单|弹窗|下拉|列表|表单)|(?:页面|菜单|弹窗|表单).{0,20}(?:点击|输入|选择|查看)", text)
+    direct_api = re.search(r"(?:调用|发送|请求).{0,15}(?:接口|HTTP)|(?:GET|POST|PUT|PATCH|DELETE)\s+/", text, re.I)
     for mode, pattern in _RULES:
+        if mode == ExecutionMode.API.value and browser_action and not direct_api:
+            continue
         if pattern.search(text):
             return mode
     return ExecutionMode.UI.value

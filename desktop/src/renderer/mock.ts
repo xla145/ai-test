@@ -1,4 +1,6 @@
 import { workspaceMock } from "./pages/api/workspaceMock";
+import { createPerformanceDemo } from "./performanceDemo";
+import { rememberNav } from "./nav";
 let mockUiStopped = false;
 /**
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
@@ -7,7 +9,11 @@ let mockUiStopped = false;
 import type { UiStep } from "@ai-test/mcp-servers";
 import { UiDebugSession } from "../main/uiDebug";
 import { caseSignature, deriveSteps, groupCases, scriptParams, variantLabel } from "../shared/uiGroups";
-import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState, UiScriptState, UiStepView } from "../shared/ipc";
+import type { AitestApi, ApiTestSet, ApprovalRequest, GlobalSettings, GlobalSettingsView, Page, PageQuery, UpdateState, UiScriptState, UiStepView, UiTaskRecord } from "../shared/ipc";
+
+// 仅普通浏览器预览使用；显式 ?agent-demo=running|failed|empty 展示过程面板状态。
+const agentDemo = new URLSearchParams(location.search).get('agent-demo');
+const agentDemoTasks: UiTaskRecord[] = [];
 
 const delay = <T,>(v: T, ms = 250) => new Promise<T>((r) => setTimeout(() => r(structuredClone(v)), ms));
 
@@ -260,8 +266,9 @@ let viewState = { visible: false, docked: false };
 const setView = (next: Partial<typeof viewState>) => { viewState = { ...viewState, ...next }; listeners.view?.(viewState); };
 const eventListeners = new Set<(e: { method: string; params: unknown }) => void>();
 listeners.event = event => eventListeners.forEach(cb => cb(event));
+const apiWorkspaceMock = workspaceMock(cases);
 const mockApi: AitestApi = {
-  ...workspaceMock(cases),
+  ...apiWorkspaceMock,
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
     const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
@@ -439,8 +446,15 @@ const mockApi: AitestApi = {
     return state;
   },
   uiDebugState: async () => debugSession?.state() ?? null,
-  uiTasks: async () => [],
-  stopUiTask: async () => { mockUiStopped = true; },
+  uiTasks: async () => structuredClone(agentDemoTasks),
+  stopExecutionTask: async (id) => { const task = agentDemoTasks.find(t => t.id === id); if (task) task.status = "stopped"; },
+  stopUiTask: async (projectId, env) => {
+    mockUiStopped = true;
+    for (const task of agentDemoTasks) if (task.projectId === projectId && task.env === env && task.status === 'running') {
+      task.status = 'stopped'; task.stage = '用户已停止'; task.finishedAt = new Date().toISOString();
+    }
+    listeners.event?.({ method: 'aitest/progress', params: { projectId, env, stage: 'ui-task', status: 'stopped' } });
+  },
   openRoleLogin: async () => { setView({ visible: true }); },
   saveRoleLogin: async (_p, _e, role) => { roleSessionTimes[role] = new Date().toISOString(); return delay({ cookies: 3, localStorage: 1, url: "https://feature-test.example.com/index", savedAt: roleSessionTimes[role] }, 300); },
   roleSessions: async () => delay({ ...roleSessionTimes }),
@@ -522,6 +536,11 @@ const mockApi: AitestApi = {
   checkBudget: () => delay({ month_used: 412300, monthly_budget: 2000000, remaining: 1587700, allowed: true, per_task_limit: 200000 }),
   getSettings: () => delay({ monthly_token_budget: 2000000, per_task_token_limit: 200000, price_per_mtok: 20, currency: "CNY", stability_threshold: 0.95 }),
   setSettings: (_p, s) => delay(s as Record<string, unknown>),
+  ...createPerformanceDemo(apiWorkspaceMock.listApiDefinitions),
+  runPerformance: async () => { throw new Error("当前为演示预览，未执行压测或发送请求。真实执行请使用桌面客户端和本地 k6。"); },
+  perfCompile: async () => ({ steps: [] }),
+  caseHistory: async () => [],
+  coverage: (projectId, env) => delay({ schema_version: 1, project_id: projectId, env, requirements: [], cases: [], summary: { requirements: 0, uncovered_requirements: 0, cases: 0, mapped: 0, total: 0, blocked_cases: 0 } }),
   metrics: () => delay({
     first_pass_rate: 0.733, first_pass: { passed: 22, measured: 30 },
     attribution_accuracy: 0.857, attribution: { correct: 12, confirmed: 14 },
@@ -634,9 +653,34 @@ const mockApi: AitestApi = {
 };
 
 export function installMock(): void {
+  // 显式预览链接直达独立菜单；此模块不会在 Electron 中加载。
+  if (new URLSearchParams(location.search).get("performance-demo") === "1") {
+    rememberNav("proj_feature", "performance");
+  }
+  if (agentDemo === 'running' || agentDemo === 'failed') {
+    agentDemoTasks.push({ id: 'demo-agent-task', projectId: 'proj_feature', env: 'test', kind: '生成 UI 脚本', caseIds: ['tc_8f2a1c0e01'],
+      status: agentDemo === 'failed' ? 'failed' : 'running', stage: agentDemo === 'failed' ? '断言验证未通过' : '探索并生成脚本',
+      startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      detail: agentDemo === 'failed' ? '演示：标签状态未变更为已停用。已保留原始预期，等待人工核对。' : '演示：定位标签 TAG-1001，检查停用后的页面状态。' });
+    agentDemoTasks.push({ id: 'demo-api-agent', projectId: 'proj_order', env: '', kind: '生成接口脚本', caseIds: [], source: 'agent', canStop: false,
+      status: agentDemo === 'failed' ? 'failed' : 'running', stage: '补充接口脚本', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      detail: '演示：根据 OpenAPI 补充订单接口的业务场景与断言。' });
+  }
   window.aitest = mockApi;
   // 演示：活动记录与审批弹窗（?approval=1）
   setTimeout(() => {
+    if (agentDemo === 'empty') return;
+    if (agentDemo === 'running' || agentDemo === 'failed') {
+      const progress = (stage: string) => listeners.event?.({ method: 'aitest/progress', params: { stage, projectId: 'proj_feature', threadId: 'demo-thread' } });
+      progress('ui_contract');
+      progress('explore');
+      for (const tool of ['open_project', 'new_role_context', 'snapshot', 'find_text']) {
+        listeners.event?.({ method: 'item/started', params: { threadId: 'demo-thread', item: { type: 'mcpToolCall', server: 'browser', tool } } });
+        listeners.event?.({ method: 'item/completed', params: { threadId: 'demo-thread', item: { type: 'mcpToolCall', server: 'browser', tool, status: 'completed' } } });
+      }
+      if (agentDemo === 'failed') listeners.event?.({ method: 'turn/completed', params: { threadId: 'demo-thread', turn: { status: 'failed' } } });
+      return;
+    }
     listeners.event?.({ method: "aitest/progress", params: { stage: "explore" } });
     listeners.event?.({ method: "item/started", params: { item: { type: "mcpToolCall", server: "browser", tool: "snapshot" } } });
     listeners.event?.({ method: "turn/completed", params: {} });

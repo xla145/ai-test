@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Orchestrator, type EngineCall } from "../src/main/orchestrator.js";
 
-function setup() {
+function setup(authToken = "test-token") {
   const engine = vi.fn(async (args: string[]) => {
     if (args[0] === "list-projects") return [{ id: "p", workspace_path: "/ws", environments: {
       test: { base_url: "http://test" }, prod: { base_url: "http://prod", production: true },
@@ -10,17 +10,24 @@ function setup() {
     return [];
   });
   const agent = vi.fn();
-  const orch = new Orchestrator({ engine: engine as unknown as EngineCall, agent, secretEnv: () => ({ AITEST_AUTH_TOKEN: "test-token" }) });
+  const orch = new Orchestrator({ engine: engine as unknown as EngineCall, agent, secretEnv: () => ({ AITEST_AUTH_TOKEN: authToken }) });
   return { orch, engine, agent };
 }
 
 describe("接口选择执行", () => {
+  it("uses case authentication when no environment token exists, while preserving explicit preference", async () => {
+    const { orch, engine } = setup("");
+    await orch.runRegression("p", "test", { caseIds: ["tc_public"] });
+    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "0" }));
+    await orch.runRegression("p", "test", { caseIds: ["tc_public"], preferEnvToken: true });
+    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "1" }));
+  });
   it("keeps selection and credentials through scheduling without a model call", async () => {
     const { orch, engine, agent } = setup();
     await orch.runRegression("p", "test", { caseIds: ["tc_one", "tc_flow"] });
     expect(engine).toHaveBeenCalledWith(
       ["run-api-suite", "--project", "p", "--env", "test", "--case-ids", '["tc_one","tc_flow"]'],
-      { AITEST_AUTH_TOKEN: "test-token" },
+      { AITEST_AUTH_TOKEN: "test-token", AITEST_API_PREFER_ENV_TOKEN: "1" },
     );
     expect(agent).not.toHaveBeenCalled();
   });

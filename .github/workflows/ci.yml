@@ -61,3 +61,11 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
+      - name: Run fixed 40-scenario reliability gate
+        run: python scripts/benchmarks/regression.py --repeats 5
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-benchmark
+          path: reports/benchmark-regression

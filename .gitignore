@@ -10,3 +10,9 @@ __pycache__/
 .DS_Store
 .release/
 desktop/release/
+/reports/
+claude-cleaner
+docs/evidence
+.hypothesis
+/outputs/
+/tmp-clean-*/

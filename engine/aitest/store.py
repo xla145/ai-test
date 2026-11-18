@@ -121,6 +121,12 @@ class Store:
             self.conn.execute("ALTER TABLE project ADD COLUMN kind TEXT NOT NULL DEFAULT 'project'")
         if "project_type" not in cols:
             self.conn.execute("ALTER TABLE project ADD COLUMN project_type TEXT NOT NULL DEFAULT 'multi'")
+        result_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(run_result)")}
+        for field in ("acceptance_status", "reason_code"):
+            if field not in result_cols:
+                self.conn.execute(f"ALTER TABLE run_result ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
+        if "execution_context" not in result_cols:
+            self.conn.execute("ALTER TABLE run_result ADD COLUMN execution_context TEXT NOT NULL DEFAULT '{}'")
         self.conn.commit()
 
     def close(self) -> None:
@@ -277,6 +283,9 @@ class Store:
         case = self.get_case(case_id)
         if case is None:
             raise KeyError(case_id)
+        requirement = self.conn.execute("SELECT project_id FROM requirement WHERE id=?", (requirement_id,)).fetchone()
+        if not requirement or requirement["project_id"] != case.project_id:
+            raise ValueError("需求必须存在且属于当前项目")
         if requirement_id not in case.requirement_ids:
             case.requirement_ids.append(requirement_id)
         return self.upsert_case(case)
@@ -375,8 +384,10 @@ class Store:
 
     @staticmethod
     def _proposal(r: sqlite3.Row) -> HealProposal:
+        from .heal_risk import assess
         d = dict(r)
         d["commit"] = d.pop("commit_hash") or ""
+        d["risk_level"], d["risk_reasons"] = assess(d["original"], d["proposed"])
         return HealProposal(**d)
 
     def get_proposal(self, proposal_id: str) -> HealProposal | None:
@@ -429,9 +440,9 @@ class Store:
                           (run.id, run.project_id, run.env, run.started_at, run.mode,
                            json.dumps(run.result, ensure_ascii=False)))
         self.conn.executemany(
-            "INSERT OR REPLACE INTO run_result VALUES (?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO run_result (run_id,case_id,status,duration,message,evidence_paths,failure_type,acceptance_status,reason_code,execution_context) VALUES (?,?,?,?,?,?,?,?,?,?)",
             [(r.run_id, r.case_id, r.status, r.duration, r.message,
-              json.dumps(r.evidence_paths), r.failure_type) for r in results],
+              json.dumps(r.evidence_paths), r.failure_type, r.acceptance_status, r.reason_code, json.dumps(r.execution_context, ensure_ascii=False)) for r in results],
         )
         self.conn.commit()
 
@@ -439,7 +450,7 @@ class Store:
         page, page_args = _limit(limit, offset)
         rows = self.conn.execute("SELECT * FROM run_result WHERE run_id=? ORDER BY rowid" + page,
                                  [run_id, *page_args]).fetchall()
-        return [RunResult(**{**dict(r), "evidence_paths": json.loads(r["evidence_paths"] or "[]")}) for r in rows]
+        return [RunResult(**{**dict(r), "evidence_paths": json.loads(r["evidence_paths"] or "[]"), "execution_context": json.loads(r["execution_context"] or "{}")}) for r in rows]
 
     def count_run_results(self, run_id: str) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM run_result WHERE run_id=?", (run_id,)).fetchone()[0]

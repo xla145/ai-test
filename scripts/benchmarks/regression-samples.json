@@ -1,0 +1,286 @@
+{
+  "schema_version": 1,
+  "scope": "deterministic fixture and contract validation; does not measure model business accuracy",
+  "samples": [
+    {
+      "id": "B01",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-controls.test.ts",
+      "name": "maps a form label to its editable input, validates placeholders and rejects ambiguous fields",
+      "category": "ui"
+    },
+    {
+      "id": "B02",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-controls.test.ts",
+      "name": "clicks the select wrapper and records exact selected text, scoped away from hidden duplicates",
+      "category": "ui"
+    },
+    {
+      "id": "B03",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-controls.test.ts",
+      "name": "resolves a switch label to its checkbox and records a state-setting action",
+      "category": "ui"
+    },
+    {
+      "id": "B04",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-collection.test.ts",
+      "name": "checks rules rather than captured result counts, including fresh generated replay after data changes",
+      "category": "ui"
+    },
+    {
+      "id": "B05",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-collection.test.ts",
+      "name": "supports count ranges, rejects invalid rules and never uses expected text to select matching rows",
+      "category": "ui"
+    },
+    {
+      "id": "B06",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "requires atomic evidence, enforces dependencies and revokes evidence after undo",
+      "category": "ui"
+    },
+    {
+      "id": "B07",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "rejects checks recorded after body steps and persists the blocked result",
+      "category": "ui"
+    },
+    {
+      "id": "B08",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "allows one different recovery and then blocks further actions",
+      "category": "ui"
+    },
+    {
+      "id": "B09",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "binds the plan through tools, consumes coverage once and blocks case steps until all checks pass",
+      "category": "ui"
+    },
+    {
+      "id": "B10",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "waits for asynchronous data and blocks gateway errors without inspecting business text",
+      "category": "ui"
+    },
+    {
+      "id": "B11",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-execution-guard.test.ts",
+      "name": "reports unresolved loading instead of returning a stale empty snapshot",
+      "category": "ui"
+    },
+    {
+      "id": "B12",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-db.test.ts",
+      "name": "verifies persisted data while exploring and records it into the script",
+      "category": "ui"
+    },
+    {
+      "id": "B13",
+      "runner": "vitest",
+      "file": "mcp-servers/test/ui-db.test.ts",
+      "name": "regression passes when data is persisted and fails when it is not",
+      "category": "ui"
+    },
+    {
+      "id": "B14",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "runs regression without the agent when everything passes",
+      "category": "api-agent"
+    },
+    {
+      "id": "B15",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "sends only undetermined failures to a dedicated triage thread and records tokens",
+      "category": "api-agent"
+    },
+    {
+      "id": "B16",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "exposes API enrichment while running and preserves its failure",
+      "category": "api-agent"
+    },
+    {
+      "id": "B17",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "rejects unknown environments",
+      "category": "api-agent"
+    },
+    {
+      "id": "B18",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "keeps the deterministic API report when AI triage fails",
+      "category": "api-agent"
+    },
+    {
+      "id": "B19",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "disables AI analysis even when the report contains unknown failures",
+      "category": "api-agent"
+    },
+    {
+      "id": "B20",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "parses bare and fenced arrays and tolerates garbage",
+      "category": "api-agent"
+    },
+    {
+      "id": "B21",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "accepts the unified failure taxonomy and rejects invalid field types",
+      "category": "api-agent"
+    },
+    {
+      "id": "B22",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "maps page queries, search and multi-value filters to engine arguments",
+      "category": "api-agent"
+    },
+    {
+      "id": "B23",
+      "runner": "vitest",
+      "file": "desktop/test/orchestrator.test.ts",
+      "name": "creates groups without a workspace, sub-projects with a parent, and clears settings to inherit",
+      "category": "api-agent"
+    },
+    {
+      "id": "B24",
+      "runner": "vitest",
+      "file": "desktop/test/api-selection.test.ts",
+      "name": "keeps selection and credentials through scheduling without a model call",
+      "category": "api-agent"
+    },
+    {
+      "id": "B25",
+      "runner": "vitest",
+      "file": "desktop/test/api-selection.test.ts",
+      "name": "rejects an empty selection and retains the production confirmation",
+      "category": "api-agent"
+    },
+    {
+      "id": "B26",
+      "runner": "vitest",
+      "file": "desktop/test/api-selection.test.ts",
+      "name": "generates reviewed scripts and persists named selections without a model",
+      "category": "api-agent"
+    },
+    {
+      "id": "B27",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_import_is_idempotent_and_contract_change_invalidates_approval",
+      "category": "api-contract"
+    },
+    {
+      "id": "B28",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_cross_source_conflict_leaves_import_unchanged",
+      "category": "api-contract"
+    },
+    {
+      "id": "B29",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_removed_definition_keeps_case_and_generation_never_overwrites",
+      "category": "api-contract"
+    },
+    {
+      "id": "B30",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_variable_checks_prevent_broken_reordering_and_duplicates",
+      "category": "api-contract"
+    },
+    {
+      "id": "B31",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_non_json_interfaces_can_be_cataloged_but_not_run_or_generated",
+      "category": "api-contract"
+    },
+    {
+      "id": "B32",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_failed_flow_blocks_dependents_runs_cleanup_and_redacts",
+      "category": "api-contract"
+    },
+    {
+      "id": "B33",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_trial_and_exported_regression_have_identical_assertions",
+      "category": "api-contract"
+    },
+    {
+      "id": "B34",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_large_responses_preserve_complete_redacted_content",
+      "category": "api-contract"
+    },
+    {
+      "id": "B35",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_selective_import_and_module_groups",
+      "category": "api-contract"
+    },
+    {
+      "id": "B36",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_invalid_import_selection_does_not_write",
+      "category": "api-contract"
+    },
+    {
+      "id": "B37",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_default_login_precedes_requests_and_caches_token",
+      "category": "api-contract"
+    },
+    {
+      "id": "B38",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_invalid_login_token_stops_business_request",
+      "category": "api-contract"
+    },
+    {
+      "id": "B39",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_public_requests_skip_login_and_explicit_role_wins",
+      "category": "api-contract"
+    },
+    {
+      "id": "B40",
+      "runner": "pytest",
+      "file": "engine/tests/test_api_workspace.py",
+      "name": "test_login_client_id_follows_role_token_without_duplicate_headers",
+      "category": "api-contract"
+    }
+  ]
+}

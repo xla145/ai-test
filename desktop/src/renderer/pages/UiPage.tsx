@@ -105,11 +105,11 @@ export function Roles({ project, env }: { project: Project; env: string }) {
     loginForm.setFieldsValue(login);
   }, [env, loginKey]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="split">
-      <div style={{ flex: "1 1 320px" }}>
+    <div className="split uix-roles">
+      <div className="uix-roles-left">
         <RoleAccounts project={project} />
       </div>
-      <div style={{ flex: "1.2 1 380px" }}>
+      <div className="uix-roles-right">
         <Card size="small" title={`登录方式（${env} 环境${ownerName ? `，保存到大项目「${ownerName}」` : ""}）`} extra={<Typography.Text type="secondary">填写 CSS 选择器</Typography.Text>}>
           <Form form={loginForm} name="login-recipe" layout="vertical" initialValues={login} key={env}
             onFinish={(v) => run(async () => {
@@ -146,8 +146,8 @@ function ManualLogin({ project, env }: { project: Project; env: string }) {
   const names = (roles.data ?? []).map((r) => r.role_name);
   const saved = sessions.data ?? {};
   return (
-    <Card size="small" title="手动登录" style={{ marginTop: 16 }} extra={<Typography.Text type="secondary">适合验证码、扫码等无法自动登录的系统</Typography.Text>}>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+    <Card size="small" title="手动登录" className="uix-manual-login" extra={<Typography.Text type="secondary">适合验证码、扫码等无法自动登录的系统</Typography.Text>}>
+      <Typography.Paragraph type="secondary" className="uix-manual-login-hint">
         在内嵌浏览器中以某个角色亲自登录一次（{env} 环境）：AI 探索、单步调试、内嵌试跑直接沿用这份登录态；保存后无头回归也会使用。登录过期后重新登录即可。
       </Typography.Paragraph>
       {!names.length && !roles.loading ? <Alert type="info" showIcon message="先在左侧添加角色（只填角色名即可，不需要账号密码）" /> : <>
@@ -163,13 +163,13 @@ function ManualLogin({ project, env }: { project: Project; env: string }) {
               return out;
             }, "登录态已保存")}>已完成登录，保存登录态</Button>
         </Space>
-        {opened && <Alert type="warning" showIcon style={{ marginTop: 12 }}
+        {opened && <Alert type="warning" showIcon className="page-section"
           message="在右侧内嵌浏览器中完成登录（含验证码），看到登录后的页面再点「已完成登录，保存登录态」"
           description="AI 探索、单步调试和内嵌试跑共用这个角色的浏览器，不保存也会沿用；保存是为了让无头回归也能使用。" />}
         {Object.keys(saved).length > 0 && (
-          <div style={{ marginTop: 12 }}>
+          <div className="uix-saved-sessions">
             {Object.entries(saved).map(([n, at]) => (
-              <div key={n}><Tag bordered={false} color="green">{n}</Tag><Typography.Text type="secondary">登录态保存于 {new Date(at).toLocaleString()}</Typography.Text></div>
+              <div key={n} className="uix-saved-session"><Tag bordered={false} color="green">{n}</Tag><Typography.Text type="secondary">登录态保存于 {new Date(at).toLocaleString()}</Typography.Text></div>
             ))}
           </div>
         )}

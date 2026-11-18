@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { uiReason } from "./diagnostics.js";
 import type { Page } from "playwright-core";
 
 /** 视觉能力只参与探索与人工复核，生成的回归脚本仍使用确定性定位器。 */
@@ -63,14 +66,30 @@ export function midsceneFactory(cacheId = "aitest"): VisionAgentFactory {
         agents.delete(page);
         void agent.destroy().catch(() => undefined);
       });
+      const measured = async <T>(operation: string, call: () => Promise<T>): Promise<T> => {
+        const start = Date.now();
+        let reason: string | undefined;
+        try { return await call(); }
+        catch (error) { reason = uiReason(String((error as Error).message)); throw error; }
+        finally {
+          // No prompts, screenshots, credentials or raw server error payloads in diagnostics.
+          const dir = process.env.MIDSCENE_RUN_DIR;
+          if (dir) try {
+            mkdirSync(dir, { recursive: true });
+            appendFileSync(join(dir, "diagnostics.jsonl"), JSON.stringify({ at: new Date().toISOString(), operation,
+              model: process.env.MIDSCENE_MODEL_NAME, family: process.env.MIDSCENE_MODEL_FAMILY,
+              durationMs: Date.now() - start, status: reason ? "error" : "completed", reason, retries: 0 }) + "\n", { mode: 0o600 });
+          } catch { /* diagnostics must not change test verdict */ }
+        }
+      };
       return {
-        aiAct: (prompt) => agent.aiAct(prompt),
-        aiAssert: async (assertion) => { await agent.aiAssert(assertion); },
-        aiLocate: async (prompt) => {
+        aiAct: (prompt) => measured("act", () => agent.aiAct(prompt)),
+        aiAssert: async (assertion) => { await measured("assert", () => agent.aiAssert(assertion)); },
+        aiLocate: (prompt) => measured("locate", async () => {
           // 不用 Midscene 缓存：探索时 prompt 几乎不重复，从未命中；而定位错的结果写进缓存后会被原样复用
           const result = await agent.aiLocate(prompt, { cacheable: false });
           return { ...result, center: cssCenter(result.center) };
-        },
+        }),
         get reportFile() { return agent.reportFile; },
       };
     })();

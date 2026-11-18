@@ -10,10 +10,12 @@
  * 凭据只从 CI 的密钥变量读取：AITEST_AUTH_TOKEN、AITEST_AUTH_HEADER、AITEST_ROLES（JSON）、
  * AITEST_ROLE_TOKENS（JSON，接口多账号的角色 token）。
  */
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { runEngine, type EngineOptions } from "./engine.js";
 import { runUiSuite } from "./ui/runner.js";
 
@@ -204,6 +206,291 @@ export function toSummary(project: string, env: string, baseUrl: string, results
   return lines.join("\n") + "\n";
 }
 
+// --------------------------------------------------------------------------- 性能测试 CI
+
+export interface PerfCiOptions {
+  workspace: string;
+  env: string;
+  path?: string;
+  method?: string;
+  body?: string;
+  scenario?: string;
+  vus?: number;
+  seconds?: number;
+  p95?: number;
+  maxFailureRate?: number;
+  rampUp?: number;
+  rampDown?: number;
+  outDir?: string;
+  python?: string;
+  secrets?: NodeJS.ProcessEnv;
+  log?: (msg: string) => void;
+}
+
+export interface PerfCiReport {
+  exitCode: number;
+  summary: string;
+  junit: string;
+}
+
+/** Generate a k6 script for CI (self-contained, no desktop dependency). */
+function generateK6Script(opts: {
+  method: string; target: string; body?: unknown; headers?: Record<string, string>;
+  vus: number; seconds: number; p95: number; maxFailureRate: number; rampUp?: number; rampDown?: number;
+  scenarioSteps?: Array<{ name: string; method: string; path: string; body?: unknown; extract?: Record<string, string> }>;
+  baseUrl?: string;
+}): string {
+  const K6_METHOD: Record<string, string> = { GET: "get", POST: "post", PUT: "put", DELETE: "del" };
+  const thresholds = JSON.stringify({ http_req_duration: [`p(95)<${opts.p95}`], http_req_failed: [`rate<=${opts.maxFailureRate}`] });
+
+  // Load model: stages or flat duration
+  const useStages = opts.rampUp && opts.rampUp > 0;
+  const optionsObj = useStages
+    ? `{ stages: ${JSON.stringify([
+        { duration: `${opts.rampUp}s`, target: opts.vus },
+        { duration: `${opts.seconds}s`, target: opts.vus },
+        { duration: `${opts.rampDown ?? 10}s`, target: 0 },
+      ])}, maxRedirects: 0, discardResponseBodies: ${!opts.scenarioSteps?.length}, thresholds: ${thresholds} }`
+    : `{ vus: ${opts.vus}, duration: '${opts.seconds}s', maxRedirects: 0, discardResponseBodies: ${!opts.scenarioSteps?.length}, thresholds: ${thresholds} }`;
+
+  const lines: string[] = [];
+  lines.push(`import http from 'k6/http';`);
+
+  if (opts.scenarioSteps?.length) {
+    // Scenario mode: multi-step with groups
+    lines.push(`import { group, sleep } from 'k6';`);
+    lines.push(`import { Trend, Rate } from 'k6/metrics';`);
+    lines.push(``);
+    opts.scenarioSteps.forEach((_, i) => {
+      lines.push(`const step_${i}_dur = new Trend('step_${i}_duration');`);
+      lines.push(`const step_${i}_fail = new Rate('step_${i}_failed');`);
+    });
+    lines.push(``);
+    lines.push(`export const options = ${optionsObj};`);
+    lines.push(``);
+    lines.push(`export default function () {`);
+    lines.push(`  const h = {};`);
+    lines.push(`  const ah = __ENV.AIPROBE_AUTH_HEADER || 'Authorization';`);
+    lines.push(`  if (__ENV.AIPROBE_AUTH_TOKEN) h[ah] = __ENV.AIPROBE_AUTH_TOKEN;`);
+    if (opts.headers) {
+      for (const [k, v] of Object.entries(opts.headers)) lines.push(`  h[${JSON.stringify(k)}] = ${JSON.stringify(v)};`);
+    }
+    lines.push(`  let vars = {};`);
+    opts.scenarioSteps.forEach((step, i) => {
+      const label = `${i + 1}-${step.name}`;
+      const fn = K6_METHOD[step.method] ?? "get";
+      const hasBody = step.body !== undefined && step.body !== null;
+      lines.push(`  group(${JSON.stringify(label)}, () => {`);
+      const reqHeaders = hasBody ? `{...h, 'Content-Type': 'application/json'}` : `h`;
+      let pathExpr = `\`\${__ENV.AIPROBE_BASE}${step.path}\``;
+      // Replace ${var} references with template literal vars
+      pathExpr = pathExpr.replace(/\$\{(\w+)\}/g, (_, v) => `\${vars.${v}}`);
+      if (hasBody) {
+        let bodyStr = JSON.stringify(step.body);
+        bodyStr = bodyStr.replace(/"\$\{(\w+)\}"/g, `" + vars.$1 + "`);
+        lines.push(`    const res = http.${fn}(${pathExpr}, ${JSON.stringify(bodyStr)}, {headers: ${reqHeaders}, timeout: '10s'});`);
+      } else if (step.method === "GET") {
+        lines.push(`    const res = http.${fn}(${pathExpr}, {headers: ${reqHeaders}, timeout: '10s'});`);
+      } else {
+        lines.push(`    const res = http.${fn}(${pathExpr}, null, {headers: ${reqHeaders}, timeout: '10s'});`);
+      }
+      lines.push(`    step_${i}_dur.add(res.timings.duration);`);
+      lines.push(`    step_${i}_fail.add(res.status >= 400);`);
+      if (step.extract) {
+        lines.push(`    try { const b = JSON.parse(res.body);`);
+        for (const [name, path] of Object.entries(step.extract)) {
+          const chain = path.split(".").map(p => `[${JSON.stringify(p)}]`).join("");
+          lines.push(`      vars[${JSON.stringify(name)}] = b${chain};`);
+        }
+        lines.push(`    } catch(e) {}`);
+      }
+      lines.push(`  });`);
+    });
+    lines.push(`  sleep(1);`);
+    lines.push(`}`);
+  } else {
+    // Single endpoint mode
+    lines.push(`import { sleep } from 'k6';`);
+    lines.push(``);
+    lines.push(`export const options = ${optionsObj};`);
+    lines.push(``);
+    lines.push(`export default function () {`);
+    lines.push(`  const h = {};`);
+    lines.push(`  const ah = __ENV.AIPROBE_AUTH_HEADER || 'Authorization';`);
+    lines.push(`  if (__ENV.AIPROBE_AUTH_TOKEN) h[ah] = __ENV.AIPROBE_AUTH_TOKEN;`);
+    if (opts.headers) {
+      for (const [k, v] of Object.entries(opts.headers)) lines.push(`  h[${JSON.stringify(k)}] = ${JSON.stringify(v)};`);
+    }
+    const fn = K6_METHOD[opts.method] ?? "get";
+    if (opts.body !== undefined) {
+      lines.push(`  h['Content-Type'] = h['Content-Type'] || 'application/json';`);
+      lines.push(`  http.${fn}(__ENV.AIPROBE_TARGET, ${JSON.stringify(JSON.stringify(opts.body))}, {headers: h, timeout: '10s', redirects: 0});`);
+    } else if (opts.method === "GET" || !opts.method) {
+      lines.push(`  http.${fn}(__ENV.AIPROBE_TARGET, {headers: h, timeout: '10s', redirects: 0});`);
+    } else {
+      lines.push(`  http.${fn}(__ENV.AIPROBE_TARGET, null, {headers: h, timeout: '10s', redirects: 0});`);
+    }
+    lines.push(`  sleep(1);`);
+    lines.push(`}`);
+  }
+  lines.push(``);
+  lines.push(`export function handleSummary(data) { return { [__ENV.AIPROBE_SUMMARY]: JSON.stringify(data) }; }`);
+  lines.push(``);
+  return lines.join("\n");
+}
+
+function perfThresholdJunit(method: string, path: string, results: { p95Ms: number | null; failureRate: number | null; thresholdsPassed: boolean }, p95Limit: number, failLimit: number): string {
+  const cases: string[] = [];
+  const p95Pass = results.p95Ms !== null && results.p95Ms < p95Limit;
+  const failPass = results.failureRate !== null && results.failureRate <= failLimit;
+  cases.push(p95Pass
+    ? `    <testcase classname="aitest.perf" name="P95 延迟 &lt; ${p95Limit}ms (${method} ${xml(path)})" time="0"/>`
+    : `    <testcase classname="aitest.perf" name="P95 延迟 &lt; ${p95Limit}ms (${method} ${xml(path)})" time="0"><failure message="P95 实际 ${results.p95Ms ?? '—'}ms，超过门槛 ${p95Limit}ms"/></testcase>`);
+  cases.push(failPass
+    ? `    <testcase classname="aitest.perf" name="失败率 ≤ ${(failLimit * 100).toFixed(1)}% (${method} ${xml(path)})" time="0"/>`
+    : `    <testcase classname="aitest.perf" name="失败率 ≤ ${(failLimit * 100).toFixed(1)}% (${method} ${xml(path)})" time="0"><failure message="失败率实际 ${results.failureRate !== null ? (results.failureRate * 100).toFixed(2) + '%' : '—'}，超过门槛"/></testcase>`);
+  const failures = [!p95Pass, !failPass].filter(Boolean).length;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="aitest-perf">\n  <testsuite name="perf" tests="2" failures="${failures}">\n${cases.join("\n")}\n  </testsuite>\n</testsuites>\n`;
+}
+
+function perfSummaryMd(method: string, path: string, env: string, baseUrl: string, vus: number, seconds: number, results: {
+  requests?: number | null; requestsPerSecond?: number | null; p50Ms?: number | null; p90Ms?: number | null;
+  p95Ms?: number | null; p99Ms?: number | null; failureRate?: number | null; thresholdsPassed?: boolean;
+}, p95Limit: number, failLimit: number): string {
+  const ms = (v: number | null | undefined) => v == null ? "—" : `${v.toFixed(1)}ms`;
+  const pct = (v: number | null | undefined) => v == null ? "—" : `${(v * 100).toFixed(2)}%`;
+  const icon = (ok: boolean) => ok ? "✅" : "❌";
+  const p95ok = results.p95Ms != null && results.p95Ms < p95Limit;
+  const failok = results.failureRate != null && results.failureRate <= failLimit;
+  return [
+    `## 性能测试：${method} ${path}`,
+    "",
+    `环境 \`${env}\`（${baseUrl}），${vus} VU × ${seconds}s`,
+    "",
+    "| 指标 | 值 | 门槛 | 结果 |",
+    "| --- | --- | --- | --- |",
+    `| 请求总数 | ${results.requests ?? "—"} | | |`,
+    `| RPS | ${results.requestsPerSecond?.toFixed(1) ?? "—"} | | |`,
+    `| P50 | ${ms(results.p50Ms)} | | |`,
+    `| P90 | ${ms(results.p90Ms)} | | |`,
+    `| P95 | ${ms(results.p95Ms)} | < ${p95Limit}ms | ${icon(p95ok)} |`,
+    `| P99 | ${ms(results.p99Ms)} | | |`,
+    `| 失败率 | ${pct(results.failureRate)} | ≤ ${(failLimit * 100).toFixed(1)}% | ${icon(failok)} |`,
+    "",
+    results.thresholdsPassed ? "**结果：通过** 🎉" : "**结果：未通过** ⚠️",
+    "",
+  ].join("\n");
+}
+
+export async function runPerfCi(opts: PerfCiOptions): Promise<PerfCiReport> {
+  const log = opts.log ?? ((m: string) => console.log(m));
+  const secrets = opts.secrets ?? process.env;
+  const workspace = resolve(opts.workspace);
+  const outDir = resolve(opts.outDir ?? join(workspace, "reports", "ci"));
+  mkdirSync(outDir, { recursive: true });
+  const engineOpts: EngineOptions = {
+    python: opts.python ?? secrets.AITEST_PYTHON ?? "python3",
+    db: join(mkdtempSync(join(tmpdir(), "aitest-ci-perf-")), "ci.sqlite"),
+    env: pick(secrets, ["AITEST_AUTH_TOKEN", "AITEST_AUTH_HEADER", "AITEST_ROLES", "AITEST_ROLE_TOKENS", "PYTHONPATH"]),
+  };
+  const engine = <T,>(args: string[], env?: Record<string, string>) =>
+    runEngine<T>(args, { ...engineOpts, env: { ...engineOpts.env, ...env } });
+
+  const imported = await engine<{ project_id: string }>(["import-workspace", "--workspace", workspace]);
+  const project = await engine<{ id: string; name: string; environments: Record<string, { base_url: string; api_crypto?: { headers?: Record<string, string> }; production?: boolean }> }>(
+    ["get-project", "--project", imported.project_id]);
+  const envCfg = project.environments[opts.env];
+  if (!envCfg) throw new Error(`workspace 中没有环境 ${opts.env}`);
+  if (envCfg.production) throw new Error("性能测试不允许在生产环境执行");
+  const baseUrl = envCfg.base_url;
+
+  const method = (opts.method ?? "GET").toUpperCase();
+  const path = opts.path ?? "/";
+  const vus = opts.vus ?? 10;
+  const seconds = opts.seconds ?? 30;
+  const p95 = opts.p95 ?? 500;
+  const maxFailureRate = opts.maxFailureRate ?? 0.01;
+
+  // Compile scenario steps if requested
+  let scenarioSteps: Array<{ name: string; method: string; path: string; body?: unknown; extract?: Record<string, string> }> | undefined;
+  if (opts.scenario) {
+    const compiled = await engine<{ steps: typeof scenarioSteps }>(["perf-compile", "--case", opts.scenario]);
+    scenarioSteps = compiled.steps;
+    log(`场景编译：${scenarioSteps?.length ?? 0} 个步骤`);
+  }
+
+  const target = new URL(path, baseUrl).href;
+  const cryptoHeaders = envCfg.api_crypto?.headers ?? {};
+  const body = opts.body ? JSON.parse(opts.body) : undefined;
+
+  const script = generateK6Script({
+    method, target, body, headers: Object.keys(cryptoHeaders).length ? cryptoHeaders : undefined,
+    vus, seconds, p95, maxFailureRate, rampUp: opts.rampUp, rampDown: opts.rampDown,
+    scenarioSteps, baseUrl,
+  });
+
+  log(`性能测试：${scenarioSteps ? `场景 ${opts.scenario}（${scenarioSteps.length} 步）` : `${method} ${path}`}，${vus} VU × ${seconds}s`);
+
+  // Write & run k6 script
+  const id = `perf-${randomUUID()}`;
+  const scriptPath = join(outDir, `${id}.js`);
+  const summaryPath = join(outDir, `${id}.summary.json`);
+  writeFileSync(scriptPath, script, { mode: 0o600 });
+
+  const procEnv: Record<string, string> = {
+    ...process.env as Record<string, string>,
+    AIPROBE_TARGET: target,
+    AIPROBE_BASE: baseUrl.replace(/\/$/, ""),
+    AIPROBE_SUMMARY: summaryPath,
+  };
+  if (secrets.AITEST_AUTH_TOKEN) procEnv.AIPROBE_AUTH_TOKEN = secrets.AITEST_AUTH_TOKEN;
+  if (secrets.AITEST_AUTH_HEADER) procEnv.AIPROBE_AUTH_HEADER = secrets.AITEST_AUTH_HEADER;
+
+  const exitCode = await new Promise<number | null>((resolveExit, reject) => {
+    const child = spawn("k6", ["run", "--quiet", "--summary-export", summaryPath, scriptPath], {
+      cwd: workspace, env: procEnv, stdio: ["ignore", "inherit", "inherit"], shell: false,
+    });
+    const timeout = setTimeout(() => { child.kill("SIGKILL"); }, (seconds + (opts.rampUp ?? 0) + (opts.rampDown ?? 0) + 60) * 1000);
+    child.once("error", (e) => { clearTimeout(timeout); reject(e); });
+    child.once("close", (code) => { clearTimeout(timeout); resolveExit(code); });
+  });
+
+  // Parse results
+  const finite = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : null;
+  let results = { requests: null as number | null, requestsPerSecond: null as number | null, failureRate: null as number | null,
+    p50Ms: null as number | null, p90Ms: null as number | null, p95Ms: null as number | null, p99Ms: null as number | null, thresholdsPassed: false };
+  if (existsSync(summaryPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(summaryPath, "utf8"));
+      const m = raw?.metrics ?? {};
+      const dur = m.http_req_duration ?? {};
+      results = {
+        requests: finite(m.http_reqs?.count), requestsPerSecond: finite(m.http_reqs?.rate),
+        failureRate: finite(m.http_req_failed?.value ?? m.http_req_failed?.rate),
+        p50Ms: finite(dur["p(50)"]), p90Ms: finite(dur["p(90)"]),
+        p95Ms: finite(dur["p(95)"]), p99Ms: finite(dur["p(99)"]),
+        thresholdsPassed: results.requests !== null && results.p95Ms !== null && results.p95Ms < p95
+          && results.failureRate !== null && results.failureRate <= maxFailureRate,
+      };
+      // Recompute thresholdsPassed with actual parsed values
+      results.thresholdsPassed = results.requests !== null && results.requests > 0
+        && results.p95Ms !== null && results.p95Ms < p95
+        && results.failureRate !== null && results.failureRate <= maxFailureRate;
+    } catch { /* summary parse failure — results stay null */ }
+  }
+
+  const junit = perfThresholdJunit(method, path, results, p95, maxFailureRate);
+  const summary = perfSummaryMd(method, path, opts.env, baseUrl, vus, seconds, results, p95, maxFailureRate);
+
+  writeFileSync(join(outDir, "perf-junit.xml"), junit);
+  writeFileSync(join(outDir, "perf-summary.md"), summary);
+  if (secrets.GITHUB_STEP_SUMMARY) appendFileSync(secrets.GITHUB_STEP_SUMMARY, summary + "\n");
+
+  const finalExitCode = exitCode !== 0 || !results.thresholdsPassed ? 1 : 0;
+  log(`结果写入 ${outDir}（perf-junit.xml、perf-summary.md），退出码 ${finalExitCode}`);
+  return { exitCode: finalExitCode, summary, junit };
+}
+
 // --------------------------------------------------------------------------- 工作流模板
 
 export function workflowTemplate(provider: "github" | "gitlab", toolRepo: string, env: string): { path: string; content: string } {
@@ -297,8 +584,10 @@ function parseArgs(argv: string[]): { cmd: string; flags: Record<string, string>
 }
 
 const USAGE = `用法：
-  aitest-ci run  --workspace <dir> --env <name> [--suite api,ui] [--base-url URL] [--out DIR]
-  aitest-ci init --workspace <dir> --tool-repo <git url> [--provider github|gitlab] [--env name]`;
+  aitest-ci run   --workspace <dir> --env <name> [--suite api,ui] [--base-url URL] [--out DIR]
+  aitest-ci perf  --workspace <dir> --env <name> [--path /api/x] [--method POST] [--body '{}'] [--scenario <case_id>]
+                  [--vus 10] [--seconds 30] [--p95 500] [--max-failure-rate 0.01] [--ramp-up 10] [--ramp-down 5] [--out DIR]
+  aitest-ci init  --workspace <dir> --tool-repo <git url> [--provider github|gitlab] [--env name]`;
 
 async function main(argv: string[]): Promise<number> {
   const { cmd, flags } = parseArgs(argv);
@@ -308,6 +597,25 @@ async function main(argv: string[]): Promise<number> {
       env: flags.env ?? "test",
       suites: flags.suite ? (flags.suite.split(",") as ("api" | "ui")[]) : undefined,
       baseUrl: flags["base-url"],
+      outDir: flags.out,
+      python: flags.python,
+    });
+    return report.exitCode;
+  }
+  if (cmd === "perf") {
+    const report = await runPerfCi({
+      workspace: flags.workspace ?? ".",
+      env: flags.env ?? "test",
+      path: flags.path,
+      method: flags.method,
+      body: flags.body,
+      scenario: flags.scenario,
+      vus: flags.vus ? parseInt(flags.vus) : undefined,
+      seconds: flags.seconds ? parseInt(flags.seconds) : undefined,
+      p95: flags.p95 ? parseFloat(flags.p95) : undefined,
+      maxFailureRate: flags["max-failure-rate"] ? parseFloat(flags["max-failure-rate"]) : undefined,
+      rampUp: flags["ramp-up"] ? parseInt(flags["ramp-up"]) : undefined,
+      rampDown: flags["ramp-down"] ? parseInt(flags["ramp-down"]) : undefined,
       outDir: flags.out,
       python: flags.python,
     });

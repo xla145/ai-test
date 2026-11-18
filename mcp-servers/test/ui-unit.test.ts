@@ -17,22 +17,15 @@ describe("locator priority", () => {
     expect(toCode({ kind: "role", role: "button", name: '说"明"' })).toBe('page.getByRole("button", { name: "说\\"明\\"", exact: true })');
   });
 
-  it("puts row-scoped and text-filtered locators before positional CSS", () => {
+  it("keeps all row candidates scoped before recording them", () => {
     const c = candidates({ tag: "button", role: "button", name: "停用", css: "tbody > tr:nth-of-type(2) > td > button",
       cssLoose: "button.el-button", labelText: "停用", row: { css: "tr", key: "TAG-2002", inner: "button" } });
-    expect(c.map((x) => toCode(x))).toEqual([
-      'page.getByRole("button", { name: "停用", exact: true })',
-      'page.locator("tr", { hasText: "TAG-2002" }).getByRole("button", { name: "停用", exact: true })',
-      'page.locator("tr", { hasText: "TAG-2002" }).locator("button")',
-      'page.locator("button.el-button", { hasText: "停用" })',
-      'page.locator("tbody > tr:nth-of-type(2) > td > button")',
-    ]);
-    expect(c.map(isPositional)).toEqual([false, false, false, false, true]);
-    // 断言文字出现在这些定位器的识别文字里时，断言等于定位器本身
-    expect(specTexts(c[1])).toEqual(["停用", "TAG-2002"]);
-    expect(specTexts(c[3])).toEqual(["停用"]);
-    expect(describeTarget(c[1])).toBe("「TAG-2002」所在行的 button「停用」");
-    expect(describeTarget(c[3])).toBe("button.el-button「停用」");
+    expect(c).toHaveLength(3);
+    expect(c.every(x => x.within?.hasExactText === "TAG-2002")).toBe(true);
+    expect(c.map(isPositional)).toEqual([false, false, false]);
+    expect(specTexts(c[0])).toEqual(["停用", "TAG-2002"]);
+    expect(describeTarget(c[0])).toBe("「TAG-2002」所在行的 button「停用」");
+    expect(toCode(c[0])).toContain('getByText("TAG-2002", { exact: true })');
   });
 });
 

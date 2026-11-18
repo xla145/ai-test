@@ -151,10 +151,10 @@ export function ImportPage({ project }: { project: Project }) {
             <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
           </div>
           {report.blocked_case_ids.length === 0 && (
-            <Alert style={{ marginTop: 16 }} type="success" showIcon icon={<CheckCircleOutlined />} message="没有阻断级问题，可以进入脚本生成"
+            <Alert className="page-section" type="success" showIcon icon={<CheckCircleOutlined />} message="没有阻断级问题，可以进入脚本生成"
               action={goTab && <Button size="small" onClick={() => goTab("cases")}>去用例库审核</Button>} />
           )}
-          <div className="split" style={{ marginTop: 16 }}>
+          <div className="split page-section">
             <div style={{ flex: "2 1 280px" }}>
               <Card title="规则命中" size="small">
                 <Table

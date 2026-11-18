@@ -58,6 +58,9 @@ class FailureType(str, Enum):
     PRODUCT_BUG = "product_bug"
     SCRIPT_ERROR = "script_error"  # 用例/脚本错误或页面改版
     ENVIRONMENT = "environment"
+    DATA = "data"
+    AUTH = "auth"
+    MODEL = "model"
     UNKNOWN = "unknown"
 
 
@@ -126,6 +129,7 @@ class TestCase:
     title: str
     project_id: str = ""
     requirement_ids: list[str] = field(default_factory=list)
+    coverage_links: list[dict[str, Any]] = field(default_factory=list)
     type: str = CaseType.UI.value
     priority: str = "P2"
     category: str = "功能测试"
@@ -221,6 +225,9 @@ class RunResult:
     message: str = ""
     evidence_paths: list[str] = field(default_factory=list)
     failure_type: str | None = None
+    execution_context: dict[str, Any] = field(default_factory=dict)
+    acceptance_status: str = ""
+    reason_code: str = ""
 
 
 @dataclass
@@ -274,6 +281,8 @@ class HealProposal:
     status: str = ProposalStatus.PENDING.value
     commit: str = ""
     id: str = field(default_factory=lambda: new_id("heal"))
+    risk_level: str = "high"
+    risk_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -171,7 +171,7 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
         </Card>
       </div>
 
-      <Card size="small" title="最近执行" className="home-runs" style={{ marginTop: 24 }}
+      <Card size="small" title="最近执行" className="home-runs page-section-lg"
         extra={recent.length > 0 && <Typography.Link onClick={() => go("reports")}>全部报告</Typography.Link>}>
         <Table<RunRow> size="small" rowKey="id" loading={runs.loading} dataSource={recent.slice(0, 5)} pagination={false}
           scroll={{ x: 520 }}

@@ -1,4 +1,5 @@
 import { UiTasksProvider, UiTasksButton } from "./components/UiTasks";
+import { AgentProcessDock } from "./components/AgentProcessDock";
 import { BROWSER_PANEL_HEADER, BROWSER_PANEL_GUTTER } from "../shared/browserPanel";
 import {
   ApiOutlined,
@@ -19,6 +20,7 @@ import {
   SafetyCertificateOutlined,
   SettingOutlined,
   ToolOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -26,7 +28,6 @@ import {
   Badge,
   Button,
   Descriptions,
-  Drawer,
   Empty,
   Flex,
   Form,
@@ -38,7 +39,6 @@ import {
   Select,
   Space,
   Tag,
-  Timeline,
   Tooltip,
   Typography,
   theme,
@@ -63,6 +63,7 @@ import { DatabasePage } from "./pages/DatabasePage";
 import { HomePage, loadTodos } from "./pages/HomePage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
+import { PerformancePage } from "./pages/PerformancePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RunPage } from "./pages/RunPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -86,14 +87,22 @@ function initial(name?: string): string {
 /** Codex 事件 → 可读的活动记录 */
 function describe(method: string, params: any): string | undefined {
   switch (method) {
-    case "aitest/progress":
-      return { run: "开始接口回归", "ui-run": "开始 UI 回归", case_gen: "agent：生成用例", api_script: "agent：补充接口脚本",
-        triage: "agent：失败归因", explore: "agent：探索 UI 用例", heal: "agent：自愈",
-        "app-run": "开始 App 回归", app_explore: "agent：探索 App 用例" }[params?.stage as string] ?? params?.stage;
+    case "aitest/progress": {
+      if (params?.stage === "ui-task") return ({ running: "创建 UI 任务", stopping: "正在停止 UI 任务", stopped: "UI 任务已停止", completed: "UI 任务完成", failed: "UI 任务未通过" } as Record<string, string>)[params.status];
+      if (params?.stage === "ui-step") return `${({ running: "正在执行", passed: "步骤通过", failed: "步骤失败", skipped: "步骤跳过" } as Record<string, string>)[params.status] ?? "执行步骤"}：${params.title ?? params.stepId ?? "UI 步骤"}`;
+      if (params?.stage === "agent-task") return params.status === "completed" ? "Agent 任务已完成" : params.status === "failed" ? "Agent 任务失败" : "Agent 任务执行中";
+      return { run: "开始接口回归", "ui-run": "开始 UI 脚本回归", case_gen: "Agent 正在生成用例", api_script: "接口 Agent 正在补充接口脚本",
+        ui_contract: "Agent 正在整理执行计划", revise: "Agent 正在修正脚本", triage: "Agent 正在分析失败原因", explore: "Agent 正在探索并生成 UI 脚本", heal: "Agent 正在分析脚本修复",
+        "app-run": "开始 App 回归", app_explore: "Agent 正在探索 App 用例" }[params?.stage as string];
+    }
     case "item/started":
+      if (params?.item?.type === "contextCompaction") return "正在压缩任务上下文";
       return params?.item?.type === "mcpToolCall" ? `调用工具 ${params.item.server ?? ""}.${params.item.tool ?? ""}` : undefined;
+    case "item/completed":
+      if (params?.item?.type === "contextCompaction") return "任务上下文已压缩";
+      return params?.item?.type === "mcpToolCall" ? `${params.item.status === "failed" || params.item.error ? "工具调用失败" : "工具调用结束"} ${params.item.server ?? ""}.${params.item.tool ?? ""}` : undefined;
     case "turn/completed":
-      return "agent 完成本轮任务";
+      return params?.turn?.status === "failed" ? "Agent 本轮执行失败" : params?.turn?.status === "interrupted" ? "Agent 本轮已中断" : "Agent 完成本轮任务";
     default:
       return undefined;
   }
@@ -105,6 +114,7 @@ const NAV_ICON: Record<string, ReactNode> = {
   import: <FileExcelOutlined />,
   api: <ApiOutlined />,
   run: <PlayCircleOutlined />,
+  performance: <ThunderboltOutlined />,
   ui: <ChromeOutlined />,
   app: <MobileOutlined />,
   reports: <FileSearchOutlined />,
@@ -189,7 +199,7 @@ export function App() {
     const offEvent = api().onEvent((e) => {
       const detail = describe(e.method, e.params);
       if (!detail) return;
-      setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString(), method: e.method, detail }]);
+      setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), method: e.method, detail }]);
       setUnread((n) => n + 1);
     });
     const offView = api().onViewChange?.((v) => setViewVisible(v.visible && !v.docked));
@@ -248,6 +258,7 @@ export function App() {
       case "api": return <ApiPage project={p} />;
       case "cases": return <CasesPage project={p} />;
       case "run": return <RunPage project={p} />;
+      case "performance": return <PerformancePage project={p} />;
       case "ui": return <UiPage project={p} />;
       case "db": return <DatabasePage project={p} onChanged={reload} />;
       case "reports": return <ReportsPage project={p} />;
@@ -303,7 +314,9 @@ export function App() {
                   </Tooltip>
                 )}
               </Flex>
-              {current && !showSettings && <Space size={4} style={{ flexShrink: 0 }}>
+              <Space size={4} style={{ flexShrink: 0 }}>
+                <UiTasksButton />
+                {current && !showSettings && <>
                 {!compact && Object.entries(current.environments).map(([name, env]) => (
                   <Tooltip key={name} title={env.base_url}>
                     <Tag className="workspace-environment" color={env.production ? "red" : "blue"} bordered={false}>{env.production ? `${name}（生产）` : name}</Tag>
@@ -315,7 +328,8 @@ export function App() {
                   </Tooltip>
                 )}
 
-              </Space>}
+                </>}
+              </Space>
             </Flex>
           </Header>
       <Layout className="workspace-body">
@@ -336,7 +350,6 @@ export function App() {
             }}
             items={menuItems}
           />
-          <UiTasksButton />
           <div className={`sider-footer ${compact ? "compact" : ""}`} style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
             <Tooltip placement={compact ? "right" : "topLeft"} title={user && (
               <>
@@ -440,14 +453,7 @@ export function App() {
         )}
       </Modal>
 
-      <Drawer title="agent 活动" open={activityOpen} onClose={() => setActivityOpen(false)} width={420}
-        extra={<Button size="small" onClick={() => { setActivity([]); setUnread(0); }}>清空</Button>}>
-        {activity.length ? (
-          <Timeline items={[...activity].reverse().map((a) => ({ children: <><Typography.Text type="secondary">{a.time}</Typography.Text> {a.detail}</> }))} />
-        ) : (
-          <Empty description="暂无活动" />
-        )}
-      </Drawer>
+      <AgentProcessDock open={activityOpen} onOpenChange={setActivityOpen} activity={activity} onClearActivity={() => { setActivity([]); setUnread(0); }} />
     </Layout>
     </NavContext.Provider>
     </UiTasksProvider>

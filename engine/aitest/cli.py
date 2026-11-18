@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -21,6 +22,8 @@ from .models import PROJECT_TYPES, AgentSession, Project, ReviewItem, RoleAccoun
 from .schema import validate_case
 from .store import CaseValidationError, Store
 from . import api_workspace
+from .artifacts import api_snapshot
+from .traceability import coverage
 
 DEFAULT_DB = os.environ.get("AITEST_DB", str(Path.home() / ".aitest" / "aitest.db"))
 
@@ -140,12 +143,29 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     column_map = json.loads(a.column_map) if a.column_map else None
     info: dict[str, Any] = {}
     cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet, info=info)
+    # Only deduplicate an identical source and import configuration. Matching
+    # row/title across different workbooks would overwrite unrelated or edited
+    # cases. Keep manually reviewed/edited records when the source is repeated.
+    source_hash = hashlib.sha256(Path(a.file).read_bytes()).hexdigest()
+    identity = {"sha256": source_hash, "sheet": a.sheet or "", "column_map": column_map}
+    previous = next((e["data"] for e in reversed(ops.events(store, a.project, {"excel_import"}))
+                     if e["data"].get("source") == identity), None)
+    ids = previous.get("case_ids", []) if previous else []
+    if ids and len(ids) == len(cases) and all(store.get_case(cid) is not None for cid in ids):
+        existing = [store.get_case(cid) for cid in ids]
+        report = linter.lint_cases(existing)
+        return {"imported": len(cases), "reused": len(cases), "created": 0,
+                "source_sha256": source_hash, **info,
+                "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
     router.route_all(cases)
     report = linter.lint_cases(cases)
     for c in cases:
         store.upsert_case(c, validate=False)  # 导入的原始用例可能不完整，靠 lint 阻断
     store.replace_lint_issues([c.id for c in cases], report.issues)
-    return {"imported": len(cases), **info, "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
+    ops.log_event(store, "excel_import", project_id=a.project,
+                  data={"source": identity, "case_ids": [c.id for c in cases]})
+    return {"imported": len(cases), "reused": 0, "created": len(cases), "source_sha256": source_hash, **info,
+            "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
 
 
 def cmd_lint(store: Store, a: argparse.Namespace) -> Any:
@@ -207,9 +227,16 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
     if case is None:
         raise KeyError(a.case)
     patch = json.loads(a.json)
+    review_comment = patch.pop("review_comment", "")
+    if not isinstance(review_comment, str):
+        raise ValueError("审核意见必须为文本")
+    if "requirement_ids" in patch:
+        known = {r.id for r in store.list_requirements(case.project_id)}
+        if not isinstance(patch["requirement_ids"], list) or any(not isinstance(r, str) or r not in known for r in patch["requirement_ids"]):
+            raise ValueError("关联需求必须存在且属于当前项目")
     merged = {**case.to_dict(), **patch, "id": case.id, "project_id": case.project_id}
     if case.is_api_executable and case.api_variable_scope == "case":
-        execution_changed = bool(set(patch) - {"status", "owner", "title", "priority", "module_path"})
+        execution_changed = bool(set(patch) - {"status", "owner", "title", "priority", "module_path", "coverage_links", "requirement_ids"})
         if execution_changed:
             merged["status"] = "draft"
             merged["api_revision"] = case.api_revision + 1
@@ -237,8 +264,7 @@ def cmd_update_case(store: Store, a: argparse.Namespace) -> Any:
         keep = [i for i in store.list_lint_issues(case.id) if i.rule in ("group_not_subdivided", "p0_ratio")]
         store.replace_lint_issues([case.id], [*report.issues, *keep])
     out = store.upsert_case(updated, validate=False).to_dict()
-    if a.actor == "human":
-        ops.log_event(store, "case_edited", case.project_id, case.id, actor="human", data={"fields": sorted(patch)})
+    ops.log_event(store, "case_edited", case.project_id, case.id, actor=a.actor, data={"fields": sorted(patch), "before": {k: case.to_dict().get(k) for k in patch}, "after": {k: out.get(k) for k in patch}, "comment": review_comment})
     return out
 
 
@@ -317,16 +343,36 @@ def cmd_run_api_suite(store: Store, a: argparse.Namespace) -> Any:
         for data_file in (suite_dir / "data").glob("*.json"):
             compiled_ids.update(item.get("case_id") for item in json.loads(data_file.read_text(encoding="utf-8")))
     selected_ids = set(case_ids) if case_ids is not None else compiled_ids
-    for case in store.list_cases(p.id, execution_mode="api"):
+    selected_cases = [case for case in store.list_cases(p.id, execution_mode="api") if case.id in selected_ids]
+    for case in selected_cases:
         if case.api_variable_scope == "case" and case.id in selected_ids:
             api_selection.validate_selection(store, p.id, [case.id])
             expected_revisions[case.id] = case.api_revision
+    if os.environ.get("AITEST_API_PREFER_ENV_TOKEN") == "1" and not os.environ.get("AITEST_AUTH_TOKEN", "").strip():
+        raise ValueError("当前环境尚未保存接口 token，请先手动登录并保存登录态，或选择按用例角色 / 鉴权设置执行")
+    api_selection.validate_run_auth(
+        selected_cases, os.environ.get("AITEST_API_SELECTED_ROLE"), env_cfg,
+        json.loads(os.environ.get("AITEST_ROLE_TOKENS") or "{}"),
+        json.loads(os.environ.get("AITEST_ROLES") or "[]"),
+        bool(os.environ.get("AITEST_AUTH_TOKEN")) and os.environ.get("AITEST_API_PREFER_ENV_TOKEN") == "1",
+    )
     # 入库校验需要的数据库连接（密码来自 AITEST_DB_PASSWORDS，只传给脚本进程）
     db_env = db.runtime_env(db.configs_for_env(env_cfg))
     if expected_revisions:
         db_env["AITEST_API_REVISIONS"] = json.dumps(expected_revisions)
+    snapshots = api_snapshot(store, p, a.env, env_cfg, selected_ids)
     run, results = runner.run_pytest(suite_dir, env, project_id=p.id, env_name=a.env,
                                      report_dir=Path(p.workspace_path) / "reports", extra_env=db_env, case_ids=case_ids)
+    # Keep the execution identity visible in the run summary without persisting credentials.
+    if os.environ.get("AITEST_API_SELECTED_ROLE"):
+        run.result["selected_role"] = os.environ["AITEST_API_SELECTED_ROLE"]
+    if "AITEST_API_PREFER_ENV_TOKEN" in os.environ:
+        run.result["prefer_env_token"] = os.environ["AITEST_API_PREFER_ENV_TOKEN"] == "1"
+    if "AITEST_API_CHECK_BUSINESS_CODE" in os.environ:
+        run.result["check_business_code"] = os.environ["AITEST_API_CHECK_BUSINESS_CODE"] == "1"
+    for result in results:
+        if result.case_id in snapshots:
+            result.execution_context["artifact"] = snapshots[result.case_id]
     store.save_run(run, results)
     return {"run_id": run.id, **run.result}
 
@@ -482,6 +528,33 @@ def cmd_save_run(store: Store, a: argparse.Namespace) -> Any:
     """保存外部执行器（Playwright 等）的结果。results 文件为 RunResult 字段组成的 JSON 数组。"""
     _leaf(store, a.project)
     items = json.loads(Path(a.results_file).read_text(encoding="utf-8"))
+    # Several Playwright tests may belong to one case. Never let a later pass overwrite an earlier failure.
+    grouped = {}
+    priority = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
+    acceptance_priority = {"verified_pass": 0, "pending_review": 1, "incomplete": 2, "blocked": 3, "failed": 4}
+    for item in items:
+        key = item["case_id"]
+        if key not in grouped:
+            grouped[key] = dict(item)
+            continue
+        row = grouped[key]
+        row["duration"] = row.get("duration", 0) + item.get("duration", 0)
+        row["evidence_paths"] = list(dict.fromkeys(row.get("evidence_paths", []) + item.get("evidence_paths", [])))
+        row["reviews"] = row.get("reviews", []) + item.get("reviews", [])
+        # A case can contain multiple Playwright tests (or role-bound shards). Keep
+        # every observed session so reports explain which role/context actually ran.
+        contexts = [
+            *(row.get("execution_context", {}).get("sessions", []) if isinstance(row.get("execution_context"), dict) else []),
+            *(item.get("execution_context", {}).get("sessions", []) if isinstance(item.get("execution_context"), dict) else []),
+        ]
+        if contexts:
+            row["execution_context"] = {**(row.get("execution_context") or {}), "sessions": contexts}
+        if priority.get(item["status"], 3) > priority.get(row["status"], 3):
+            row.update({k: item.get(k) for k in ("status", "message", "failure_type")})
+        if acceptance_priority.get(item.get("acceptance_status", ""), -1) > acceptance_priority.get(row.get("acceptance_status", ""), -1):
+            row["acceptance_status"] = item["acceptance_status"]
+            row["reason_code"] = item.get("reason_code", "")
+    items = list(grouped.values())
     run = Run(project_id=a.project, env=a.env, mode=a.mode, started_at=datetime.now(timezone.utc).isoformat())
     results = [RunResult(run_id=run.id, **{k: v for k, v in r.items() if k in RunResult.__dataclass_fields__ and k != "run_id"})
                for r in items]
@@ -528,6 +601,10 @@ def cmd_list_proposals(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_resolve_proposal(store: Store, a: argparse.Namespace) -> Any:
     p = _project(store, a.project)
+    proposal = store.get_proposal(a.id)
+    case = store.get_case(proposal.case_id) if proposal else None
+    if not case or case.project_id != p.id:
+        raise ValueError("修改建议不存在或不属于当前项目")
     d = asdict(heal.resolve(store, p.workspace_path, a.id, a.accept))
     d.pop("original"), d.pop("proposed")
     ops.log_event(store, "proposal_resolved", p.id, d["case_id"], a.id, actor="human", data={"status": d["status"]})
@@ -555,7 +632,19 @@ def cmd_resolve_review(store: Store, a: argparse.Namespace) -> Any:
     item.status = "confirmed_pass" if a.passed else "confirmed_fail"
     ops.log_event(store, "review_resolved", ops.project_of_case(store, item.case_id), item.case_id, item.id,
                   actor="human", data={"status": item.status})
-    return asdict(store.save_review(item))
+    saved = store.save_review(item)
+    # Reconcile acceptance only for the same run/case after all visual reviews.
+    reviews = [r for r in store.list_reviews() if r.run_id == item.run_id and r.case_id == item.case_id]
+    if item.run_id and reviews:
+        status = "failed" if any(r.status == "confirmed_fail" for r in reviews) else "verified_pass" if all(r.status == "confirmed_pass" for r in reviews) else "pending_review"
+        store.conn.execute("UPDATE run_result SET acceptance_status=? WHERE run_id=? AND case_id=? AND status='passed' AND acceptance_status IN ('pending_review','verified_pass','failed')", (status, item.run_id, item.case_id))
+        row = store.conn.execute("SELECT result FROM run WHERE id=?", (item.run_id,)).fetchone()
+        if row:
+            summary = json.loads(row["result"])
+            summary.update(runner.summarize(store.list_run_results(item.run_id)))
+            store.conn.execute("UPDATE run SET result=? WHERE id=?", (json.dumps(summary, ensure_ascii=False), item.run_id))
+        store.conn.commit()
+    return asdict(saved)
 
 
 # ---- 三期：自愈与工程化 ----
@@ -593,6 +682,17 @@ def cmd_list_attributions(store: Store, a: argparse.Namespace) -> Any:
 
 def cmd_metrics(store: Store, a: argparse.Namespace) -> Any:
     return ops.metrics(store, a.project)
+
+
+def cmd_case_history(store: Store, a: argparse.Namespace) -> Any:
+    case = store.get_case(a.case)
+    if not case:
+        raise ValueError("用例不存在")
+    return [e for e in ops.events(store, case.project_id, {"case_edited", "fix_applied"}) if e["case_id"] == case.id][-100:][::-1]
+
+
+def cmd_coverage(store: Store, a: argparse.Namespace) -> Any:
+    return coverage(store, a.project, a.env or "")
 
 
 def cmd_stability(store: Store, a: argparse.Namespace) -> Any:
@@ -683,6 +783,47 @@ def cmd_db_exec(store: Store, a: argparse.Namespace) -> Any:
 def cmd_db_runtime_env(store: Store, a: argparse.Namespace) -> Any:
     """供客户端 / CI 注入 UI 脚本进程（含密码，只经本地子进程传递，不进模型上下文）。"""
     return db.runtime_env(_db_configs(store, a))
+
+
+# ---- 性能测试（二期 + 三期） ----
+
+
+def cmd_perf_compile(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    return perf.compile_case(store, a.case)
+
+
+def cmd_perf_save_baseline(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    _project(store, a.project)
+    return perf.save_baseline(store, a.project, a.target, a.result)
+
+
+def cmd_perf_get_baseline(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    _project(store, a.project)
+    return perf.get_baseline(store, a.project, a.target)
+
+
+def cmd_perf_compare(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    current = json.loads(a.current)
+    baseline = json.loads(a.baseline)
+    return perf.compare_results(current, baseline)
+
+
+def cmd_perf_trend(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    return perf.trend_data(a.workspace, target_path=a.path or None, limit=a.limit)
+
+
+def cmd_perf_report(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf_report
+    results = json.loads(a.results)
+    out = Path(a.out) if a.out else None
+    if out is None:
+        raise ValueError("请通过 --out 指定报告输出路径")
+    return {"path": str(perf_report.render_perf_report(results, out))}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -790,6 +931,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("confirm-attribution", cmd_confirm_attribution, (("--run",), req), (("--case",), req), (("--type",), failure_types))
     add("list-attributions", cmd_list_attributions, (("--project",), req), (("--pending",), flag), *paging)
     add("metrics", cmd_metrics, (("--project",), req))
+    add("case-history", cmd_case_history, (("--case",), req))
+    add("coverage", cmd_coverage, (("--project",), req), (("--env",), {}))
     add("stability", cmd_stability, (("--project",), req), (("--window",), {"type": int, "default": 10}))
     add("export-workspace", cmd_export_workspace, (("--project",), req), (("--commit",), flag))
     add("import-workspace", cmd_import_workspace, (("--workspace",), req), (("--name",), {}))
@@ -808,7 +951,14 @@ def build_parser() -> argparse.ArgumentParser:
     add("db-exec", cmd_db_exec, *dbargs, (("--sql",), req), (("--params",), {}))
     add("db-runtime-env", cmd_db_runtime_env, (("--project",), req), (("--env",), req))
     add("export-report", cmd_export_report, (("--run",), {"action": "append", "required": True}),
-        (("--format",), {"choices": ["html", "xlsx"], "default": "html"}), (("--out",), {}))
+        (("--format",), {"choices": ["html", "xlsx", "json"], "default": "html"}), (("--out",), {}))
+    # ---- 性能测试（二期 + 三期） ----
+    add("perf-compile", cmd_perf_compile, (("--case",), req))
+    add("perf-save-baseline", cmd_perf_save_baseline, (("--project",), req), (("--target",), req), (("--result",), req))
+    add("perf-get-baseline", cmd_perf_get_baseline, (("--project",), req), (("--target",), req))
+    add("perf-compare", cmd_perf_compare, (("--current",), req), (("--baseline",), req))
+    add("perf-trend", cmd_perf_trend, (("--workspace",), req), (("--path",), {}), (("--limit",), {"type": int, "default": 20}))
+    add("perf-report", cmd_perf_report, (("--results",), req), (("--out",), req))
     return ap
 
 

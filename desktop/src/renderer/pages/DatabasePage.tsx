@@ -78,7 +78,7 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
         </>}
       />
       {envCfg?.production && (
-        <Alert style={{ marginBottom: 16 }} type="warning" showIcon icon={<LockOutlined />}
+        <Alert className="page-section-b" type="warning" showIcon icon={<LockOutlined />}
           message="生产环境：只能执行只读查询，数据准备与清理被禁止。" />
       )}
       <div className="database-layout">

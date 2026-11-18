@@ -1,0 +1,11 @@
+{
+  "repeats": 5,
+  "viewport": { "width": 1280, "height": 900 },
+  "output": "reports/model-benchmark",
+  "models": [
+    { "name": "YOUR_MODEL", "family": "qwen3-vl", "baseUrl": "https://YOUR_ENDPOINT/v1", "keyEnv": "UI_BENCHMARK_API_KEY" }
+  ],
+  "samples": [
+    { "id": "unique-button", "url": "http://127.0.0.1:YOUR_PORT/fixture", "selector": "[data-testid=save]", "prompt": "定位保存按钮" }
+  ]
+}

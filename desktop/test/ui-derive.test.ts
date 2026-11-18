@@ -2,12 +2,12 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { writeUiScript, type UiStep } from "@ai-test/mcp-servers";
+import { caseHash, writeUiScript, type UiStep } from "@ai-test/mcp-servers";
 import { Orchestrator, type EngineCall, type UiDeps } from "../src/main/orchestrator.js";
 
 const mk = (id: string, tag: string, extra: Record<string, unknown> = {}) => ({
   id, title: `标签管理-停用标签 ${tag}`, execution_mode: "ui", status: "reviewed", lint_status: "passed", priority: "P1", data_refs: [],
-  steps: ["进入标签管理页", `停用标签 ${tag}`], expected: ["展示标签列表", "状态显示为「已停用」"], preconditions: ["存在启用中的标签 TAG-1001"], ...extra,
+  steps: ["进入标签管理页", `停用标签 ${tag}`], expected: ["展示标签列表", "状态显示为「已停用」"], preconditions: [`存在启用中的标签 ${tag}`], ...extra,
 });
 
 function setup() {
@@ -18,10 +18,11 @@ function setup() {
   ];
   const steps: UiStep[] = [
     { id: "S1", caseStep: 1, action: "goto", url: "/tags" },
+    { id: "P1", caseStep: 1, action: "expectText", target: { kind: "testid", value: "status-TAG-1001" }, text: "启用中", expectedIndices: [1], preconditionIndices: [1] },
     { id: "S2", caseStep: 2, action: "click", target: { kind: "testid", value: "disable-TAG-1001" } },
-    { id: "S3", caseStep: 2, action: "expectText", target: { kind: "testid", value: "status-TAG-1001" }, text: "已停用" },
+    { id: "S3", caseStep: 2, action: "expectText", target: { kind: "testid", value: "status-TAG-1001" }, text: "已停用", expectedIndices: [2] },
   ];
-  const scripts = [{ case_id: "tc_a", framework: "playwright", path: writeUiScript(ws, { caseId: "tc_a", title: cases[0].title, steps }).path }];
+  const scripts = [{ case_id: "tc_a", framework: "playwright", path: writeUiScript(ws, { caseId: "tc_a", title: cases[0].title, caseHash: caseHash(cases[0]), steps }).path }];
   const calls: string[][] = [];
   const engine = vi.fn(async (args: string[]) => {
     calls.push(args);

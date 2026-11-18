@@ -1,22 +1,75 @@
 // 由 AIProbe 生成：脚本共用的辅助函数。
-import { expect, type Browser, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import valueTools from "./aitest-values.cjs";
+
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 /** 角色登录态（global-setup 生成） */
 export function storageStateFor(role: string): string | undefined {
+  if (role === "default" && process.env.AITEST_DEFAULT_ROLE) role = process.env.AITEST_DEFAULT_ROLE;
   if (process.env.AITEST_EMBEDDED) return `aitest-role:${role}`;
-  const file = join(__dirname, ".auth", `${role}.json`);
-  return existsSync(file) ? file : undefined;
+  return join(process.env.AITEST_AUTH_DIR || join(__dirname, ".auth"), `${Buffer.from(role).toString("hex")}.json`);
 }
 
 /** 多角色：每个角色一个独立上下文 */
 export async function openAs(browser: Browser, role: string): Promise<Page> {
   if (process.env.AITEST_EMBEDDED) return (await import("./aitest-embedded")).embeddedPage(browser, role);
-  const context = await browser.newContext({ baseURL: process.env.AITEST_BASE_URL, storageState: storageStateFor(role) });
-  return context.newPage();
+  const state = storageStateFor(role)!;
+  if (!existsSync(state)) throw new Error(`AUTH_REQUIRED: 角色「${role}」没有可恢复的登录态`);
+  const context = await browser.newContext({ baseURL: process.env.AITEST_BASE_URL, storageState: state });
+  if (existsSync(`${state}.session.json`)) {
+    await context.addInitScript(({ origin, values }) => {
+      if (location.origin === origin) for (const [key, value] of Object.entries(values)) sessionStorage.setItem(key, String(value));
+    }, JSON.parse(readFileSync(`${state}.session.json`, "utf8")));
+  }
+  const page = await context.newPage();
+  prepareSessionPage(page);
+  recordSession(page, role, true);
+  return page;
+}
+
+export function recordSession(page: Page, role: string, restored: boolean) {
+  let u: URL;
+  try { u = new URL(page.url()); } catch { return; }
+  test.info().annotations.push({ type: "aitest-context", description: JSON.stringify({ role,
+    sessionId: process.env.AITEST_SESSION_ID, pageUrl: u.origin + u.pathname + u.hash.split("?")[0], restored,
+    mode: process.env.AITEST_EMBEDDED ? "embedded" : "isolated", viewport: page.viewportSize() }) });
+}
+
+/** Check configured authentication boundary after navigation, without modifying business actions. */
+export function prepareSessionPage(page: Page) {
+  const recipe = JSON.parse(process.env.AITEST_LOGIN || "null");
+  const isLogin = (url: string) => {
+    if (!recipe) {
+      const u = new URL(url, process.env.AITEST_BASE_URL);
+      return /(?:^|[\/#])(?:login|signin|sign-in)(?:[\/?#]|$)/i.test(u.pathname + u.hash);
+    }
+    const u = new URL(url, process.env.AITEST_BASE_URL), l = new URL(recipe.url, process.env.AITEST_BASE_URL);
+    return u.origin === l.origin && u.pathname === l.pathname && u.hash === l.hash;
+  };
+  const goto = page.goto.bind(page);
+  page.goto = async (url, options) => {
+    const target = new URL(url, process.env.AITEST_BASE_URL).href;
+    const result = await goto(target, { waitUntil: 'domcontentloaded', ...options });
+    if (!isLogin(target) && isLogin(page.url())) throw new Error("AUTH_REQUIRED: 登录态失效，请重新登录执行角色");
+    return result;
+  };
+}
+
+const { numericEqual, equalValue } = valueTools;
+export const readValue = valueTools.readValue;
+export async function expectCollection(locator: import("@playwright/test").Locator, rule: { selector: string; minCount?: number; maxCount?: number; contains?: string; equals?: string }) {
+  valueTools.validateCollectionRule(rule);
+  await expect.poll(async () => (await valueTools.checkCollection(locator, rule)).matched, { message: 'ASSERTION_FAILED: 集合不满足用例规则' }).toBe(true);
+}
+export async function expectObserved(locator: import("@playwright/test").Locator, expected: unknown, source: string, normalize: string) {
+  await expect.poll(async () => equalValue(await readValue(locator, source), expected, normalize), { message: "ASSERTION_FAILED: 读取值与预期不一致" }).toBe(true);
+}
+export async function expectNumber(locator: import("@playwright/test").Locator, expected: string | number, tolerance: string | number = 0) {
+  await expect.poll(async () => numericEqual(await locator.innerText(), expected, tolerance), { message: `数值不等于 ${expected}` }).toBe(true);
 }
 
 export interface Captured { url: string; method: string; body: unknown }

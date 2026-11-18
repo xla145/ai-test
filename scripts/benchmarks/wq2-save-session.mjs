@@ -1,0 +1,3 @@
+import { chromium } from 'playwright-core';
+const b=await chromium.connectOverCDP('http://127.0.0.1:9333');
+try { const p=b.contexts().flatMap(c=>c.pages()).find(p=>p.url().startsWith('http://localhost:5173/')); const id='proj_d5a78499644f'; const saved=await p.evaluate(({id})=>window.aitest.saveRoleLogin(id,'dev','超级管理员'),{id}); const cases=await p.evaluate(({id})=>window.aitest.listCases(id),{id}); console.log(JSON.stringify({saved, samples:cases.filter(c=>c.execution_mode==='ui').slice(0,8).map(c=>({id:c.id,title:c.title,priority:c.priority,lint_status:c.lint_status,steps:c.steps?.length,expected:c.expected?.length}))},null,2)); } finally {await b.close()}

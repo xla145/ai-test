@@ -35,6 +35,8 @@ export const envOwner = (p: Project, env: string) => p.inherited_environments?.[
 export interface TestCase {
   id: string;
   title: string;
+  owner?: string;
+  requirement_ids?: string[];
   type: string;
   priority: string;
   category: string;

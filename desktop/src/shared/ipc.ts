@@ -1,8 +1,18 @@
+import type { PerformanceOptions, PerformanceResult, PerformanceScenarioStep } from "./performance.js";
 export interface UiTaskRecord {
   id: string; projectId: string; env: string; kind: string; caseIds: string[];
   status: "running" | "stopping" | "completed" | "failed" | "stopped";
   startedAt: string; updatedAt: string; finishedAt?: string;
   stage: string; detail?: string; runId?: string;
+  /** UI、Agent 或未来的性能任务；保留 UiTaskRecord 名称以兼容现有 IPC。 */
+  source?: "ui" | "agent" | "performance";
+  canStop?: boolean;
+  parentTaskId?: string;
+  purpose?: string;
+  threadId?: string;
+  tokens?: number;
+  persistenceError?: string;
+  events?: { time: string; detail: string }[];
 }
 
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "./apiWorkspace.js";
@@ -178,7 +188,15 @@ export interface ApiTestSet {
 }
 
 export interface ApiRunOptions {
+  /** 优先使用当前环境手动保存的 token；省略时有 token 才启用，false 表示按用例角色鉴权。 */
+  preferEnvToken?: boolean;
+  /** 本次未指定角色的请求使用此身份；不修改用例与脚本。 */
+  selectedRole?: string;
+  /** 校验 code + msg/message 响应中的业务码，显式业务码断言优先。 */
+  checkBusinessCode?: boolean;
   confirmProduction?: boolean;
+  /** 默认启用；关闭后仅执行确定性脚本与规则分类，不调用模型。 */
+  autoTriage?: boolean;
   /** 省略时兼容全量脚本执行；显式空数组会拒绝执行。 */
   caseIds?: string[];
 }
@@ -190,6 +208,8 @@ export interface UiRunOptions {
   caseIds?: string[];
   mode?: "validate" | "regression";
   embedded?: boolean;
+  /** 内嵌试跑时，默认会话使用所选角色的现有视图；明确角色不变。 */
+  selectedRole?: string;
   /** 无头执行时并行的用例数（1–8，默认 1）；内嵌浏览器只有一个视图，始终逐条执行 */
   workers?: number;
 }
@@ -229,11 +249,15 @@ export interface UiStepView {
   description: string;
   /** 对应用例第几步（从 1 开始）；旧脚本或未声明时为空 */
   caseStep?: number;
+  expectedIndices?: number[];
+  preconditionIndices?: number[];
   role?: string;
   source?: "ai" | "user" | "pick";
 }
 
 export interface UiScriptDetail {
+  /** 生成时原始用例快照，用于检测历史映射 */
+  source?: { steps?: string[]; expected?: string[]; preconditions?: string[] };
   path: string;
   code: string;
   /** 结构化步骤；旧脚本没有 steps.json 时为空 */
@@ -276,6 +300,8 @@ export interface UiScriptState {
   hash: string;
   status: "pending" | "confirmed";
   validatedRunId?: string;
+  validationReason?: string;
+  executionRole?: string;
 }
 
 export interface AitestApi {
@@ -336,7 +362,7 @@ export interface AitestApi {
   /** 已登记的脚本：用例 ID → 脚本路径（framework：maestro / playwright / pytest） */
   scriptMap(framework: string): Promise<Record<string, string>>;
   caseTitles(projectId: string, ids: string[]): Promise<Record<string, string>>;
-  exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
+  exploreUiCase(projectId: string, env: string, caseId: string, opts?: { confirmProduction?: boolean; selectedRole?: string }): Promise<unknown>;
   runUiRegression(projectId: string, env: string, headed: boolean, opts?: UiRunOptions): Promise<unknown>;
   uiScriptStates(projectId: string, env: string): Promise<Record<string, UiScriptState>>;
   /** UI 用例按「同脚本、不同参数」归组 */
@@ -351,6 +377,7 @@ export interface AitestApi {
   /** 当前调试会话（没有则为 null），页面重新进入时恢复 */
   uiDebugState(): Promise<UiDebugState | null>;
   uiTasks(): Promise<UiTaskRecord[]>;
+  stopExecutionTask(taskId: string): Promise<void>;
   stopUiTask(projectId: string, env: string): Promise<void>;
   reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
   /** App 回归（Maestro）；device 为设备 ID，连接了多台设备时必填 */
@@ -370,6 +397,18 @@ export interface AitestApi {
   getSettings(projectId: string): Promise<Record<string, unknown>>;
   setSettings(projectId: string, settings: Record<string, string | number | null>): Promise<Record<string, unknown>>;
   metrics(projectId: string): Promise<any>;
+  runPerformance(projectId: string, env: string, options: PerformanceOptions): Promise<PerformanceResult>;
+  performanceHistory(projectId: string): Promise<PerformanceResult[]>;
+  /** 二期：从用例编译性能场景步骤 */
+  perfCompile(projectId: string, caseId: string): Promise<{ steps: PerformanceScenarioStep[] }>;
+  /** 三期：设定性能基线 */
+  perfSetBaseline(projectId: string, targetKey: string, resultId: string): Promise<void>;
+  /** 三期：获取性能基线 */
+  perfGetBaseline(projectId: string, targetKey: string): Promise<PerformanceResult | null>;
+  /** 三期：性能趋势数据 */
+  perfTrend(projectId: string, targetPath?: string): Promise<Array<{ id: string; startedAt: string; p95Ms: number | null; requestsPerSecond: number | null; failureRate: number | null; status: string }>>;
+  caseHistory(caseId: string): Promise<any[]>;
+  coverage(projectId: string, env?: string): Promise<any>;
   stability(projectId: string): Promise<any>;
   listAttributions(projectId: string, pendingOnly?: boolean): Promise<any[]>;
   pageAttributions(projectId: string, q: PageQuery & { pending?: boolean }): Promise<Page<any>>;
@@ -396,14 +435,14 @@ export interface AitestApi {
   listRuns(projectId: string, framework?: "pytest" | "playwright"): Promise<any[]>;
   runDetail(runId: string): Promise<any>;
   /** 弹出保存对话框；用户取消返回 null */
-  exportReport(runIds: string[], format: "html" | "xlsx"): Promise<{ path: string } | null>;
+  exportReport(runIds: string[], format: "html" | "xlsx" | "json"): Promise<{ path: string } | null>;
   exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
   readEvidenceImage(projectId: string, path: string): Promise<string>;
   openPath(path: string): Promise<void>;
   showInFolder(path: string): Promise<void>;
   pickFile(filters?: { name: string; extensions: string[] }[]): Promise<string | null>;
   pickDirectory(): Promise<string | null>;
-  openTestPage(url: string, session?: { projectId: string; env: string }): Promise<void>;
+  openTestPage(url: string, session?: { projectId: string; env: string; role?: string }): Promise<void>;
   onApprovalRequest(cb: (req: ApprovalRequest) => void): () => void;
   respondApproval(id: string, accept: boolean): void;
   onEvent(cb: (evt: { method: string; params: unknown }) => void): () => void;

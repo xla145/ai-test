@@ -1,11 +1,12 @@
 import { ChromeOutlined, CloseOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Button, Empty, Space, Tooltip, Typography } from "antd";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ViewDock } from "../../shared/ipc";
 import { api } from "../api";
 
 /** 会盖在停靠区上的浮层：与停靠区相交时暂时隐藏原生视图（WebContentsView 总在 DOM 之上） */
 const OVERLAYS = [
+  ".agent-process-panel",
   ".ant-modal-wrap", ".ant-drawer-content-wrapper", ".ant-image-preview-wrap",
   ".ant-select-dropdown:not(.ant-select-dropdown-hidden)", ".ant-dropdown:not(.ant-dropdown-hidden)",
   ".ant-picker-dropdown:not(.ant-picker-dropdown-hidden)", ".ant-popover:not(.ant-popover-hidden)",
@@ -41,7 +42,7 @@ function visibleRect(el: HTMLElement): DOMRect {
  * 内嵌浏览器停靠区：把主进程的被测页面视图嵌进页面布局，而不是浮在右半屏。
  * 视图未打开时显示占位提示。
  */
-export function BrowserDock({ url, title = "内嵌浏览器", session, suspended = false }: { url?: string; title?: string; session?: { projectId: string; env: string }; suspended?: boolean }) {
+export function BrowserDock({ url, title = "内嵌浏览器", session, controls, suspended = false }: { controls?: ReactNode; url?: string; title?: string; session?: { projectId: string; env: string; role?: string }; suspended?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const [shown, setShown] = useState(false);
@@ -122,6 +123,7 @@ export function BrowserDock({ url, title = "内嵌浏览器", session, suspended
           )}
         </Space>
       </div>
+      {controls && <div className="browser-dock-controls">{controls}</div>}
       <div ref={box} className="browser-dock-view" data-view={!visible ? "closed" : shown ? "shown" : "suspended"}>
         {visible && !shown && <Typography.Text type="secondary">{suspended ? "正在调整宽度，松开后恢复浏览器" : "浏览器已暂时隐藏，关闭弹窗后恢复"}</Typography.Text>}
         {!visible && (

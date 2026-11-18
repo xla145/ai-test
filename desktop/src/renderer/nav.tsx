@@ -25,6 +25,7 @@ export const NAV_SECTIONS: NavSection[] = [
   ] },
   { key: "execute", title: "执行", items: [
     { key: "run", label: "接口回归" },
+    { key: "performance", label: "性能测试" },
     { key: "ui", label: "Web UI 测试" },
     { key: "app", label: "App 测试" },
   ] },

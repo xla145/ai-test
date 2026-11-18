@@ -11,15 +11,14 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Dropdown,
   Empty,
   Progress,
-  Row,
   Segmented,
   Space,
   Statistic,
@@ -47,9 +46,11 @@ interface RunRow {
   pass_rate: number;
   html_report?: string;
   junit?: string;
+  acceptance?: Record<string, number>;
 }
 
 interface ResultRow {
+  artifact?: { case_revision?: string; script_hash?: string; environment_fingerprint?: string; script_path?: string };
   api_trace?: ApiDebugResult;
   case_id: string;
   title: string;
@@ -62,9 +63,13 @@ interface ResultRow {
   attribution_confirmed: boolean;
   attribution_reason: string;
   evidence_paths: string[];
+  acceptance_status?: string;
+  reason_code?: string;
+  execution_context?: { sessions?: { role: string; mode: string; pageUrl: string; sessionId?: string }[] };
   reviews: { description: string; ai_verdict: string; status: string }[];
 }
 
+const ACCEPTANCE: Record<string, string> = { verified_pass: "验收通过", pending_review: "待人工复核", incomplete: "覆盖不完整", blocked: "执行阻断", failed: "验收失败" };
 const STATUS = {
   passed: { text: "通过", color: "success" },
   failed: { text: "失败", color: "error" },
@@ -83,7 +88,7 @@ export function ReportsPage({ project }: { project: Project }) {
   const [open, setOpen] = useState<RunRow>();
   const { busy, run } = useAction();
 
-  const exportRuns = (ids: string[], format: "html" | "xlsx") => run(async () => {
+  const exportRuns = (ids: string[], format: "html" | "xlsx" | "json") => run(async () => {
     const out = await api().exportReport(ids, format);
     if (out) await api().showInFolder(out.path).catch(() => undefined);
     return out;
@@ -92,9 +97,10 @@ export function ReportsPage({ project }: { project: Project }) {
   const exportMenu = (ids: string[]) => ({
     items: [
       { key: "html", icon: <FileTextOutlined />, label: "HTML 汇总报告（单文件，含截图）" },
+      { key: "json", icon: <FileTextOutlined />, label: "JSON 机器可读报告" },
       { key: "xlsx", icon: <FileExcelOutlined />, label: "Excel 结果明细" },
     ],
-    onClick: ({ key }: { key: string }) => exportRuns(ids, key as "html" | "xlsx"),
+    onClick: ({ key }: { key: string }) => exportRuns(ids, key as "html" | "xlsx" | "json"),
   });
 
   return (
@@ -129,10 +135,10 @@ export function ReportsPage({ project }: { project: Project }) {
             v === "playwright" ? <Tag icon={<ChromeOutlined />} color="geekblue" bordered={false}>UI</Tag> : <Tag icon={<ApiOutlined />} color="cyan" bordered={false}>接口</Tag> },
           { title: "环境", dataIndex: "env", width: 90 },
           { title: "模式", dataIndex: "mode", width: 70, render: (v: string) => MODE[v] ?? v },
-          { title: "通过率", dataIndex: "pass_rate", render: (v: number, r) => (
+          { title: "执行通过率", dataIndex: "pass_rate", render: (v: number, r) => (
             <Space className="report-pass-rate" style={{ width: "100%" }}>
               <Progress percent={Math.round(v * 100)} size="small" style={{ width: 140, margin: 0 }} status={r.failed ? "exception" : "success"} />
-              <Typography.Text type="secondary">{r.passed}/{r.total - r.skipped}</Typography.Text>
+              <Typography.Text type="secondary">验收 {r.acceptance?.verified_pass ?? 0} · {r.passed}/{r.total - r.skipped}</Typography.Text>
             </Space>
           ) },
           { title: "失败", dataIndex: "failed", width: 70, render: (v: number) => v ? <Typography.Text type="danger">{v}</Typography.Text> : 0 },
@@ -155,7 +161,7 @@ export function ReportsPage({ project }: { project: Project }) {
 }
 
 function RunDrawer({ project, run: r, onClose, onExport, busy }: {
-  project: Project; run: RunRow; onClose: () => void; onExport: (f: "html" | "xlsx") => void; busy: boolean;
+  project: Project; run: RunRow; onClose: () => void; onExport: (f: "html" | "xlsx" | "json") => void; busy: boolean;
 }) {
   const detail = useLoad(() => api().runDetail(r.id), [r.id]);
   const { run } = useAction();
@@ -163,6 +169,11 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
   const d = detail.data;
   const resolvePath = (p: string) => (/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${project.workspace_path}/${p}`);
   const rows: ResultRow[] = (d?.results ?? []).filter((x: ResultRow) => !onlyFailed || ["failed", "error"].includes(x.status));
+  const suspectPasses = (d?.results ?? []).filter((x: ResultRow) => x.status === "passed" && x.api_trace?.steps?.some((step) => {
+    const body = step.response?.body;
+    return body && typeof body === "object" && !Array.isArray(body) && "code" in body && ("msg" in body || "message" in body)
+      && !["0", "200"].includes(String(body.code));
+  })).length;
 
   return (
     <Drawer
@@ -185,13 +196,21 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             { key: "t", label: "时间", children: fmt(d.run.started_at) },
             { key: "e", label: "环境", children: d.run.base_url ? <Tooltip title={d.run.base_url}>{d.run.env}</Tooltip> : d.run.env },
             { key: "d", label: "耗时", children: `${d.summary.duration.toFixed(1)} 秒` },
+            ...(d.run.framework === "pytest" ? [
+              { key: "identity", label: "批量调用身份", children: d.run.prefer_env_token ? "环境登录态（手动 token）" : d.run.selected_role || "按用例 / 环境默认（未统一指定）" },
+              { key: "business", label: "业务码校验", children: d.run.check_business_code === undefined ? "未记录" : d.run.check_business_code ? "已启用" : "已关闭" },
+            ] : []),
           ]} />
-          <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="通过" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
-          </Row>
+          {suspectPasses > 0 && <Alert type="warning" showIcon style={{ marginTop: 12 }}
+            message={`有 ${suspectPasses} 条通过项返回了非成功业务码，请核对业务断言`}
+            description="这些可能是预期错误的反例，也可能只校验了 HTTP 200。原始执行结果保留；可关闭“仅看失败”查看响应，新执行建议启用业务码校验。" />}
+          <div className="stat-grid" style={{ margin: "16px 0 24px" }}>
+            <Card size="small"><Statistic title="执行通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card>
+            <Card size="small"><Statistic title="执行成功" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
+            <Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card>
+            <Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card>
+            <Card size="small"><Statistic title="验收通过" value={(d.summary.acceptance?.verified_pass ?? 0)} valueStyle={{ color: "var(--console-success)" }} /></Card>
+          </div>
           {Object.keys(d.summary.failure_types).length > 0 && (
             <div style={{ marginBottom: 12 }}><Space wrap>
               <Typography.Text type="secondary">失败归因：</Typography.Text>
@@ -208,11 +227,18 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
             dataSource={rows}
             pagination={{ pageSize: 20, size: "small", hideOnSinglePage: true }}
             expandable={{
-              rowExpandable: (x) => !!(x.message || x.evidence_paths.length || x.reviews.length),
+              rowExpandable: (x) => !!(x.artifact || x.message || x.evidence_paths.length || x.reviews.length || x.execution_context?.sessions?.length),
               expandedRowRender: (x) => (
                 <Space direction="vertical" style={{ width: "100%" }}>
+                  {x.artifact ? <Descriptions size="small" column={1} title="执行版本" items={[
+                    { key: "case", label: "用例指纹", children: x.artifact.case_revision ? <Typography.Text code copyable>{x.artifact.case_revision}</Typography.Text> : "未记录" },
+                    { key: "script", label: "脚本指纹", children: x.artifact.script_hash ? <Typography.Text code copyable>{x.artifact.script_hash}</Typography.Text> : "未记录" },
+                    { key: "env", label: "环境指纹", children: x.artifact.environment_fingerprint ? <Typography.Text code copyable>{x.artifact.environment_fingerprint}</Typography.Text> : "未记录" },
+                  ]} /> : <Typography.Text type="secondary">历史记录未保存执行版本快照</Typography.Text>}
                   {x.api_trace && <ExecutionResult result={{ ...x.api_trace, id: r.id, env: r.env, title: x.title, created_at: r.started_at }} />}
+                  {x.acceptance_status && <Typography.Text type="secondary">验收：{ACCEPTANCE[x.acceptance_status] ?? x.acceptance_status}{x.reason_code ? ` · ${x.reason_code}` : ""}</Typography.Text>}
                   {x.attribution_reason && <Typography.Text>{x.attribution_reason}</Typography.Text>}
+                  {x.execution_context?.sessions?.map((session, i) => <Typography.Text key={`session-${i}`} type="secondary">执行角色：{session.role} · {session.mode === "embedded" ? "内嵌浏览器" : "独立浏览器"} · {session.pageUrl}</Typography.Text>)}
                   {x.message && <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0, maxHeight: 240, overflow: "auto" }}>{x.message}</pre>}
                   {x.evidence_paths.length > 0 && (
                     <Space wrap>
@@ -234,6 +260,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
               { title: "用例", dataIndex: "title", render: (t: string, x) => <>{t}<div><Typography.Text type="secondary" style={{ fontSize: 12 }}>{x.module || x.case_id}</Typography.Text></div></> },
               { title: "等级", dataIndex: "priority", width: 60 },
               { title: "结果", dataIndex: "status", width: 70, render: (v: string) => <Tag color={STATUS[v]?.color} bordered={false}>{STATUS[v]?.text ?? v}</Tag> },
+              { title: "验收", dataIndex: "acceptance_status", width: 120, render: (v: string) => ACCEPTANCE[v] ?? "历史未验收" },
               { title: "归因", dataIndex: "failure_type", width: 150, render: (v: string, x) => ["failed", "error"].includes(x.status) && (
                 <Space size={4}><LabelTag map={FAILURE} value={v || "unknown"} />{x.attribution_confirmed && <Tag bordered={false}>已确认</Tag>}</Space>
               ) },

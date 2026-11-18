@@ -83,6 +83,34 @@ def test_run_detail(cli, setup):
     assert "不存在" in cli("run-detail", "--run", "run_missing", ok=False)
 
 
+def test_json_report_preserves_execution_snapshot_and_missing_legacy_fields(cli, setup, tmp_path):
+    snapshot = {"schema_version": 1, "case_revision": "case-at-run", "script_hash": "script-at-run", "environment_fingerprint": "env-at-run"}
+    source = tmp_path / "snapshot.json"
+    source.write_text(json.dumps([
+        {"case_id": setup["ok"], "status": "passed", "execution_context": {"sessions": [{"role": "buyer"}], "artifact": snapshot}},
+        {"case_id": setup["ok"], "status": "passed", "execution_context": {"sessions": [{"role": "admin"}]}},
+    ]))
+    run = cli("save-run", "--project", setup["pid"], "--env", "test", "--framework", "playwright", "--results-file", str(source))["run_id"]
+    # 当前用例变化不得改写历史运行的版本证据。
+    cli("update-case", "--case", setup["ok"], "--json", '{"title":"标签管理-新版用例"}')
+    detail = cli("run-detail", "--run", run)
+    assert detail["results"][0]["artifact"] == snapshot
+    assert len(detail["results"][0]["execution_context"]["sessions"]) == 2
+    out = cli("export-report", "--run", run, "--run", setup["api"], "--format", "json")
+    report = json.loads(open(out["path"]).read())
+    assert report["schema_version"] == 1
+    assert report["runs"][0]["results"][0]["artifact"] == snapshot
+    assert report["runs"][1]["results"][0]["artifact"] is None
+
+
+@pytest.mark.parametrize("failure_type", ["data", "auth", "model", "unknown"])
+def test_unified_failure_types_in_reports(cli, setup, failure_type):
+    cli("set-attribution", "--run", setup["ui"], "--case", setup["bug"], "--type", failure_type)
+    cli("confirm-attribution", "--run", setup["ui"], "--case", setup["bug"], "--type", failure_type)
+    result = cli("run-detail", "--run", setup["ui"])["results"][0]
+    assert result["failure_type"] == failure_type and result["attribution_confirmed"]
+
+
 def test_export_html_is_self_contained_and_escaped(cli, setup):
     out = cli("export-report", "--run", setup["api"], "--run", setup["ui"])
     assert out["path"].endswith(".html") and out["total"] == 5 and out["failed"] == 1

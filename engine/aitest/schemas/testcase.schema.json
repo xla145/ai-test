@@ -638,6 +638,41 @@
     },
     "api_needs_review": {
       "type": "boolean"
+    },
+    "coverage_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "index",
+          "target",
+          "target_revision",
+          "source_revision"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "steps",
+              "expected",
+              "preconditions"
+            ]
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "target": {
+            "type": "string"
+          },
+          "target_revision": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }

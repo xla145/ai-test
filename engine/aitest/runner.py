@@ -26,6 +26,7 @@ _ENV_PATTERNS = re.compile(
     r"|[Nn]o devices? (found|connected)|[Dd]evice .{0,40}not (found|connected)|device offline|[Aa]pp .{0,60}not installed"
     r"|[Uu]nable to launch app)")
 _SERVER_ERROR = re.compile(r"状态码 5\d\d")
+_AUTH_ERROR = re.compile(r"业务码 (?:401|403)|认证失败|未配置接口登录|没有接口凭据")
 
 
 @dataclass
@@ -54,6 +55,8 @@ def classify_failure(message: str) -> str:
         return FailureType.ENVIRONMENT.value
     if _SERVER_ERROR.search(message):
         return FailureType.PRODUCT_BUG.value
+    if _AUTH_ERROR.search(message):
+        return FailureType.AUTH.value
     return FailureType.UNKNOWN.value  # 交给 agent 判断是接口 bug 还是用例错误
 
 
@@ -128,11 +131,16 @@ def summarize(results: list[RunResult]) -> dict[str, Any]:
         if r.failure_type:
             failure_types[r.failure_type] = failure_types.get(r.failure_type, 0) + 1
     total = len(results)
+    acceptance = {}
+    for r in results:
+        if r.acceptance_status:
+            acceptance[r.acceptance_status] = acceptance.get(r.acceptance_status, 0) + 1
     return {
         "total": total,
         **counts,
         "pass_rate": round(counts["passed"] / total, 4) if total else 0.0,
         "failure_types": failure_types,
+        **({"acceptance": acceptance} if acceptance else {}),
         # 只有这些需要调 agent 做归因
         "needs_agent": [r.case_id for r in results if r.failure_type == FailureType.UNKNOWN.value],
     }

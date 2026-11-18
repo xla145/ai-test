@@ -11,6 +11,19 @@ export interface McpServerEntry {
   envVars?: string[];
 }
 
+export const BUILTIN_MCP_SERVERS = ["doc-parser", "case-store", "case-import", "api-runner", "report", "browser", "env-support", "app", "pinky"] as const;
+
+/** 计划转换只做文本到 JSON，不加载 MCP 的工具定义和连接。 */
+export function uiContractThreadConfig(): Record<string, unknown> {
+  // 可选服务（如 Pinky）可能未注册；Codex 即使遇到 enabled=false 也要求有效的 transport。
+  // 覆盖只作用于转换线程，禁用的服务不会启动进程。
+  return Object.fromEntries(BUILTIN_MCP_SERVERS.flatMap(name => [
+    [`mcp_servers.${name}.enabled`, false],
+    [`mcp_servers.${name}.command`, process.execPath],
+    [`mcp_servers.${name}.args`, []],
+  ]));
+}
+
 export interface ModelProvider {
   id: string;
   name: string;
@@ -36,7 +49,15 @@ export function buildCodexConfig(input: CodexConfigInput): string {
   const model = input.provider?.model ?? input.model;
   if (model) lines.push(`model = ${q(model)}`);
   if (input.provider) lines.push(`model_provider = ${q(input.provider.id)}`);
+  // 按实际模型上下文比例压缩，不给不同供应商硬编码统一的上下文长度。
+  // 轮内压缩仍使用 Codex 的模型默认阈值；这里额外允许轮结束后提前压缩。
+  lines.push('model_post_turn_compact_threshold_percent = 80');
   lines.push('approval_policy = "on-request"', 'sandbox_mode = "workspace-write"', "");
+  lines.push("[features]", "memories = true", "");
+  lines.push("[memories]", "generate_memories = true", "use_memories = true");
+  // 兼容自定义供应商：后台记忆任务也用已配置的 agent 模型，避免请求默认 OpenAI 模型。
+  if (model) lines.push(`extract_model = ${q(model)}`, `consolidation_model = ${q(model)}`);
+  lines.push("");
   lines.push("[sandbox_workspace_write]", `network_access = ${input.networkAccess ?? true}`, "");
 
   if (input.provider) {

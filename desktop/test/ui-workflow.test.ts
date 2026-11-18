@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { writeUiScript } from "@ai-test/mcp-servers";
+import { caseHash, writeUiScript } from "@ai-test/mcp-servers";
 import { UiWorkflow } from "../src/main/uiWorkflow.js";
 import { Orchestrator, type EngineCall } from "../src/main/orchestrator.js";
 
@@ -21,14 +21,38 @@ describe("UI script confirmation", () => {
     const hash = workflow.hash(path);
     expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("试跑通过");
     workflow.record("test", "r_failed", { tc_a: hash }, []);
-    expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("试跑通过");
+    expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("未通过");
     workflow.record("test", "r_ok", { tc_a: hash }, ["tc_a"]);
     workflow.confirm("test", "tc_a", path, hash);
     expect(new UiWorkflow(dir).states("test", { tc_a: path }).tc_a.status).toBe("confirmed");
     expect(workflow.states("staging", { tc_a: path }).tc_a.status).toBe("pending");
     writeFileSync(join(dir, path), "// version 2");
     expect(workflow.states("test", { tc_a: path }).tc_a).toMatchObject({ status: "pending", validatedRunId: undefined });
-    expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("当前版本");
+    expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("已变化");
+  });
+
+  it("revokes confirmation when a new validation starts, and requires matching context", () => {
+    const { workflow, path } = setup();
+    const hash = workflow.hash(path);
+    const context = { fingerprints: { tc_a: "env-v1" } };
+    workflow.record("test", "ok", { tc_a: hash }, ["tc_a"], context);
+    workflow.confirm("test", "tc_a", path, hash, context);
+    expect(workflow.states("test", { tc_a: path }, { fingerprints: { tc_a: "env-v2" } }).tc_a.status).toBe("pending");
+    workflow.begin("test", { tc_a: hash }, context.fingerprints);
+    expect(workflow.states("test", { tc_a: path }, context).tc_a.status).toBe("pending");
+    expect(() => workflow.confirm("test", "tc_a", path, hash, context)).toThrow("尚未完整结束");
+  });
+
+  it("requires all reviews from this exact run and case to pass", () => {
+    const { workflow, path } = setup();
+    const hash = workflow.hash(path);
+    workflow.record("test", "r1", { tc_a: hash }, ["tc_a"], {}, {}, { tc_a: 1 });
+    expect(() => workflow.confirm("test", "tc_a", path, hash)).toThrow("人工复核");
+    const review = { run_id: "r1", case_id: "tc_a", status: "pending" };
+    expect(() => workflow.confirm("test", "tc_a", path, hash, { reviews: [review] })).toThrow("人工复核");
+    expect(() => workflow.confirm("test", "tc_a", path, hash, { reviews: [{ ...review, run_id: "old", status: "confirmed_pass" }] })).toThrow("人工复核");
+    workflow.confirm("test", "tc_a", path, hash, { reviews: [{ ...review, status: "confirmed_pass" }] });
+    expect(workflow.states("test", { tc_a: path }, { reviews: [{ ...review, status: "confirmed_fail" }] }).tc_a.status).toBe("pending");
   });
 
   it("reads structured steps and flags specs modified after generation", () => {
@@ -58,12 +82,17 @@ describe("UI workbench orchestration", () => {
     const { dir, path, workflow } = setup();
     const rows = [{ id: "tc_a", title: "A", execution_mode: "ui", status: "reviewed", data_refs: [], steps: ["打开列表"], expected: ["列表可见"] },
       { id: "tc_b", title: "B", execution_mode: "ui", status: "reviewed", data_refs: [], steps: ["打开列表"], expected: ["列表可见"] }];
+    writeUiScript(dir, { caseId: "tc_a", title: "A", caseHash: caseHash(rows[0]), steps: [
+      { action: "goto", url: "/", caseStep: 1 },
+      { action: "expectVisible", target: { kind: "testid", value: "list" }, caseStep: 1, expectedIndices: [1] },
+    ] });
     const engine = vi.fn(async (args: string[]) => {
       switch (args[0]) {
         case "list-projects": return [{ id: "p", workspace_path: dir, environments: { test: { base_url: "http://sut" }, prod: { base_url: "http://prod", production: true } } }];
         case "list-cases": return rows;
         case "list-scripts": return [{ case_id: "tc_a", path, framework: "playwright" }];
-        case "list-roles": case "list-test-data": case "list-run-results": return [];
+        case "list-roles": return [{ role_name: "admin" }];
+        case "list-reviews": case "list-test-data": case "list-run-results": return [];
         case "save-run": return { run_id: "r1", total: 1, passed: 1, failed: 0, error: 0, reviews: 0, needs_agent: ["tc_a"] };
         default: return {};
       }
@@ -73,13 +102,15 @@ describe("UI workbench orchestration", () => {
       runUiSuite: vi.fn(async () => ({ exitCode: 0, htmlReport: "report", reportJson: "", stderr: "", errors: [], results: [{ case_id: "tc_a", status: "passed", duration: 1, message: "", evidence_paths: [], reviews: [] }] })) };
     const agent = vi.fn();
     const orch = new Orchestrator({ engine, ui: ui as any, agent, secretEnv: () => ({}) });
-    return { orch, ui, agent, workflow, path, dir };
+    return { orch, ui, agent, workflow, path, dir, rows };
   }
-  it("validates one selected script in the embedded browser then runs only its confirmed version without the model", async () => {
+  it("validates one selected script in a fresh context then runs only its confirmed version without the model", async () => {
     const { orch, ui, agent, workflow, path } = orchestration();
     await expect(orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" })).rejects.toThrow("尚未确认");
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true });
-    expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ caseIds: ["tc_a"], cdpEndpoint: "http://127.0.0.1:9333" });
+    expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ caseIds: ["tc_a"] });
+    expect(ui.runUiSuite.mock.calls[0][0].cdpEndpoint).toBeUndefined();
+    expect(ui.runUiSuite.mock.calls[0][0].sessionSource).toEqual({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } });
     await orch.confirmUiScript("p", "test", "tc_a", workflow.hash(path));
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" });
     expect(ui.runUiSuite.mock.calls[1][0]).toMatchObject({ caseIds: ["tc_a"] });
@@ -88,6 +119,46 @@ describe("UI workbench orchestration", () => {
     await expect(orch.runUiRegression("p", "test", { caseIds: ["foreign"], mode: "regression" })).rejects.toThrow("当前项目");
     await expect(orch.runUiRegression("p", "prod", { caseIds: ["tc_a"], mode: "validate", embedded: true })).rejects.toThrow("生产环境");
   });
+  it("forwards the selected role only to embedded trials and rejects stale selections", async () => {
+    const { orch, ui } = orchestration();
+    await expect(orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true, selectedRole: "missing" })).rejects.toThrow("未配置");
+    expect(ui.prepareEmbedded).not.toHaveBeenCalled();
+    await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true, selectedRole: "admin" });
+    expect(ui.prepareEmbedded).toHaveBeenCalledWith("p", "test", ["admin"], "admin");
+    expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ defaultRole: "admin" });
+    await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", selectedRole: "admin" });
+    expect(ui.runUiSuite.mock.calls[1][0]).toMatchObject({ roleBindings: { tc_a: "admin" } });
+  });
+  it.each(["missing", "mixed", "reviews", "exit", "global", "foreign"])("blocks incomplete validation: %s", async (kind) => {
+    const { orch, ui, workflow, path } = orchestration();
+    const output = await ui.runUiSuite.getMockImplementation()!();
+    if (kind === "missing") output.results = [];
+    if (kind === "foreign") output.results.push({ ...output.results[0], case_id: "foreign" });
+    if (kind === "mixed") output.results.push({ ...output.results[0], status: "skipped" });
+    if (kind === "reviews") (output.results[0].reviews as unknown[]).push({ kind: "visual", description: "check", evidence_paths: [] });
+    if (kind === "exit") output.exitCode = 1;
+    if (kind === "global") (output.errors as string[]).push("setup failed");
+    ui.runUiSuite.mockResolvedValueOnce(output);
+    const result = await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate" });
+    expect(result.validationIssues.tc_a).toBeTruthy();
+    await expect(orch.confirmUiScript("p", "test", "tc_a", workflow.hash(path))).rejects.toThrow();
+  });
+
+  it("persists the selected role for headless replay and revokes stale validation", async () => {
+    const { orch, workflow, path, rows, ui } = orchestration();
+    const result = await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true, selectedRole: "admin" });
+    expect(result.validationIssues.tc_a).toBeUndefined();
+    await orch.confirmUiScript("p", "test", "tc_a", workflow.hash(path));
+    await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" });
+    expect(ui.runUiSuite.mock.calls[1][0]).toMatchObject({ roleBindings: { tc_a: "admin" } });
+    rows[0].expected = ["new expectation"];
+    expect((await orch.uiScriptStates("p", "test")).tc_a.status).toBe("pending");
+    rows[0].expected = ["列表可见"];
+    ui.runUiSuite.mockRejectedValueOnce(new Error("browser closed"));
+    await expect(orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate" })).rejects.toThrow("browser closed");
+    expect((await orch.uiScriptStates("p", "test")).tc_a.status).toBe("pending");
+  });
+
   it("says explicitly whether exploration produced a script, and why not", async () => {
     const { orch, agent } = orchestration();
     const runTurn = vi.fn(async () => ({ status: "interrupted_budget", message: "我先打开登录页。", tokens: 9 }));

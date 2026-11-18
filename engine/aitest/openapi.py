@@ -96,18 +96,22 @@ class _Resolver:
     def __init__(self, root: dict[str, Any]):
         self.root = root
 
-    def resolve(self, node: Any, depth: int = 0) -> Any:
+    def resolve(self, node: Any, depth: int = 0, refs: frozenset[str] = frozenset()) -> Any:
         if depth > 20:
             return {}
         if isinstance(node, dict):
             if "$ref" in node and isinstance(node["$ref"], str) and node["$ref"].startswith("#/"):
+                if node["$ref"] in refs:
+                    return {}  # Recursive schema: retain the finite outer contract.
                 target: Any = self.root
                 for part in node["$ref"][2:].split("/"):
                     target = target.get(part.replace("~1", "/").replace("~0", "~"), {})
-                return self.resolve(target, depth + 1)
-            return {k: self.resolve(v, depth + 1) for k, v in node.items()}
+                return self.resolve(target, depth + 1, refs | {node["$ref"]})
+            # Count reference hops, not ordinary object nesting. Truncating a
+            # deeply nested scalar (e.g. type: 'string') produces invalid {}.
+            return {k: self.resolve(v, depth, refs) for k, v in node.items()}
         if isinstance(node, list):
-            return [self.resolve(v, depth + 1) for v in node]
+            return [self.resolve(v, depth, refs) for v in node]
         return node
 
 
@@ -115,9 +119,15 @@ def _response_schema(resp: dict[str, Any], is_v2: bool) -> dict[str, Any] | None
     if is_v2:
         return resp.get("schema")
     content = resp.get("content") or {}
+    # SpringDoc commonly emits ``*/*`` for JSON responses.  Treat it as a
+    # usable representation when no explicit application/json entry exists;
+    # otherwise imported cases lose their response contract entirely.
     for mime, body in content.items():
         if "json" in mime:
             return (body or {}).get("schema")
+    for mime in ("*/*", "application/*"):
+        if mime in content:
+            return (content[mime] or {}).get("schema")
     return None
 
 
@@ -155,6 +165,15 @@ def parse(spec: dict[str, Any]) -> ApiDoc:
                     continue
                 schema = p.get("schema") or {k: v for k, v in p.items() if k in (
                     "type", "format", "enum", "minimum", "maximum", "minLength", "maxLength", "pattern", "items")}
+                # OpenAPI query objects default to style=form, explode=true:
+                # their properties are individual query keys, not a JSON 'bo'.
+                if (not is_v2 and p.get("in") == "query"
+                        and p.get("style", "form") == "form" and p.get("explode", True)
+                        and schema.get("type") == "object" and schema.get("properties")):
+                    required = set(schema.get("required", [])) if p.get("required") else set()
+                    params.extend(Param(name, "query", name in required, prop)
+                                  for name, prop in schema["properties"].items())
+                    continue
                 params.append(Param(p["name"], p.get("in", "query"), bool(p.get("required")) or p.get("in") == "path", schema))
             if "requestBody" in raw:
                 rb = raw["requestBody"]

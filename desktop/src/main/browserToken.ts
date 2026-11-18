@@ -1,6 +1,8 @@
 const TOKEN_NAME = /^(?:(?:[a-z0-9]+[-_:])*(?:access[-_]?token|auth[-_]?token|token|authorization|satoken)|tokenkey)$/i;
 const REFRESH_NAME = /refresh/i;
 
+export class BrowserTokenMissing extends Error {}
+
 function unpack(raw: unknown): unknown {
   let value = raw;
   for (let i = 0; i < 5 && typeof value === "string"; i++) {
@@ -35,7 +37,7 @@ export function browserToken(entries: [string, string][], key?: string, prefix =
   const unique = [...new Set(tokens)];
   if (!unique.length) {
     const names = [...new Set(entries.map(([name]) => name))].slice(0, 12).join("、");
-    throw new Error(`未找到 token。${names ? `当前存储键名：${names}。可填写键名或嵌套路径（如 store.auth.accessToken）。` : "当前页面没有浏览器存储或 cookie。"}请在登录后的页面打开一个业务功能再保存，以便识别请求中的鉴权头；如刚更新应用，请重新打开登录页。`);
+    throw new BrowserTokenMissing(`未找到 token。${names ? `当前存储键名：${names}。可填写键名或嵌套路径（如 store.auth.accessToken）。` : "当前页面没有浏览器存储或 cookie。"}请在登录后的页面打开一个业务功能再保存，以便识别请求中的鉴权头；如刚更新应用，请重新打开登录页。`);
   }
   if (unique.length > 1) throw new Error("检测到多个不同的 token，请填写准确的存储键名或嵌套路径后重试");
   if (/[\r\n]/.test(unique[0])) throw new Error("token 包含无效的请求头字符");
@@ -59,4 +61,27 @@ export function browserClientHeaders(token: string, observed: Record<string, str
     if (typeof payload.clientid === "string" && payload.clientid && !/[\r\n]/.test(payload.clientid)) return { clientid: payload.clientid };
   } catch { /* 普通 token 不附加客户端请求头 */ }
   return {};
+}
+
+
+/** Current browser storage wins over a request captured before re-login. */
+export function currentBrowserCredential(storage: [string, string][], cookies: [string, string][],
+  captured: { value?: string; clientHeaders?: Record<string, string> } | undefined,
+  key?: string, prefix = "Bearer "): { authToken: string; clientHeaders: Record<string, string> } {
+  let authToken: string | undefined;
+  let missing: unknown;
+  const sources = key ? [[...storage, ...cookies]] : [storage, cookies];
+  for (const entries of sources) {
+    try { authToken = browserToken(entries, key, prefix); break; }
+    catch (error) {
+      if (!(error instanceof BrowserTokenMissing)) throw error;
+      missing = error;
+    }
+  }
+  if (!authToken) {
+    if (key || !captured?.value) throw missing;
+    authToken = captured.value;
+  }
+  return { authToken, clientHeaders: browserClientHeaders(authToken,
+    authToken === captured?.value ? captured.clientHeaders : undefined) };
 }

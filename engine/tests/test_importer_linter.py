@@ -1,6 +1,6 @@
 from openpyxl import Workbook
 
-from aitest.importer import export_excel, import_excel, split_numbered
+from aitest.importer import export_excel, import_excel, split_numbered, numbering_of
 from aitest.linter import can_generate_script, lint_cases
 from aitest.router import route_all
 from aitest.models import TestCase
@@ -37,6 +37,50 @@ def test_split_numbered():
     assert split_numbered("（1）甲 （2）乙") == ["甲", "乙"]
     assert split_numbered("等待 1.5 秒") == ["等待 1.5 秒"]
     assert split_numbered(None) == []
+
+
+def test_bracketed_export_keeps_numbers_and_multiline_prose_inside_each_step():
+    text = "【1】1. 设置倍率 1。\n说明 2. 不作为独立步骤\n【2】2. 免费为 0，原价为 1。\n【3】3. 预览显示错误 0。确认前不修改表单。"
+    assert split_numbered(text) == [
+        "设置倍率 1。\n说明 2. 不作为独立步骤",
+        "免费为 0，原价为 1。", "预览显示错误 0。确认前不修改表单。",
+    ]
+    assert numbering_of(text) == [1, 2, 3]
+    assert numbering_of("【1】1. 打开\n【3】3. 保存") == [1, 3]
+    assert split_numbered("【1】金额 1.5 元\n【2】2. 核对") == ["金额 1.5 元", "核对"]
+
+
+def test_bracketed_export_preserves_explicit_empty_items_for_linting():
+    assert split_numbered("【1】打开\n【2】\n【3】保存") == ["打开", "", "保存"]
+    case = TestCase(title="模型-详情", steps=["打开", ""], expected=["可见", ""])
+    assert "required_fields" in lint_cases([case]).rule_hits
+
+
+def test_repeat_cli_import_preserves_manual_changes_and_does_not_merge_other_sources(tmp_path, capsys):
+    import json
+    from aitest.cli import main
+    path = make_excel(tmp_path / "source.xlsx")
+    db = str(tmp_path / "db.sqlite")
+    def call(*args):
+        assert main(["--db", db, *args]) == 0
+        return json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]
+    pid = call("init-project", "--name", "imports", "--workspace", str(tmp_path / "ws"))["id"]
+    first = call("import-excel", "--project", pid, "--file", str(path))
+    assert first["created"] == 4
+    rows = call("list-cases", "--project", pid)
+    cid = rows[0]["id"]
+    call("update-case", "--case", cid, "--json", json.dumps({"title": "人工-已审核改动", "status": "reviewed"}))
+    again = call("import-excel", "--project", pid, "--file", str(path))
+    assert again["created"] == 0 and again["reused"] == 4
+    assert len(call("list-cases", "--project", pid)) == 4
+    assert call("get-case", "--case", cid)["title"] == "人工-已审核改动"
+    # A different source containing the same row/title must not overwrite it.
+    wb = Workbook(); ws = wb.active; ws.append(HEADERS)
+    ws.append(ROWS[0]); ws.append(["其它-新行", "组", "", "", "1. 打开", "1. 正常", "P1", "功能测试"])
+    other = tmp_path / "other.xlsx"; wb.save(other)
+    assert call("import-excel", "--project", pid, "--file", str(other))["created"] == 2
+    assert len(call("list-cases", "--project", pid)) == 6
+    assert call("get-case", "--case", cid)["status"] == "reviewed"
 
 
 def test_import_mapping(tmp_path):
@@ -128,3 +172,12 @@ def test_import_recognizes_common_header_variants(tmp_path):
     info = {}
     import_excel(path, info=info)
     assert info["missing_columns"] == ["标题"]
+
+
+def test_route_uses_actions_not_incidental_api_keys_or_mobile_labels():
+    from aitest.router import route
+    assert route(TestCase(title='渠道-Key维护', steps=['打开新增渠道页面', '查看 API Key 输入框'], expected=['仅保留一条'])) == 'ui'
+    assert route(TestCase(title='统计-多端消费', steps=['打开统计页面'], expected=['展示移动端、Android、iOS消费'])) == 'ui'
+    assert route(TestCase(title='渠道-批量选择', steps=['点击列表中的全选按钮'], expected=['全部选中'])) == 'ui'
+    assert route(TestCase(title='渠道-接口查询', steps=['发送 GET /channels 请求'], expected=['状态码200'])) == 'api'
+    assert route(TestCase(title='登录-Android端登录', steps=['在手机输入账号'], expected=['成功'])) == 'app'

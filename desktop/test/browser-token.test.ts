@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { browserClientHeaders, browserToken, requestToken } from "../src/main/browserToken.js";
+import { browserClientHeaders, browserToken, currentBrowserCredential, requestToken } from "../src/main/browserToken.js";
 
 describe("browser token extraction", () => {
   it("reads raw, JSON encoded and wrapped tokens without duplicating Bearer", () => {
@@ -48,5 +48,27 @@ describe("client-bound browser credentials", () => {
     expect(browserClientHeaders(token, { ClientId: "observed-client" })).toEqual({ clientid: "observed-client" });
     expect(browserClientHeaders("opaque-token")).toEqual({});
     expect(browserClientHeaders(`header.${Buffer.from('{"clientid":"bad\\r\\nheader"}').toString("base64url")}.sig`)).toEqual({});
+  });
+});
+
+
+describe("saving the current browser session", () => {
+  it("uses current storage instead of stale captured requests and stale cookies", () => {
+    const token = `header.${Buffer.from(JSON.stringify({ clientid: "new-client" })).toString("base64url")}.signature`;
+    expect(currentBrowserCredential([["Ops-Token", token]], [["token", "old-cookie"]],
+      { value: "Bearer old-request", clientHeaders: { clientid: "old-client" } })).toEqual({
+        authToken: `Bearer ${token}`, clientHeaders: { clientid: "new-client" },
+      });
+  });
+  it("falls back to captured requests only when storage and cookies have no token", () => {
+    expect(currentBrowserCredential([], [], { value: "Bearer current", clientHeaders: { clientid: "web" } }))
+      .toEqual({ authToken: "Bearer current", clientHeaders: { clientid: "web" } });
+    expect(currentBrowserCredential([], [["token", "cookie"]], { value: "Bearer old" }).authToken).toBe("Bearer cookie");
+  });
+  it("does not hide ambiguous storage, invalid headers or an explicit missing key", () => {
+    const captured = { value: "Bearer old" };
+    expect(() => currentBrowserCredential([["token", "a"], ["access_token", "b"]], [], captured)).toThrow("多个");
+    expect(() => currentBrowserCredential([["token", "bad\r\nheader"]], [], captured)).toThrow("无效");
+    expect(() => currentBrowserCredential([], [], captured, "missing")).toThrow("未找到");
   });
 });

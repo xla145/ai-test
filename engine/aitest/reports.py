@@ -21,8 +21,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from .store import Store
 
+ACCEPTANCE_LABEL = {"verified_pass": "验收通过", "pending_review": "待人工复核", "incomplete": "覆盖不完整", "blocked": "执行阻断", "failed": "验收失败"}
 STATUS_LABEL = {"passed": "通过", "failed": "失败", "error": "错误", "skipped": "跳过"}
-FAILURE_LABEL = {"product_bug": "产品缺陷", "script_error": "脚本 / 页面改版", "environment": "环境问题", "unknown": "待归因"}
+FAILURE_LABEL = {"product_bug": "产品缺陷", "script_error": "脚本 / 页面改版", "environment": "环境问题", "data": "测试数据", "auth": "认证 / 权限", "model": "模型 / Agent", "unknown": "待归因"}
 FRAMEWORK_LABEL = {"pytest": "接口", "playwright": "UI"}
 MODE_LABEL = {"regression": "回归", "explore": "探索", "heal": "自愈"}
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
@@ -48,7 +49,7 @@ def list_runs(store: Store, project_id: str, limit: int = 50, framework: str | N
             "id": r["id"], "env": r["env"], "mode": r["mode"], "started_at": r["started_at"], "framework": fw,
             "total": result.get("total", 0), "passed": result.get("passed", 0),
             "failed": result.get("failed", 0) + result.get("error", 0), "skipped": result.get("skipped", 0),
-            "pass_rate": result.get("pass_rate", 0.0), "html_report": result.get("html_report"), "junit": result.get("junit"),
+            "pass_rate": result.get("pass_rate", 0.0), "acceptance": result.get("acceptance", {}), "html_report": result.get("html_report"), "junit": result.get("junit"),
         })
         if len(out) >= limit:
             break
@@ -87,6 +88,8 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
                     except (OSError, ValueError):
                         pass
         results.append({
+            # 执行前快照；历史记录不得读取当前脚本来补写旧 hash。
+            "artifact": rr.execution_context.get("artifact") or None,
             "api_trace": api_trace,
             "case_id": rr.case_id,
             "title": case.title if case else rr.case_id,
@@ -101,6 +104,9 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
             "attribution_reason": attr.get("reason") or "",
             "evidence_paths": rr.evidence_paths,
             "reviews": reviews_by_case.get(rr.case_id, []),
+            "acceptance_status": getattr(rr, "acceptance_status", ""),
+            "execution_context": rr.execution_context,
+            "reason_code": getattr(rr, "reason_code", ""),
         })
     order = {"error": 0, "failed": 1, "passed": 2, "skipped": 3}
     results.sort(key=lambda x: (order.get(x["status"], 9), x["priority"] or "P9", x["title"]))
@@ -109,6 +115,9 @@ def run_detail(store: Store, run_id: str) -> dict[str, Any]:
             "id": run_id, "env": r["env"], "mode": r["mode"], "started_at": r["started_at"],
             "framework": _framework(result), "html_report": result.get("html_report"), "junit": result.get("junit"),
             "base_url": result.get("base_url") or ((_effective_envs(store, project).get(r["env"], {}) or {}).get("base_url", "") if project else ""),
+            "selected_role": result.get("selected_role"),
+            "prefer_env_token": result.get("prefer_env_token"),
+            "check_business_code": result.get("check_business_code"),
         },
         "project": {"id": project.id, "name": project.name, "workspace_path": project.workspace_path} if project else None,
         "summary": _summary(results),
@@ -135,6 +144,7 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "duration": round(sum(r["duration"] or 0 for r in results), 2),
         "failure_types": dict(Counter(r["failure_type"] or "unknown" for r in results if r["status"] in ("failed", "error"))),
         "pending_reviews": sum(1 for r in results for v in r["reviews"] if v.get("status") == "pending"),
+        **({"acceptance": dict(Counter(r["acceptance_status"] for r in results if r.get("acceptance_status")))} if any(r.get("acceptance_status") for r in results) else {}),
     }
 
 
@@ -202,9 +212,9 @@ def render_html(details: list[dict[str, Any]]) -> str:
             f"{'（' + e(d['run']['base_url']) + '）' if d['run']['base_url'] else ''}，{e(_fmt_time(d['run']['started_at']))}"
             for d in details) + "</div>",
         "<div class='cards'>",
-        f"<div class='card'>通过率<b>{rate:.1%}</b><div class='bar'><i style='width:{rate * 100:.1f}%'></i></div></div>",
+        f"<div class='card'>执行通过率<b>{rate:.1%}</b><div class='bar'><i style='width:{rate * 100:.1f}%'></i></div></div>",
         f"<div class='card'>用例总数<b>{s['total']}</b></div>",
-        f"<div class='card'>通过<b style='color:var(--ok)'>{s['passed']}</b></div>",
+        f"<div class='card'>执行成功<b style='color:var(--ok)'>{s['passed']}</b></div>",
         f"<div class='card'>失败<b style='color:{'var(--bad)' if s['failed'] else 'inherit'}'>{s['failed']}</b></div>",
         f"<div class='card'>跳过<b>{s['skipped']}</b></div>",
         f"<div class='card'>耗时<b>{s['duration']:.1f}s</b></div>",
@@ -214,6 +224,8 @@ def render_html(details: list[dict[str, Any]]) -> str:
         parts.append("<h2>失败归因</h2><div class='cards'>" + "".join(
             f"<div class='card'>{e(FAILURE_LABEL.get(k, k))}<b>{v}</b></div>" for k, v in sorted(s["failure_types"].items())) + "</div>")
 
+    if s.get("acceptance"):
+        parts.append("<p>验收统计：" + " · ".join(f"{e(ACCEPTANCE_LABEL.get(k,k))} {v}" for k,v in s["acceptance"].items()) + "</p>")
     failed = [r for r in all_results if r["status"] in ("failed", "error")]
     if failed:
         parts.append("<h2>失败用例</h2><table><tr><th style='width:34%'>用例</th><th style='width:150px'>归因</th><th>原因与证据</th></tr>")
@@ -244,12 +256,12 @@ def render_html(details: list[dict[str, Any]]) -> str:
                 f"<td>{e(review_label.get(v.get('status', ''), v.get('status', '')))}</td></tr>")
         parts.append("</table>")
 
-    parts.append("<h2>全部用例</h2><table><tr><th>用例</th><th>模块</th><th>等级</th><th>结果</th><th style='text-align:right'>耗时</th></tr>")
+    parts.append("<h2>全部用例</h2><table><tr><th>用例</th><th>模块</th><th>等级</th><th>结果</th><th>验收</th><th style='text-align:right'>耗时</th></tr>")
     for r in all_results:
         parts.append(
             f"<tr><td>{e(r['title'])}<div class='muted mono'>{e(r['case_id'])}</div></td><td>{e(r['module'])}</td>"
             f"<td>{e(r['priority'])}</td><td><span class='tag {e(r['status'])}'>{e(STATUS_LABEL.get(r['status'], r['status']))}</span></td>"
-            f"<td style='text-align:right'>{(r['duration'] or 0):.2f}s</td></tr>")
+            f"<td>{e(ACCEPTANCE_LABEL.get(r.get('acceptance_status',''), '历史未验收'))}</td><td style='text-align:right'>{(r['duration'] or 0):.2f}s</td></tr>")
     parts.append("</table>")
     parts.append(f"<footer>由 AIProbe 生成 · {e(datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S'))} · "
                  "回归执行不调用模型；失败归因中「待归因」的用例需在客户端中处理</footer></div></body></html>")
@@ -284,7 +296,7 @@ def render_xlsx(details: list[dict[str, Any]], out: Path) -> Path:
     ws.column_dimensions["B"].width = 80
 
     ws2 = wb.create_sheet("明细")
-    headers = ["类型", "执行 ID", "用例 ID", "标题", "模块", "等级", "结果", "耗时（秒）", "归因", "归因已确认", "原因", "错误信息", "证据"]
+    headers = ["类型", "执行 ID", "用例 ID", "标题", "模块", "等级", "结果", "耗时（秒）", "归因", "归因已确认", "原因", "错误信息", "证据", "验收", "原因码"]
     ws2.append(headers)
     for c in ws2[1]:
         c.font, c.fill = head_font, head_fill
@@ -295,7 +307,7 @@ def render_xlsx(details: list[dict[str, Any]], out: Path) -> Path:
                 FRAMEWORK_LABEL.get(d["run"]["framework"], d["run"]["framework"]), d["run"]["id"], r["case_id"], r["title"],
                 r["module"], r["priority"], STATUS_LABEL.get(r["status"], r["status"]), round(r["duration"] or 0, 3),
                 FAILURE_LABEL.get(ft or "", ft or ""), "是" if r["attribution_confirmed"] else "", r["attribution_reason"],
-                (r["message"] or "")[:2000], "\n".join(r["evidence_paths"]),
+                (r["message"] or "")[:2000], "\n".join(r["evidence_paths"]), ACCEPTANCE_LABEL.get(r.get("acceptance_status", ""), "历史未验收"), r.get("reason_code", ""),
             ])
             ws2.cell(ws2.max_row, 7).fill = PatternFill("solid", fgColor=fills.get(r["status"], "FFFFFF"))
     for col, width in zip("ABCDEFGHIJKLM", (8, 16, 18, 36, 20, 6, 8, 10, 14, 10, 30, 60, 40)):
@@ -303,6 +315,8 @@ def render_xlsx(details: list[dict[str, Any]], out: Path) -> Path:
     for row in ws2.iter_rows(min_row=2):
         for c in row:
             c.alignment = Alignment(vertical="top", wrap_text=c.column in (4, 11, 12, 13))
+    ws2.column_dimensions["N"].width = 18
+    ws2.column_dimensions["O"].width = 24
     ws2.freeze_panes = "A2"
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(out))
@@ -311,8 +325,8 @@ def render_xlsx(details: list[dict[str, Any]], out: Path) -> Path:
 
 def export_report(store: Store, run_ids: list[str], fmt: str = "html", out: str | Path | None = None) -> dict[str, Any]:
     details = [run_detail(store, rid) for rid in run_ids]
-    if fmt not in ("html", "xlsx"):
-        raise ValueError("格式只支持 html / xlsx")
+    if fmt not in ("html", "xlsx", "json"):
+        raise ValueError("格式只支持 html / xlsx / json")
     if out is None:
         ws = (details[0]["project"] or {}).get("workspace_path") or "."
         name = run_ids[0] if len(run_ids) == 1 else f"{run_ids[0]}-{len(run_ids)}runs"
@@ -321,6 +335,8 @@ def export_report(store: Store, run_ids: list[str], fmt: str = "html", out: str 
     out.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "html":
         out.write_text(render_html(details), encoding="utf-8")
+    elif fmt == "json":
+        out.write_text(json.dumps({"schema_version": 1, "runs": details}, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
         render_xlsx(details, out)
     s = _summary([r for d in details for r in d["results"]])

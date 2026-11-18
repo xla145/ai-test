@@ -165,9 +165,8 @@ def test_missing_role_credentials_fail_clearly(cli, shop, tmp_path, monkeypatch)
     # 只有账号密码、没有配置接口登录
     monkeypatch.setenv("AITEST_ROLES", json.dumps([{"role": "ops", "username": "ops", "password": "ops-pw"}]))
     monkeypatch.delenv("AITEST_ROLE_TOKENS", raising=False)
-    run = cli("run-api-suite", "--project", project["id"], "--env", "test")
-    msg = cli("list-run-results", "--run", run["run_id"])[0]["message"]
-    assert "没有配置接口登录" in msg
+    msg = cli("run-api-suite", "--project", project["id"], "--env", "test", ok=False)
+    assert "执行前鉴权检查未通过" in msg and "当前环境未配置接口登录" in msg
     monkeypatch.setenv("AITEST_ROLES", "[]")
-    run = cli("run-api-suite", "--project", project["id"], "--env", "test")
-    assert "没有接口凭据" in cli("list-run-results", "--run", run["run_id"])[0]["message"]
+    msg = cli("run-api-suite", "--project", project["id"], "--env", "test", ok=False)
+    assert "执行前鉴权检查未通过" in msg and "缺少接口 token 或完整账号密码" in msg

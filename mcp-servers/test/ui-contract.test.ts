@@ -15,6 +15,12 @@ describe("execution contract coverage gate", () => {
     const value = plan(); value.steps[0].expected = ["列表可见"];
     expect(() => validateExecutionContract(value, source, ["admin"])).toThrow("预期");
   });
+  it("validates atomic precondition plans without embedding business rules", () => {
+    const value = { ...plan(), preconditionChecks: [{ id: "P1.1", sourceIndices: [1], sourceQuotes: ["已有指定模型"], statement: "指定模型存在", expected: "存在", method: "ui", dependsOn: [] }] };
+    expect(validateExecutionContract(value, source, ["admin"]).preconditionChecks).toHaveLength(1);
+    expect(() => validateExecutionContract({ ...value, preconditionChecks: [{ ...value.preconditionChecks![0], sourceIndices: [2] }] }, source, ["admin"])).toThrow("不存在");
+    expect(() => validateExecutionContract({ ...value, preconditionChecks: [{ ...value.preconditionChecks![0], dependsOn: ["P1.1"] }] }, source, ["admin"])).toThrow("无效");
+  });
   it("rejects fuzzy role substitution and unspecified toggle state", () => {
     expect(() => validateExecutionContract(plan(), source, ["administrator"])).toThrow("未配置角色");
     const value: any = plan(); delete value.steps[0].actions[0].value;
@@ -52,4 +58,64 @@ it("keeps real clarification reasons from a model response containing partial ta
   expect(out.steps[0].expected).toEqual(source.expected);
   value.status = "ready"; value.issues = [];
   expect(() => validateExecutionContract(value, source, ["超级管理员"])).toThrow();
+});
+
+it("preserves a condition-based target until exploration resolves its identity", () => {
+  const source = {
+    preconditions: ["存在符合指定条件的记录"],
+    steps: ["打开符合指定条件的记录详情"],
+    expected: ["显示该记录详情"],
+  };
+  const value = {
+    version: 1, status: "ready", issues: [], preconditions: source.preconditions,
+    steps: [{ index: 1, source: source.steps[0], expected: source.expected, actions: [
+      { action: "observe", instruction: "核对指定条件及候选范围，确认唯一匹配的稳定标识；存在多个匹配时停止并报告" },
+      { action: "click", instruction: "打开已确认记录的详情", targetHint: "符合指定条件且已确认身份的记录的详情入口" },
+    ] }],
+  };
+  const result = validateExecutionContract(value, source, []);
+  expect(result).toEqual(value);
+  expect(result.steps[0].actions[1].target).toBeUndefined();
+  const missingTarget = structuredClone(value);
+  delete (missingTarget.steps[0].actions[1] as { targetHint?: string }).targetHint;
+  expect(() => validateExecutionContract(missingTarget, source, [])).toThrow("target");
+});
+
+it("normalizes model issue objects and zero-based precondition indexes", () => {
+  const value: any = {
+    ...plan(),
+    status: "needs_clarification",
+    issues: [{ id: "I1", message: "缺少搜索关键词" }],
+    preconditionChecks: [{ id: "P1.1", sourceIndices: [0], sourceQuotes: ["已有指定模型"], statement: "指定模型存在", expected: "存在", method: "ui", dependsOn: [] }],
+  };
+  const out = validateExecutionContract(value, source, ["admin"]);
+  expect(out.issues).toEqual(["缺少搜索关键词"]);
+  expect(out.preconditionChecks?.[0].sourceIndices).toEqual([1]);
+});
+
+it("shifts the whole zero-based response and leaves caller data unchanged", () => {
+  const original = { ...source, preconditions: ["已登录后台", "已有指定模型"] };
+  const value = { ...plan(), preconditions: original.preconditions, preconditionChecks: original.preconditions.map((quote, i) => ({
+    id: `P${i + 1}.1`, sourceIndices: [i], sourceQuotes: [quote], statement: quote, expected: quote, method: "ui", dependsOn: [],
+  })) };
+  const before = structuredClone(value);
+  expect(validateExecutionContract(value, original, ["admin"]).preconditionChecks?.map(c => c.sourceIndices)).toEqual([[1], [2]]);
+  expect(value).toEqual(before);
+  value.preconditionChecks = value.preconditionChecks.map((c, i) => ({ ...c, sourceIndices: [i + 1] }));
+  expect(validateExecutionContract(value, original, ["admin"]).preconditionChecks?.map(c => c.sourceIndices)).toEqual([[1], [2]]);
+});
+
+it("does not repair mixed bases, invalid references or malformed issues", () => {
+  const original = { ...source, preconditions: ["已登录后台", "已有指定模型"] };
+  const checks = original.preconditions.map((quote, i) => ({ id: `P${i + 1}.1`, sourceIndices: [i], sourceQuotes: [quote], statement: quote, expected: quote, method: "ui", dependsOn: [] }));
+  const value: any = { ...plan(), preconditions: original.preconditions, preconditionChecks: checks };
+  value.preconditionChecks[1].sourceIndices = [2];
+  expect(() => validateExecutionContract(value, original, ["admin"])).toThrow();
+  value.preconditionChecks[1].sourceIndices = [0.5];
+  expect(() => validateExecutionContract(value, original, ["admin"])).toThrow();
+  value.preconditionChecks[1].sourceIndices = [1];
+  value.preconditionChecks[1].sourceQuotes = ["原文中不存在的条件"];
+  expect(() => validateExecutionContract(value, original, ["admin"])).toThrow();
+  expect(() => validateExecutionContract({ ...plan(), status: "needs_clarification", issues: [{}] }, source, ["admin"])).toThrow();
+  expect(() => validateExecutionContract({ ...plan(), issues: [{ message: "存在阻塞" }] }, source, ["admin"])).toThrow("不能标记可执行");
 });

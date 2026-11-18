@@ -106,7 +106,7 @@ function Models({ view, presets, save, busy }: SectionProps) {
 
   return (
     <>
-      <Card size="small" title="使用中的模型" style={{ marginBottom: 16 }}>
+      <Card size="small" title="使用中的模型" className="page-section-b">
         <Form layout="vertical">
           <Space size={24} wrap align="start">
             <Form.Item label="agent 模型" extra="用例设计、脚本补充、失败归因、自愈，建议强模型" style={{ marginBottom: 0, width: 320 }}>
@@ -417,7 +417,7 @@ function About({ view }: { view: GlobalSettingsView }) {
         ) },
         { key: "db", label: "数据库", children: <Typography.Text className="mono" copyable>{runtime.dbPath}</Typography.Text> },
       ]} />
-      <Alert style={{ marginTop: 16 }} type="info" showIcon
+      <Alert className="page-section" type="info" showIcon
         message="数据目录中保存全局设置、本地数据库与加密后的凭据。用例、脚本与报告保存在各项目的 workspace 目录中，随 git 管理。" />
       {runtime.envOverrides.length > 0 && (
         <Alert style={{ marginTop: 12 }} type="warning" showIcon

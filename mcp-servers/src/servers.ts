@@ -297,11 +297,11 @@ export const SERVERS: ServerDef[] = [
       },
       {
         name: "record_attribution",
-        description: "记录失败归因结论（product_bug / script_error / environment），等待人工确认，用于统计归因准确率",
+        description: "记录失败归因结论（product_bug / script_error / environment / data / auth / model / unknown），等待人工确认，用于统计归因准确率",
         input: {
           run_id: z.string(),
           case_id: caseId,
-          failure_type: z.enum(["product_bug", "script_error", "environment"]),
+          failure_type: z.enum(["product_bug", "script_error", "environment", "data", "auth", "model", "unknown"]),
           reason: z.string(),
         },
         toArgs: (i) => [

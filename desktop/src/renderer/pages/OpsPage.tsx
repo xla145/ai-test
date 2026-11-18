@@ -33,6 +33,7 @@ import { PageHeader } from "../components/PageHeader";
 import { CaseLink, CaseTitles } from "../components/CaseLink";
 import { useProjects } from "../components/ProjectSettings";
 import { useAction, useLoad, usePaged } from "../hooks";
+import { CoveragePanel } from "./CoveragePanel";
 
 const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
@@ -44,6 +45,7 @@ export function OpsPage({ project }: { project: Project }) {
         tabPosition="top"
         items={[
           { key: "metrics", label: "验证指标", children: <Metrics project={project} /> },
+          { key: "coverage", label: "需求与断言覆盖", children: <CoveragePanel project={project} /> },
           { key: "attribution", label: "失败归因", children: <Attributions project={project} /> },
           { key: "usage", label: "用量与预算", children: <Usage project={project} /> },
           { key: "share", label: "团队共享与 CI", children: <Share project={project} /> },
@@ -73,7 +75,7 @@ function Metrics({ project }: { project: Project }) {
             <Typography.Text type="secondary">共 {m.interventions.total} 次，涉及 {m.interventions.cases} 条用例</Typography.Text>
           </Card>
       </div>
-      <Card style={{ marginTop: 16 }} size="small" title="UI 回归稳定性"
+      <Card className="page-section" size="small" title="UI 回归稳定性"
         extra={gate.passed ? <Tag icon={<CheckCircleFilled />} color="success">已达标</Tag> : <Tag icon={<CloseCircleFilled />} color="error">未达标</Tag>}>
         <div className="split" style={{ alignItems: "center", gap: 24 }}>
           <div style={{ flex: "0 0 auto" }}>
@@ -118,7 +120,7 @@ function Attributions({ project }: { project: Project }) {
           { title: "人工确认", width: 280, render: (_: unknown, r: any) => (
             <Radio.Group size="small" optionType="button" disabled={busy}
               onChange={(e) => run(async () => { await api().confirmAttribution(r.run_id, r.case_id, e.target.value); await reload(); }, "已确认")}
-              options={["product_bug", "script_error", "environment"].map((k) => ({ value: k, label: FAILURE[k].text }))} />
+              options={["product_bug", "script_error", "environment", "data", "auth", "model", "unknown"].map((k) => ({ value: k, label: FAILURE[k].text }))} />
           ) },
         ]}
       />
@@ -161,7 +163,7 @@ export function Usage({ project }: { project: Project }) {
             ) : <div style={{ fontSize: 24, marginTop: 4 }}>不限</div>}
           </Card>
       </div>
-      <div className="split" style={{ marginTop: 16 }}>
+      <div className="split page-section">
         <div style={{ flex: "1 1 320px" }}>
           <Card size="small" title="按用途">
             <Table size="small" pagination={false} rowKey="k"
@@ -174,7 +176,7 @@ export function Usage({ project }: { project: Project }) {
               ]} />
           </Card>
           {u?.by_project && (
-            <Card size="small" title="按子项目" style={{ marginTop: 16 }}>
+            <Card size="small" title="按子项目" className="page-section">
               <Table size="small" pagination={false} rowKey="k"
                 dataSource={Object.entries(u.by_project as Record<string, number>).sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ k, v }))}
                 locale={{ emptyText: "暂无用量" }}
@@ -209,7 +211,7 @@ export function Usage({ project }: { project: Project }) {
           </Card>
         </div>
       </div>
-      <Alert style={{ marginTop: 16 }} type="info" showIcon message="日常回归直接执行脚本，不消耗模型；只有新增用例、页面变动和原因不明的失败才调用 agent。" />
+      <Alert className="page-section" type="info" showIcon message="日常回归直接执行脚本，不消耗模型；只有新增用例、页面变动和原因不明的失败才调用 agent。" />
     </>
   );
 }
