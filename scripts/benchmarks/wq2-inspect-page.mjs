@@ -1,0 +1,3 @@
+import {chromium} from 'playwright-core';
+const b=await chromium.connectOverCDP('http://127.0.0.1:9333');
+try{const p=b.contexts().flatMap(c=>c.pages()).find(p=>p.url().includes('aicity2'));console.log(JSON.stringify(await p.evaluate(()=>({url:location.href,loading:[...document.querySelectorAll('[aria-busy="true"],.el-loading-mask,.ant-spin-spinning,.el-loading-spinner')].map(e=>({tag:e.tagName,cls:e.className,rect:!!e.getClientRects().length,display:getComputedStyle(e).display,vis:getComputedStyle(e).visibility})), text:document.body.innerText.slice(0,500)})),null,2))}finally{await b.close()}
