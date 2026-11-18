@@ -126,3 +126,65 @@ def test_write_suite(tmp_path, openapi_path):
     test_src = open(files["test"], encoding="utf-8").read()
     assert cases[0].id in test_src  # 文件头注释包含用例 ID
     assert (tmp_path / "api" / "_aitest_schema.py").exists()
+
+
+def test_springdoc_wildcard_contract_and_exploded_query():
+    from aitest.openapi import parse
+    from aitest.apigen import generate_cases
+    spec = {"openapi": "3.0.1", "paths": {"/monitor": {"get": {
+        "parameters": [{"name": "bo", "in": "query", "required": True,
+                        "schema": {"type": "object", "properties": {
+                            "range": {"type": "string", "default": "24h"},
+                            "channelId": {"type": "integer"}}, "required": ["channelId"]}}],
+        "responses": {"200": {"content": {"*/*": {"schema": {
+            "type": "object", "required": ["code"],
+            "properties": {"code": {"type": "integer"}}}}}}}
+    }}}}
+    op = parse(spec).operations[0]
+    assert [(p.name, p.required) for p in op.params] == [("range", False), ("channelId", True)]
+    cases = generate_cases(op)
+    assert cases[0].api.query == {"channelId": 1}
+    assert validate({"code": "bad"}, cases[0].api.response_schema)
+    assert not validate({"code": 200}, cases[0].api.response_schema)
+    assert not any("参数bo" in c.title for c in cases)
+    content = spec["paths"]["/monitor"]["get"]["responses"]["200"]["content"]
+    content["application/json"] = {"schema": {"type": "array"}}
+    assert parse(spec).operations[0].success_schema == {"type": "array"}
+
+
+def test_explicit_non_exploded_query_is_not_flattened():
+    from aitest.openapi import parse
+    for extra in ({"explode": False}, {"style": "deepObject"}):
+        spec = {"openapi": "3.0.1", "paths": {"/x": {"get": {
+            "parameters": [{"name": "filter", "in": "query", **extra,
+                            "schema": {"type": "object", "properties": {"id": {"type": "integer"}}}}]
+        }}}}
+        assert parse(spec).operations[0].params[0].name == "filter"
+
+
+def test_nested_response_contract_preserves_scalar_types():
+    from aitest.openapi import parse
+    schema = {"type": "string"}
+    value = "ok"
+    for _ in range(25):
+        schema = {"type": "object", "properties": {"child": schema}}
+        value = {"child": value}
+    spec = {"openapi": "3.0.1", "paths": {"/nested": {"get": {
+        "responses": {"200": {"content": {"application/json": {"schema": schema}}}}
+    }}}}
+    parsed = parse(spec).operations[0].success_schema
+    assert parsed == schema
+    assert validate(value, parsed) == []
+
+
+def test_recursive_response_schema_stops_at_cycle():
+    from aitest.openapi import parse
+    spec = {"openapi": "3.0.1", "components": {"schemas": {"Node": {
+        "type": "object", "properties": {"name": {"type": "string"},
+        "child": {"$ref": "#/components/schemas/Node"}}}}}, "paths": {"/tree": {"get": {
+        "responses": {"200": {"content": {"application/json": {
+            "schema": {"$ref": "#/components/schemas/Node"}}}}}
+    }}}}
+    parsed = parse(spec).operations[0].success_schema
+    assert parsed["properties"]["name"] == {"type": "string"}
+    assert parsed["properties"]["child"] == {}

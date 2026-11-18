@@ -72,6 +72,9 @@ def match_columns(header: tuple[Any, ...] | list[Any], column_map: dict[str, str
 
 # 「1. xxx 2. xxx」「1、xxx」「1）xxx」「(1) xxx」等编号
 _NUM_RE = re.compile(r"(?:^|(?<=\s)|(?<=[；;。]))[（(]?(\d{1,2})\s*[.、．)）](?!\d)\s*")
+# Platform exports use an explicit outer marker, e.g. 【1】1. Click.
+# Prefer that boundary over numbers in the prose (prices, limits, examples).
+_BRACKET_RE = re.compile(r"(?:^|\n)[ \t]*【(\d+)】[ \t]*")
 
 
 def split_numbered(text: Any) -> list[str]:
@@ -81,6 +84,18 @@ def split_numbered(text: Any) -> list[str]:
     s = str(text).strip()
     if not s:
         return []
+    bracketed = list(_BRACKET_RE.finditer(s))
+    if bracketed and not s[:bracketed[0].start()].strip():
+        items = []
+        for i, m in enumerate(bracketed):
+            end = bracketed[i + 1].start() if i + 1 < len(bracketed) else len(s)
+            item = s[m.end():end].strip()
+            # Remove only the redundant number matching the outer marker.
+            item = re.sub(r"^" + re.escape(m.group(1)) + r"\s*[.、．)）](?!\d)\s*", "", item)
+            # Keep an explicit empty numbered item so lint can report malformed
+            # source rows instead of silently changing step/expected alignment.
+            items.append(item.rstrip("；;"))
+        return items
     matches = list(_NUM_RE.finditer(s))
     if not matches:
         return [line.strip() for line in s.splitlines() if line.strip()]
@@ -97,6 +112,10 @@ def numbering_of(text: Any) -> list[int]:
     """提取编号序列，用于检查编号是否连续。"""
     if text is None:
         return []
+    s = str(text).strip()
+    bracketed = list(_BRACKET_RE.finditer(s))
+    if bracketed and not s[:bracketed[0].start()].strip():
+        return [int(m.group(1)) for m in bracketed]
     return [int(m.group(1)) for m in _NUM_RE.finditer(str(text))]
 
 

@@ -77,6 +77,9 @@ def _raw(case: TestCase, key: str):
 
 def check_required(case: TestCase, cfg: LintConfig) -> list[LintIssue]:
     missing = [f for f in cfg.required if not getattr(case, f)]
+    for name in ("steps", "expected"):
+        if name in cfg.required and any(not str(item).strip() for item in getattr(case, name)):
+            missing.append(name + "中的空条目")
     if not missing:
         return []
     return [_issue(case, "required_fields", f"缺少必填字段：{', '.join(missing)}", "补全缺失字段后重新导入")]

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -142,12 +143,29 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     column_map = json.loads(a.column_map) if a.column_map else None
     info: dict[str, Any] = {}
     cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet, info=info)
+    # Only deduplicate an identical source and import configuration. Matching
+    # row/title across different workbooks would overwrite unrelated or edited
+    # cases. Keep manually reviewed/edited records when the source is repeated.
+    source_hash = hashlib.sha256(Path(a.file).read_bytes()).hexdigest()
+    identity = {"sha256": source_hash, "sheet": a.sheet or "", "column_map": column_map}
+    previous = next((e["data"] for e in reversed(ops.events(store, a.project, {"excel_import"}))
+                     if e["data"].get("source") == identity), None)
+    ids = previous.get("case_ids", []) if previous else []
+    if ids and len(ids) == len(cases) and all(store.get_case(cid) is not None for cid in ids):
+        existing = [store.get_case(cid) for cid in ids]
+        report = linter.lint_cases(existing)
+        return {"imported": len(cases), "reused": len(cases), "created": 0,
+                "source_sha256": source_hash, **info,
+                "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
     router.route_all(cases)
     report = linter.lint_cases(cases)
     for c in cases:
         store.upsert_case(c, validate=False)  # 导入的原始用例可能不完整，靠 lint 阻断
     store.replace_lint_issues([c.id for c in cases], report.issues)
-    return {"imported": len(cases), **info, "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
+    ops.log_event(store, "excel_import", project_id=a.project,
+                  data={"source": identity, "case_ids": [c.id for c in cases]})
+    return {"imported": len(cases), "reused": 0, "created": len(cases), "source_sha256": source_hash, **info,
+            "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
 
 
 def cmd_lint(store: Store, a: argparse.Namespace) -> Any:
@@ -767,6 +785,47 @@ def cmd_db_runtime_env(store: Store, a: argparse.Namespace) -> Any:
     return db.runtime_env(_db_configs(store, a))
 
 
+# ---- 性能测试（二期 + 三期） ----
+
+
+def cmd_perf_compile(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    return perf.compile_case(store, a.case)
+
+
+def cmd_perf_save_baseline(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    _project(store, a.project)
+    return perf.save_baseline(store, a.project, a.target, a.result)
+
+
+def cmd_perf_get_baseline(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    _project(store, a.project)
+    return perf.get_baseline(store, a.project, a.target)
+
+
+def cmd_perf_compare(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    current = json.loads(a.current)
+    baseline = json.loads(a.baseline)
+    return perf.compare_results(current, baseline)
+
+
+def cmd_perf_trend(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf
+    return perf.trend_data(a.workspace, target_path=a.path or None, limit=a.limit)
+
+
+def cmd_perf_report(store: Store, a: argparse.Namespace) -> Any:
+    from . import perf_report
+    results = json.loads(a.results)
+    out = Path(a.out) if a.out else None
+    if out is None:
+        raise ValueError("请通过 --out 指定报告输出路径")
+    return {"path": str(perf_report.render_perf_report(results, out))}
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = _Parser(prog="aitest", description="AIProbe 引擎")
     ap.add_argument("--db", default=DEFAULT_DB, help="SQLite 路径（默认 ~/.aitest/aitest.db 或 $AITEST_DB）")
@@ -893,6 +952,13 @@ def build_parser() -> argparse.ArgumentParser:
     add("db-runtime-env", cmd_db_runtime_env, (("--project",), req), (("--env",), req))
     add("export-report", cmd_export_report, (("--run",), {"action": "append", "required": True}),
         (("--format",), {"choices": ["html", "xlsx", "json"], "default": "html"}), (("--out",), {}))
+    # ---- 性能测试（二期 + 三期） ----
+    add("perf-compile", cmd_perf_compile, (("--case",), req))
+    add("perf-save-baseline", cmd_perf_save_baseline, (("--project",), req), (("--target",), req), (("--result",), req))
+    add("perf-get-baseline", cmd_perf_get_baseline, (("--project",), req), (("--target",), req))
+    add("perf-compare", cmd_perf_compare, (("--current",), req), (("--baseline",), req))
+    add("perf-trend", cmd_perf_trend, (("--workspace",), req), (("--path",), {}), (("--limit",), {"type": int, "default": 20}))
+    add("perf-report", cmd_perf_report, (("--results",), req), (("--out",), req))
     return ap
 
 
