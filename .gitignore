@@ -14,3 +14,5 @@ desktop/release/
 claude-cleaner
 docs/evidence
 .hypothesis
+/outputs/
+/tmp-clean-*/
