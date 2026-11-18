@@ -1,6 +1,6 @@
 # AIProbe 竞品调研与改进建议
 
-日期：2026-11-16（Asia/Taipei）  
+日期：2026-11-16（Asia/Taipei）\
 范围：AIProbe 当前仓库、GitHub 仓库 README/API 元数据和公开文档。GitHub 星数为本次读取值，不能作为质量或可靠性指标。
 
 ## 结论
