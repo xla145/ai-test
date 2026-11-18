@@ -1,5 +1,6 @@
-import { listPerformance, performancePlan, runPerformance as executePerformance } from "./performance.js";
-import type { PerformanceOptions } from "../shared/performance.js";
+import { listPerformance, performancePlan, readPerformanceResult, runPerformance as executePerformance } from "./performance.js";
+import type { PerformanceOptions, PerformanceResult } from "../shared/performance.js";
+import { bindPerformanceDefinition } from "../shared/performanceSource.js";
 import type { ApiCaseDraft, ApiCaseGenerationOptions, ApiCaseGenerationPreview, ApiDebugResult, ApiDefinition, ApiImportPreview } from "../shared/apiWorkspace.js";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, renameSync } from "node:fs";
@@ -448,11 +449,13 @@ export class Orchestrator extends EventEmitter {
     if (envCfg.production && !opts.confirmProduction) throw new ProductionConfirmRequired(env);
     this.emit("progress", { projectId, stage: "run", env });
     // 接口多账号：注入全部角色的凭据（账号密码与固定 token），流程中每步按角色鉴权
+    const apiSecrets = this.deps.secretEnv(projectId, env, ["*"]);
+    const preferEnvToken = opts.preferEnvToken ?? Boolean(apiSecrets.AITEST_AUTH_TOKEN?.trim());
     const run = await this.deps.engine<RunSummary>(
       ["run-api-suite", "--project", projectId, "--env", env,
         ...opt("--case-ids", opts.caseIds === undefined ? undefined : JSON.stringify(opts.caseIds))],
-      { ...this.deps.secretEnv(projectId, env, ["*"]), ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}),
-        ...(!opts.selectedRole ? { AITEST_API_PREFER_ENV_TOKEN: opts.preferEnvToken === false ? "0" : "1" } : {}),
+      { ...apiSecrets, ...(opts.selectedRole ? { AITEST_API_SELECTED_ROLE: opts.selectedRole } : {}),
+        ...(!opts.selectedRole ? { AITEST_API_PREFER_ENV_TOKEN: preferEnvToken ? "1" : "0" } : {}),
         ...(opts.checkBusinessCode !== undefined ? { AITEST_API_CHECK_BUSINESS_CODE: opts.checkBusinessCode ? "1" : "0" } : {}) },
     );
     let triage: TriageItem[] | undefined;
@@ -715,7 +718,9 @@ export class Orchestrator extends EventEmitter {
       ...(opts.mode === "validate" ? {} : embedded),
       defaultRole: opts.selectedRole,
       roleBindings,
-      ...(opts.mode === "validate" ? {} : sessionSource ? { sessionSource } : {}),
+      // Trials remain isolated but must restore the selected role's login.
+      // Previously validation discarded the session source entirely.
+      ...((embedded ?? sessionSource) ? { sessionSource: embedded ?? sessionSource } : {}),
       onProgress: (event) => this.emit("progress", { ...event, projectId, env, stage: "ui-step" }),
       env: { ...secretEnv, ...dbRuntime, ...(envCfg.login ? { AITEST_LOGIN: JSON.stringify(envCfg.login) } : {}) },
     }) : { exitCode: 0, results: [] as UiCaseResult[], errors: [], stderr: "", htmlReport: "", reportJson: "" };
@@ -1118,18 +1123,32 @@ export class Orchestrator extends EventEmitter {
     const config = p.environments[env];
     if (!config) throw new Error("未配置环境");
     if (config.production) throw new Error("性能测试不允许在生产环境执行");
+    if (options.definitionId) {
+      const definition = (await this.listApiDefinitions(projectId)).find(d => d.id === options.definitionId);
+      if (!definition) throw new Error("接口不属于当前项目或已删除，请重新从接口列表选择");
+      options = bindPerformanceDefinition(definition, options);
+    } else if (!options.scenarioSteps?.length) {
+      throw new Error("请从当前项目的接口列表选择性能测试目标");
+    }
     performancePlan(config.base_url, options);
     if (this.taskRecords.some(t => t.source === "performance" && ["running", "stopping"].includes(t.status))) throw new Error("已有性能任务执行中，请先等待或停止");
+    const method = options.method ?? "GET";
     const now = new Date().toISOString(), taskId = `performance-${Date.now()}-${++this.uiTaskSeq}`;
     const controller = new AbortController();
-    const task: UiTaskRecord = { id: taskId, projectId, env, caseIds: [], kind: "k6 性能测试", source: "performance", status: "running", stage: "执行 GET 压测", canStop: true, startedAt: now, updatedAt: now };
+    const task: UiTaskRecord = { id: taskId, projectId, env, caseIds: [], kind: "k6 性能测试", source: "performance", status: "running", stage: `执行 ${method} 压测`, canStop: true, startedAt: now, updatedAt: now };
     this.taskRecords = [task, ...this.taskRecords].slice(0, 100);
     this.agentControllers.set(taskId, controller);
     this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: "running" });
+    // Inject auth credentials so k6 can authenticate — tokens never written to the script file.
+    const secrets = options.auth !== false ? this.deps.secretEnv(projectId, env, options.role ? [options.role] : []) : undefined;
+    // Merge crypto headers from env config into the options so the script carries them.
+    const cryptoHeaders = (config.api_crypto?.headers ?? {}) as Record<string, string>;
+    const merged: PerformanceOptions = Object.keys(cryptoHeaders).length
+      ? { ...options, headers: { ...cryptoHeaders, ...options.headers } } : options;
     try {
-      const result = await executePerformance(p.workspace_path, env, config.base_url, options, controller.signal);
+      const result = await executePerformance(p.workspace_path, env, config.base_url, merged, controller.signal, secrets);
       task.runId = result.id;
-      task.detail = result.message ?? `请求 ${result.requests ?? "—"} · P95 ${result.p95Ms ?? "—"} ms`;
+      task.detail = result.message ?? `${method} · 请求 ${result.requests ?? "—"} · P95 ${result.p95Ms ?? "—"} ms`;
       this.emit("progress", { projectId, env, taskId, stage: "agent-task", status: result.status === "passed" ? "completed" : result.status === "stopped" ? "stopped" : "failed" });
       return result;
     } catch (error) {
@@ -1140,6 +1159,41 @@ export class Orchestrator extends EventEmitter {
 
   stability(projectId: string) {
     return this.deps.engine(["stability", "--project", projectId]);
+  }
+
+  // ------------------------------------------------------------------ 性能：二期 + 三期
+
+  /** 二期：从用例编译性能场景步骤 */
+  async perfCompile(projectId: string, caseId: string) {
+    return this.deps.engine<{ steps: Array<{ name: string; method: string; path: string; body?: unknown; headers?: Record<string, string>; extract?: Record<string, string>; role?: string }> }>(
+      ["perf-compile", "--case", caseId]);
+  }
+
+  /** 三期：设定性能基线 */
+  async perfSetBaseline(projectId: string, targetKey: string, resultId: string) {
+    const project = await this.project(projectId);
+    const result = readPerformanceResult(project.workspace_path, resultId);
+    if (!result) throw new Error("当前项目中找不到该性能执行记录");
+    if (result.status !== "passed" || !result.thresholdsPassed || !Number.isFinite(result.requests) || !(result.requests! > 0)) {
+      throw new Error("只能将已完整执行且通过门槛的结果设为基线");
+    }
+    const expectedTarget = result.options.scenarioId ? `scenario:${result.options.scenarioId}` : `${result.options.method ?? "GET"}:${result.options.path}`;
+    if (targetKey !== expectedTarget) throw new Error("基线必须属于同一测试目标");
+    await this.deps.engine(["perf-save-baseline", "--project", projectId, "--target", targetKey, "--result", resultId]);
+  }
+
+  /** 三期：读取引用的完整结果，保持与 renderer 的 PerformanceResult 契约一致。 */
+  async perfGetBaseline(projectId: string, targetKey: string): Promise<PerformanceResult | null> {
+    const project = await this.project(projectId);
+    const record = await this.deps.engine<{ result_id: string } | null>(["perf-get-baseline", "--project", projectId, "--target", targetKey]);
+    return record ? readPerformanceResult(project.workspace_path, record.result_id) : null;
+  }
+
+  /** 三期：性能趋势数据 */
+  async perfTrend(projectId: string, targetPath?: string) {
+    const p = await this.project(projectId);
+    return this.deps.engine<Array<{ id: string; startedAt: string; p95Ms: number | null; requestsPerSecond: number | null; failureRate: number | null; status: string }>>(
+      ["perf-trend", "--workspace", p.workspace_path, ...(targetPath ? ["--path", targetPath] : [])]);
   }
 
   /** 团队共享：导出项目元数据与用例到 workspace 并提交 git */

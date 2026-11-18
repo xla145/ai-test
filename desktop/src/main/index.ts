@@ -1,4 +1,5 @@
 import { browserPanelBounds } from "../shared/browserPanel.js";
+import { validateRoleSessionLocation } from "./roleSession.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { userInfo } from "node:os";
@@ -385,10 +386,17 @@ const SAME_SITE = { no_restriction: "None", lax: "Lax", strict: "Strict", unspec
 /** 把角色视图的 cookie 与当前页面的 localStorage 导出为 Playwright storageState（无头回归使用） */
 async function saveRoleLogin(orch: Orchestrator, projectId: string, env: string, role: string) {
   if (orch.uiBusy()) throw new Error("内嵌浏览器正在执行 UI 任务或调试，请结束后再保存");
-  const { key, file } = await roleLoginTarget(orch, projectId, env, role);
+  const { key, file, cfg } = await roleLoginTarget(orch, projectId, env, role);
   const view = testViews.get(key);
   const url = view?.webContents.getURL() ?? "";
   if (!view || !/^https?:/.test(url)) throw new Error("请先点击「打开登录页」并在内嵌浏览器中完成登录");
+  const loginFormVisible = await view.webContents.executeJavaScript(`(() => {
+    const visible = el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+    const password = [...document.querySelectorAll('input[type="password"]')].some(visible);
+    const submit = [...document.querySelectorAll('button,input[type="submit"]')].some(el => visible(el) && /^(?:登\\s*录|log\\s*in|sign\\s*in)$/i.test((el.innerText || el.value || '').trim()));
+    return password && submit;
+  })()`);
+  validateRoleSessionLocation(url, cfg.base_url, cfg.login?.url, loginFormVisible);
   const cookies = await view.webContents.session.cookies.get({});
   const local = JSON.parse(await view.webContents.executeJavaScript("JSON.stringify(Object.entries(localStorage))")) as [string, string][];
   const state = {
@@ -475,7 +483,8 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     usageReport: (p: string, days?: number) => ds.usageReport(p, days),
     checkBudget: (p: string) => ds.checkBudget(p),
     caseHistory: (id: string) => ds.caseHistory(id),
-    performanceHistory: (p: string) => ds.performanceHistory(p),
+    // 性能执行记录写在 workspace/reports/performance，不在 event_log 中。
+    performanceHistory: (p: string) => orch.performanceHistory(p),
     listAttributions: (p: string, pendingOnly?: boolean) => ds.pageAttributions(p, { page: 1, pageSize: 10000, pending: pendingOnly ?? true }).items,
     // ---- 仍需 Python 引擎的写操作与复杂业务逻辑 ----
     // 覆盖分析需要读取脚本、映射及执行版本证据，不能用 SQLite 数量统计替代。
@@ -658,6 +667,10 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     // ---- 三期：写操作仍走 Python ----
     setSettings: (p: string, settings) => orch.setSettings(p, settings),
     runPerformance: (p: string, env: string, options) => orch.runPerformance(p, env, options),
+    perfCompile: (p: string, caseId: string) => orch.perfCompile(p, caseId),
+    perfSetBaseline: (p: string, key: string, resultId: string) => orch.perfSetBaseline(p, key, resultId),
+    perfGetBaseline: (p: string, key: string) => orch.perfGetBaseline(p, key),
+    perfTrend: (p: string, path?: string) => orch.perfTrend(p, path),
     confirmAttribution: (runId: string, caseId: string, type: string) => orch.confirmAttribution(runId, caseId, type),
     exportWorkspace: (p: string) => orch.exportWorkspace(p),
     importWorkspace: (dir: string) => orch.importWorkspace(dir),

@@ -1,4 +1,4 @@
-import type { PerformanceOptions, PerformanceResult } from "./performance.js";
+import type { PerformanceOptions, PerformanceResult, PerformanceScenarioStep } from "./performance.js";
 export interface UiTaskRecord {
   id: string; projectId: string; env: string; kind: string; caseIds: string[];
   status: "running" | "stopping" | "completed" | "failed" | "stopped";
@@ -188,7 +188,7 @@ export interface ApiTestSet {
 }
 
 export interface ApiRunOptions {
-  /** 优先使用当前环境手动保存的 token；false 表示按用例角色鉴权。 */
+  /** 优先使用当前环境手动保存的 token；省略时有 token 才启用，false 表示按用例角色鉴权。 */
   preferEnvToken?: boolean;
   /** 本次未指定角色的请求使用此身份；不修改用例与脚本。 */
   selectedRole?: string;
@@ -399,6 +399,14 @@ export interface AitestApi {
   metrics(projectId: string): Promise<any>;
   runPerformance(projectId: string, env: string, options: PerformanceOptions): Promise<PerformanceResult>;
   performanceHistory(projectId: string): Promise<PerformanceResult[]>;
+  /** 二期：从用例编译性能场景步骤 */
+  perfCompile(projectId: string, caseId: string): Promise<{ steps: PerformanceScenarioStep[] }>;
+  /** 三期：设定性能基线 */
+  perfSetBaseline(projectId: string, targetKey: string, resultId: string): Promise<void>;
+  /** 三期：获取性能基线 */
+  perfGetBaseline(projectId: string, targetKey: string): Promise<PerformanceResult | null>;
+  /** 三期：性能趋势数据 */
+  perfTrend(projectId: string, targetPath?: string): Promise<Array<{ id: string; startedAt: string; p95Ms: number | null; requestsPerSecond: number | null; failureRate: number | null; status: string }>>;
   caseHistory(caseId: string): Promise<any[]>;
   coverage(projectId: string, env?: string): Promise<any>;
   stability(projectId: string): Promise<any>;

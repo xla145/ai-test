@@ -57,17 +57,17 @@ export function GenerateParameterCases({ projectId, draft, result, onClose, onSa
         <Col span={8}><Form.Item name="code_path" label="业务码字段路径" rules={[{ required: true }, { pattern: /^[\w-]+(?:\.[\w-]+)*$/, message: "例如 code 或 data.code" }]}><Input placeholder="code" /></Form.Item></Col>
         <Col span={8}><Form.Item name="success_code" label="成功业务码（JSON 值）" rules={[{ required: true }, scalarRule]}><Input placeholder="例如 200" /></Form.Item></Col>
         {negative && <Col span={8}><Form.Item name="error_code" label="参数错误业务码（JSON 值）" rules={[{ required: true, message: "请按系统定义填写，不会自动猜测" }, scalarRule]}><Input placeholder="按系统定义填写" /></Form.Item></Col>}
-      </Row> : <Alert style={{ marginBottom: 16 }} type="warning" showIcon message="如果系统用 HTTP 200 包装业务错误，请选择业务码模式，避免误判" />}
+      </Row> : <Alert className="page-section-b" type="warning" showIcon message="如果系统用 HTTP 200 包装业务错误，请选择业务码模式，避免误判" />}
       <Button loading={activeKey === "preview"} disabled={busy} onClick={generate}>生成预览</Button>
     </Form>
-    {preview && <div style={{ marginTop: 20 }}>
-      <Space wrap style={{ marginBottom: 12 }}><Tag>{preview.data.engine}</Tag><Typography.Text type="secondary">共 {preview.data.candidates.length} 条 · 已有 {preview.data.candidates.filter((c) => c.existing).length} 条 · 种子 {preview.data.seed}</Typography.Text></Space>
+    {preview && <div className="api-generate-preview">
+      <Space wrap className="api-generate-meta"><Tag>{preview.data.engine}</Tag><Typography.Text type="secondary">共 {preview.data.candidates.length} 条 · 已有 {preview.data.candidates.filter((c) => c.existing).length} 条 · 种子 {preview.data.seed}</Typography.Text></Space>
       <Table size="small" rowKey="key" dataSource={preview.data.candidates} pagination={{ pageSize: 8, hideOnSinglePage: true }}
         rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys as string[]), getCheckboxProps: (c) => ({ disabled: c.existing || busy }) }}
         columns={[{ title: "场景", dataIndex: "scenario" }, { title: "类型", dataIndex: "polarity", width: 80, render: (value) => <Tag color={value === "positive" ? "green" : "orange"}>{value === "positive" ? "正向" : "反向"}</Tag> },
           { title: "状态", dataIndex: "existing", width: 80, render: (exists) => exists ? "已存在" : "待保存" }]}
         expandable={{ expandedRowRender: (candidate) => <><Typography.Text strong>{candidate.title}</Typography.Text><pre className="api-response-code">{JSON.stringify(candidate.request, null, 2)}</pre></> }} />
-      {preview.data.notices.map((notice) => <Typography.Paragraph key={notice} type="secondary" style={{ marginBottom: 4 }}>{notice}</Typography.Paragraph>)}
+      {preview.data.notices.map((notice) => <Typography.Paragraph key={notice} type="secondary" className="api-generate-notice">{notice}</Typography.Paragraph>)}
     </div>}
   </Modal>;
 }

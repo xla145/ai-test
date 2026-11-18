@@ -20,6 +20,7 @@ import {
   SafetyCertificateOutlined,
   SettingOutlined,
   ToolOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -62,6 +63,7 @@ import { DatabasePage } from "./pages/DatabasePage";
 import { HomePage, loadTodos } from "./pages/HomePage";
 import { ImportPage } from "./pages/ImportPage";
 import { OpsPage } from "./pages/OpsPage";
+import { PerformancePage } from "./pages/PerformancePage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RunPage } from "./pages/RunPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -112,6 +114,7 @@ const NAV_ICON: Record<string, ReactNode> = {
   import: <FileExcelOutlined />,
   api: <ApiOutlined />,
   run: <PlayCircleOutlined />,
+  performance: <ThunderboltOutlined />,
   ui: <ChromeOutlined />,
   app: <MobileOutlined />,
   reports: <FileSearchOutlined />,
@@ -255,6 +258,7 @@ export function App() {
       case "api": return <ApiPage project={p} />;
       case "cases": return <CasesPage project={p} />;
       case "run": return <RunPage project={p} />;
+      case "performance": return <PerformancePage project={p} />;
       case "ui": return <UiPage project={p} />;
       case "db": return <DatabasePage project={p} onChanged={reload} />;
       case "reports": return <ReportsPage project={p} />;

@@ -81,7 +81,7 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
       : "   执行前检查每个步骤是否能触发对应预期。按页面、区域、业务对象、控件、单个动作、输入/目标状态、结果证据整理；步骤与预期错位或运行时结果缺少触发和观察方式时停止，列出待澄清项，不自行重排或减少覆盖。下拉选择拆成打开下拉框、选择关联选项两次操作；开关使用 check 设置明确状态。",
     "   按条件解析业务对象：在任何修改操作前，用页面证据核对全部条件和候选范围；无法核实条件时停止。唯一匹配时记录实际稳定标识并限定后续定位；多个匹配时仅当原用例明确允许任选，才在允许范围内选定一个并固定标识，否则列出候选的非敏感标识并报告待澄清。无匹配时报告数据阻塞，不创建或替换未声明的数据。不得把当前页唯一当作整个候选范围唯一，不用第一行、行号或全局同名按钮替代身份。后续操作、断言和生成的脚本始终绑定选定对象；回放时对象缺失或不唯一应失败，不能重新任选。",
     "   少走往返：navigate / click / select / press 的返回值已带紧凑的操作后快照；普通控件优先使用其中信息，不要每次操作后再调完整 snapshot。只有需要查找未出现在紧凑快照中的元素时才调用 snapshot；连续按键用 press 一次传数组。assertion_coverage 与其下一条断言必须串行调用，不能并行覆盖映射。",
-    "   截图主要用于证据留档；不要为了确认普通控件调用 screenshot 后再读取整张图片，只有视觉类预期或 DOM 无法判断时才读取截图。",
+    "   截图主要用于证据留档；不要为了确认普通控件调用 screenshot 后再读取整张图片，只有视觉类预期或 DOM 无法判断时才读取截图。禁用/可用状态必须用 expect_enabled(enabled=false/true)，不能用 expect_visible 替代，也不强制点击已禁用控件；数量要求用 expect_collection 验证整个稳定容器中的数量范围，不能仅断言某个输入框可见。",
     "   数据可变性：仅用例明确指定的输入和预期允许固定。不得把探索时看到的总条数、页数、其它记录名称、当前账号名称或默认选中值固化为额外通过条件。搜索正确应验证结果满足关键词规则，不等于固定只返回一条；多个对象应验证数量范围，不指定偶然看到的第二个对象；分页按运行时总数、页容量和边界验证，不固定第2页就是末页。跨步骤一致性用 read_value + expect_observed(name) 读取独立来源，不将现场观察值写死。缺少规则断言能力时报告未验证，不用固定快照断言冒充。",
     locateStrategy === "midscene-first"
       ? "   定位策略：优先 Midscene。需要定位新的操作目标时先调用 browser.ai_locate，描述目标及所在区域，再用返回的 ref 调用 click / type / press 等可录制操作；已有定位结果可复用。不要先尝试 DOM 定位。视觉工具未提供或定位失败时才回退 snapshot / browser.find_text。"
@@ -95,6 +95,7 @@ export function explorePrompt(projectId: string, env: string, caseId: string, ro
     '   预期覆盖示例：先 assertion_coverage({expected:[2]})，再录制能证明预期 2 的断言。case_step 不能代替 assertion_coverage。若预期包含后台行为、路由或请求效果，仅状态文字变化不能证明这些要求，缺少证据就报告未验证，不把可见状态断言映射为全部通过。',
     "   入口或指定数据缺失时只做一次有依据的补充检查，仍缺失则停止并报告阻塞，不遍历系统管理菜单、不替换测试数据或削弱断言。同一目标同类操作失败后只允许一次不同方法的恢复，仍失败就停止该步骤。",
     "   页面显示系统接口502异常、服务不可用或回到登录页时，先报告环境或会话阻塞，不重复定位缺失控件。",
+    "   UI_RESULT_NOT_READY 表示上一步操作已发生但页面仍在加载，不得重复点击。只调用一次 browser.wait_ready 等待；成功后根据最新快照继续，仍超时则停止。网关错误、前置条件阻塞和 RECOVERY_EXHAUSTED 必须立即结束任务，不再调用操作工具或重建角色会话尝试绕过。",
     "   不要用 shell 翻看工作区里的其它脚本或配置，所需信息都在本提示与工具返回值里。",
     `4. browser.save_ui_script（case_id=${caseId}），再 browser.run_playwright_script 试跑，失败则修正后重新保存。`,
     "   保存前调用 recording 核对每个原始步骤、预期和前置条件的覆盖。COVERAGE_INCOMPLETE 时按缺项补录对应真实断言；不能只补序号、删预期、降低门禁或重复执行有副作用的操作。undo 清除录制不撤销页面操作；重录前先核对页面实际状态并恢复用例初始条件。",
@@ -157,6 +158,7 @@ export function uiContractPrompt(brief: ExploreCaseBrief, roles: string[], selec
     "已配置角色：" + JSON.stringify(roles),
     ...(selectedRole ? [`用户选择的登录态角色：${JSON.stringify(selectedRole)}。原文未明确角色的已登录操作绑定此角色；不得覆盖原文明确的其它角色、匿名访问或登录测试。不把选择角色视为已登录的证据，探索时仍须检查会话。`] : []),
     '格式：{"version":1,"status":"ready|needs_clarification","issues":[],"preconditions":["原始前置条件"],"preconditionChecks":[{"id":"P1.1","sourceIndices":[1],"sourceQuotes":["原文中对应要求的完整片段"],"statement":"一个可独立验证的事实","expected":"保留原要求","method":"session|ui|api|database|manual","verificationHint":"观察和判定提示","dependsOn":[]}],"steps":[{"index":1,"source":"原始步骤","actions":[{"action":"navigate|click|fill|check|select|press|observe|capture|clock|database","instruction":"单个动作的具体说明","role":"实际配置角色或default","value":"输入值，check时必须为布尔值","targetHint":"页面尚未观察时的自然语言定位描述，与target二选一","target":{"page":"页面名","scope":[{"kind":"region|dialog|row|form_item|listbox","name":"实际范围名","key":"row必填的业务标识"}],"control":"textbox|checkbox|combobox|button|option","name":"控件名，可改用label/placeholder/text"}}],"expected":["对应的原始预期"]}]}',
+    "issues 必须是字符串数组，例如 [\"缺少搜索关键词\"]，不能输出对象。sourceIndices 从 1 开始：第一条原始前置条件是 [1]，第二条是 [2]，禁止使用 0 起始的数组下标。",
     "preconditions、source 和 expected 必须原样保留；preconditionChecks 是对原文的原子检查计划，不能删改原文或按逗号机械拆分。每个原文前置条件至少被一个检查项引用；复合条件拆成多个独立事实时必须全部列出。index 按原步骤从1连续编号，所有 expected 按原顺序覆盖且不重复。不能减少断言、改步骤顺序或换数据来使其可执行。",
     "你没有浏览器观察结果。页面标题、DOM 类型、区域名称、弹窗/抽屉形式、菜单层级以及保存后是否关闭是 UI 实现细节，不应仅因这些信息未知就标记待澄清。交互动作优先使用 targetHint 描述原文明确的目标及上下文；只有确切已知完整定位结构才提供 target，不能虚构完整 target。每次一个动作，下拉展开与选项点击分开。",
     "needs_clarification 只用于缺失必要业务条件，例如要求角色未配置、要求特定对象却既无标识也无可核对的筛选条件、必要输入值缺失或业务预期互相矛盾。不能把 data_refs 为空直接等同业务对象不存在；创建页面中的唯一表单项也不需要事先指定列表 row key。待澄清时不输出残缺 target，可保留 targetHint 或将 actions 留空，必须保留全部 source 和 expected。",

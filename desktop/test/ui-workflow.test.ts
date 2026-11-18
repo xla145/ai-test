@@ -110,6 +110,7 @@ describe("UI workbench orchestration", () => {
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "validate", embedded: true });
     expect(ui.runUiSuite.mock.calls[0][0]).toMatchObject({ caseIds: ["tc_a"] });
     expect(ui.runUiSuite.mock.calls[0][0].cdpEndpoint).toBeUndefined();
+    expect(ui.runUiSuite.mock.calls[0][0].sessionSource).toEqual({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } });
     await orch.confirmUiScript("p", "test", "tc_a", workflow.hash(path));
     await orch.runUiRegression("p", "test", { caseIds: ["tc_a"], mode: "regression" });
     expect(ui.runUiSuite.mock.calls[1][0]).toMatchObject({ caseIds: ["tc_a"] });

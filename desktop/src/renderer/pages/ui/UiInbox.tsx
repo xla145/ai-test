@@ -65,17 +65,17 @@ function Proposals({ project, paged }: { project: Project; paged: Paged<Proposal
         renderItem={(p) => (
           <div className="uix-proposal">
             <div className="uix-proposal-head">
-              <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="uix-proposal-main">
                 <CaseLink id={p.case_id} />
-                <Typography.Text type="secondary" className="mono" ellipsis style={{ display: "block" }}>{p.script_path}</Typography.Text>
+                <Typography.Text type="secondary" className="mono uix-proposal-path" ellipsis>{p.script_path}</Typography.Text>
               </div>
               <Space>
                 <Button icon={<CloseOutlined />} loading={activeKey === `reject:${p.id}`} disabled={busy} onClick={() => resolve(p, false)}>拒绝</Button>
                 <Button type="primary" icon={<CheckOutlined />} loading={activeKey === `merge:${p.id}`} disabled={busy || p.risk_level === "high"} onClick={() => resolve(p, true)}>合并</Button>
               </Space>
             </div>
-            {p.reason && <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{p.reason}</Typography.Paragraph>}
-            {p.risk_level && <Typography.Paragraph><Tag color={p.risk_level === "high" ? "red" : p.risk_level === "medium" ? "orange" : "blue"}>{p.risk_level === "high" ? "高风险 · 需澄清用例" : p.risk_level === "medium" ? "中风险 · 人工确认" : "低风险 · 定位器修正"}</Tag>{p.risk_reasons?.join("；")}</Typography.Paragraph>}
+            {p.reason && <Typography.Paragraph type="secondary" className="uix-proposal-reason">{p.reason}</Typography.Paragraph>}
+            {p.risk_level && <Typography.Paragraph className="uix-proposal-risk"><Tag color={p.risk_level === "high" ? "red" : p.risk_level === "medium" ? "orange" : "blue"}>{p.risk_level === "high" ? "高风险 · 需澄清用例" : p.risk_level === "medium" ? "中风险 · 人工确认" : "低风险 · 定位器修正"}</Tag>{p.risk_reasons?.join("；")}</Typography.Paragraph>}
             <DiffView diff={p.diff} />
           </div>
         )}

@@ -1,4 +1,6 @@
 import { workspaceMock } from "./pages/api/workspaceMock";
+import { createPerformanceDemo } from "./performanceDemo";
+import { rememberNav } from "./nav";
 let mockUiStopped = false;
 /**
  * 演示数据：在普通浏览器中预览界面（npm run preview:web）时替代 Electron 预加载脚本提供的 window.aitest。
@@ -264,8 +266,9 @@ let viewState = { visible: false, docked: false };
 const setView = (next: Partial<typeof viewState>) => { viewState = { ...viewState, ...next }; listeners.view?.(viewState); };
 const eventListeners = new Set<(e: { method: string; params: unknown }) => void>();
 listeners.event = event => eventListeners.forEach(cb => cb(event));
+const apiWorkspaceMock = workspaceMock(cases);
 const mockApi: AitestApi = {
-  ...workspaceMock(cases),
+  ...apiWorkspaceMock,
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
     const p = { id: `proj_${Date.now()}`, name, workspace_path: opts?.kind === "group" ? "" : workspace,
@@ -533,8 +536,9 @@ const mockApi: AitestApi = {
   checkBudget: () => delay({ month_used: 412300, monthly_budget: 2000000, remaining: 1587700, allowed: true, per_task_limit: 200000 }),
   getSettings: () => delay({ monthly_token_budget: 2000000, per_task_token_limit: 200000, price_per_mtok: 20, currency: "CNY", stability_threshold: 0.95 }),
   setSettings: (_p, s) => delay(s as Record<string, unknown>),
-  performanceHistory: async () => [],
-  runPerformance: async () => { throw new Error("浏览器预览不能运行本地 k6，请在桌面客户端执行"); },
+  ...createPerformanceDemo(apiWorkspaceMock.listApiDefinitions),
+  runPerformance: async () => { throw new Error("当前为演示预览，未执行压测或发送请求。真实执行请使用桌面客户端和本地 k6。"); },
+  perfCompile: async () => ({ steps: [] }),
   caseHistory: async () => [],
   coverage: (projectId, env) => delay({ schema_version: 1, project_id: projectId, env, requirements: [], cases: [], summary: { requirements: 0, uncovered_requirements: 0, cases: 0, mapped: 0, total: 0, blocked_cases: 0 } }),
   metrics: () => delay({
@@ -649,6 +653,10 @@ const mockApi: AitestApi = {
 };
 
 export function installMock(): void {
+  // 显式预览链接直达独立菜单；此模块不会在 Electron 中加载。
+  if (new URLSearchParams(location.search).get("performance-demo") === "1") {
+    rememberNav("proj_feature", "performance");
+  }
   if (agentDemo === 'running' || agentDemo === 'failed') {
     agentDemoTasks.push({ id: 'demo-agent-task', projectId: 'proj_feature', env: 'test', kind: '生成 UI 脚本', caseIds: ['tc_8f2a1c0e01'],
       status: agentDemo === 'failed' ? 'failed' : 'running', stage: agentDemo === 'failed' ? '断言验证未通过' : '探索并生成脚本',

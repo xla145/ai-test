@@ -615,7 +615,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
       </div>
     )}
     {result && !summary && resultOpen && failures.length > 0 && (
-      <div className="uix-panel" style={{ padding: 12 }}>
+      <div className="uix-panel uix-result-table">
         <CaseTitles projectId={project.id} ids={failures.map((r) => r.case_id)}>
           <Table size="small" rowKey="key" dataSource={failures} scroll={{ x: 680 }}
             pagination={{ defaultPageSize: 10, size: "small", hideOnSinglePage: true, showTotal: (t) => `共 ${t} 条` }}
@@ -626,7 +626,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
               { title: "归因", dataIndex: "failure_type", width: 140, render: (v: string) => (v ? <LabelTag map={FAILURE} value={v} /> : "—") },
               { title: "说明", render: (_: unknown, r: { reason?: string; message: string }) => <>
                 {r.reason && <div>{r.reason}</div>}
-                {r.message && <Typography.Paragraph type="secondary" className="mono" style={{ marginBottom: 0, fontSize: 12 }}
+                {r.message && <Typography.Paragraph type="secondary" className="mono uix-result-message"
                   ellipsis={{ rows: 2, expandable: true, symbol: "展开" }}>{r.message}</Typography.Paragraph>}
               </> },
             ]} />

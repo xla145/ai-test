@@ -1,7 +1,7 @@
 import { ApiCaseList } from "./api/ApiCaseList";
 import { groupDefinitions, type ApiDirectoryNode } from "../../shared/apiDirectory";
 import { clusterImportChanges } from "../../shared/apiImportClusters";
-import { ApiOutlined, ArrowDownOutlined, ArrowRightOutlined, ArrowUpOutlined, CheckCircleFilled, CheckOutlined, CloudDownloadOutlined, DeleteOutlined, FileAddOutlined, FileTextOutlined, HistoryOutlined, InboxOutlined, LinkOutlined, MoreOutlined, FolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, SendOutlined, StopOutlined, UploadOutlined } from "@ant-design/icons";
+import { ApiOutlined, ArrowDownOutlined, ArrowUpOutlined, CheckCircleFilled, CheckOutlined, CloudDownloadOutlined, DeleteOutlined, FileAddOutlined, FileTextOutlined, HistoryOutlined, InboxOutlined, LinkOutlined, MoreOutlined, FolderOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, SendOutlined, StopOutlined, UploadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Checkbox, Collapse, Drawer, Dropdown, Empty, Input, Modal, Select, Space, Spin, Steps, Table, Tabs, Tag, Tooltip, Tree, Typography, Upload } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api, type Project, type TestCase } from "../api";
@@ -322,46 +322,29 @@ function ApiWorkspace({ project }: { project: Project }) {
           <h4 className="api-section-heading">响应定义</h4><Collapse items={Object.entries(selected.operation.responses).map(([status, schema]) => ({ key: status, label: <span className="api-mono">HTTP {status}</span>, children: <pre className="api-response-code">{JSON.stringify(schema, null, 2)}</pre> }))} />
         </div></> : <div className="api-intro-empty">
           <div className="api-onboarding">
-            <div className="api-onboarding-hero">
-              <div className="api-empty-symbol"><ApiOutlined /></div>
-              <h2>{definitions.length ? "选择一个接口开始测试" : "导入接口定义，开始接口测试"}</h2>
-              <p className="api-onboarding-desc">{definitions.length ? "在左侧目录中选择接口查看参数与响应定义，或直接进入请求调试" : "支持 OpenAPI 3.x 与 Swagger 2.0，导入后自动保留接口目录与版本变更追踪"}</p>
-            </div>
-            <div className="api-workflow-steps">
+            <div className="api-onboarding-status">
               <Steps size="small" current={definitions.length ? (cases.length ? 2 : 1) : 0} items={[
-                { title: "导入接口", description: `${currentDefinitions.length} 个接口`, icon: currentDefinitions.length ? <CheckCircleFilled style={{ color: "var(--console-success)" }} /> : undefined },
-                { title: "调试与生成用例", description: `${cases.length} 条用例` },
-                { title: "审核通过", description: `${cases.filter((c) => c.status === "reviewed").length} 条已审核` },
-                { title: "回归执行", description: "持续验证" },
+                { title: "导入接口", description: `${currentDefinitions.length} 个`, icon: currentDefinitions.length ? <CheckCircleFilled style={{ color: "var(--console-success)" }} /> : undefined },
+                { title: "生成用例", description: `${cases.length} 条` },
+                { title: "审核", description: `${cases.filter((c) => c.status === "reviewed").length} 条` },
+                { title: "回归", description: "持续" },
               ]} />
             </div>
-            <div className="api-quick-actions">
-              {!currentDefinitions.length ? <>
-                <button className="api-action-card api-action-primary" onClick={() => setImportOpen(true)}>
-                  <UploadOutlined className="api-action-icon" />
-                  <div className="api-action-copy"><strong>导入 OpenAPI 文档</strong><span>从文件或 URL 导入 Swagger / OpenAPI 规范</span></div>
-                  <ArrowRightOutlined />
-                </button>
-                <button className="api-action-card" disabled={busy} onClick={() => run("requirement", async () => {
-                  const file = await api().pickFile([{ name: "需求文档", extensions: ["md", "docx", "pdf", "txt"] }]); if (!file) return;
-                  await api().generateCases(project.id, file); notifyProjectChanged(project.id); goTab?.("cases");
-                })}>
-                  <FileTextOutlined className="api-action-icon" />
-                  <div className="api-action-copy"><strong>从需求文档生成用例</strong><span>上传需求文档，AI 自动设计测试用例</span></div>
-                  <ArrowRightOutlined />
-                </button>
-              </> : <>
-                <button className="api-action-card api-action-primary" onClick={() => selectDefinition(currentDefinitions[0])}>
-                  <SendOutlined className="api-action-icon" />
-                  <div className="api-action-copy"><strong>打开第一个接口</strong><span>{currentDefinitions[0]?.summary}</span></div>
-                  <ArrowRightOutlined />
-                </button>
-                <button className="api-action-card" onClick={() => setTab("request")}>
-                  <ApiOutlined className="api-action-icon" />
-                  <div className="api-action-copy"><strong>请求调试</strong><span>发送请求，查看响应和断言结果</span></div>
-                  <ArrowRightOutlined />
-                </button>
-              </>}
+            <div className="api-onboarding-body">
+              <h3 className="api-onboarding-heading">{definitions.length ? "在左侧选择接口" : "导入接口定义开始测试"}</h3>
+              <p className="api-onboarding-desc">{definitions.length ? "选择接口查看参数与响应定义，或直接进入请求调试。" : "支持 OpenAPI 3.x 与 Swagger 2.0，导入后保留接口目录与版本追踪。"}</p>
+              <div className="api-onboarding-actions">
+                {!currentDefinitions.length ? <>
+                  <Button type="primary" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>导入 OpenAPI 文档</Button>
+                  <Button icon={<FileTextOutlined />} disabled={busy} onClick={() => run("requirement", async () => {
+                    const file = await api().pickFile([{ name: "需求文档", extensions: ["md", "docx", "pdf", "txt"] }]); if (!file) return;
+                    await api().generateCases(project.id, file); notifyProjectChanged(project.id); goTab?.("cases");
+                  })}>从需求文档生成</Button>
+                </> : <>
+                  <Button type="primary" icon={<SendOutlined />} onClick={() => selectDefinition(currentDefinitions[0])}>打开第一个接口</Button>
+                  <Button icon={<ApiOutlined />} onClick={() => setTab("request")}>请求调试</Button>
+                </>}
+              </div>
             </div>
           </div>
         </div>
@@ -388,7 +371,7 @@ function ApiWorkspace({ project }: { project: Project }) {
               <p className="ant-upload-text">拖拽 OpenAPI 文件到此</p>
               <p className="ant-upload-hint">支持 JSON / YAML / YML 格式</p>
             </Upload.Dragger>
-            <Button type="primary" ghost style={{ marginTop: 12, width: "100%" }} loading={activeKey === "pick"} disabled={busy}
+            <Button type="primary" ghost className="api-import-source-btn" loading={activeKey === "pick"} disabled={busy}
               icon={<UploadOutlined />} onClick={() => run("pick", async () => {
                 const file = await api().pickFile([{ name: "OpenAPI / Swagger", extensions: ["json", "yaml", "yml"] }]);
                 if (file) acceptPreview(await api().previewApiImport(project.id, file));
@@ -399,11 +382,11 @@ function ApiWorkspace({ project }: { project: Project }) {
             <div className="api-import-url-card">
               <div className="api-import-url-icon"><LinkOutlined /></div>
               <h4>从文档地址导入</h4>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>输入 Swagger / OpenAPI 规范的 JSON 或 YAML 地址</Typography.Text>
+              <Typography.Text type="secondary" className="api-import-url-hint">输入 Swagger / OpenAPI 规范的 JSON 或 YAML 地址</Typography.Text>
               <Input placeholder="https://example.com/v3/api-docs" value={source} disabled={busy}
                 onChange={(e) => setSource(e.target.value)} onPressEnter={() => { if (source.trim()) previewSource(source); }} />
-              <Typography.Text type="secondary" style={{ fontSize: 11 }}>请填写规范文件地址，非 Swagger UI 页面</Typography.Text>
-              <Button type="primary" style={{ width: "100%", marginTop: 8 }} loading={activeKey === "preview"} disabled={busy || !source.trim()}
+              <Typography.Text type="secondary" className="api-import-url-note">请填写规范文件地址，非 Swagger UI 页面</Typography.Text>
+              <Button type="primary" className="api-import-url-action" loading={activeKey === "preview"} disabled={busy || !source.trim()}
                 icon={<CloudDownloadOutlined />} onClick={() => previewSource(source)}>预览接口变更</Button>
             </div>
           </div>
@@ -429,7 +412,7 @@ function ApiWorkspace({ project }: { project: Project }) {
             };
           })} /><div className="api-import-note">按文档标签分组，并将名称相似的模块聚类展示；无标签接口归入「未分组」。仅应用勾选项，更新后受影响用例需重新检查。{preview.changes.some((c) => c.change === "removed") && <p>勾选「来源已移除」会将对应接口标记为已移除。</p>}</div></>}
     </Drawer>
-    <Drawer title={<span>调试历史 <span className="api-muted" style={{ fontWeight: 400 }}>· 最近 {history.length} 次</span></span>} width={860} open={historyOpen} onClose={() => setHistoryOpen(false)}>
+    <Drawer title={<span>调试历史 <span className="api-muted api-drawer-subtitle">· 最近 {history.length} 次</span></span>} width={860} open={historyOpen} onClose={() => setHistoryOpen(false)}>
       {!history.length ? <Empty description="暂无调试记录" /> : <>
         <div className="api-history-toolbar">
           <Typography.Text type="secondary">凭据字段已脱敏；点击展开查看响应详情</Typography.Text>
@@ -453,7 +436,7 @@ function ApiWorkspace({ project }: { project: Project }) {
       </>}
     </Drawer>
     <Drawer title="接口登录与加密" open={protocolOpen} onClose={() => setProtocolOpen(false)} width={640} destroyOnClose><ApiLoginCard project={project} env={env} /></Drawer>
-    <Drawer title={<span>此接口的用例 <span className="api-muted" style={{ fontWeight: 400 }}>· {related.length} 条</span></span>} width={800} open={casesDrawerOpen} onClose={() => setCasesDrawerOpen(false)} destroyOnClose>
+    <Drawer title={<span>此接口的用例 <span className="api-muted api-drawer-subtitle">· {related.length} 条</span></span>} width={800} open={casesDrawerOpen} onClose={() => setCasesDrawerOpen(false)} destroyOnClose>
       {caseRows(related)}
     </Drawer>
     <Modal title={`选择${addTo === "cleanup" ? "清理" : "业务"}接口`} open={Boolean(addTo)} footer={null} onCancel={() => setAddTo(undefined)} width={680}><Input aria-label="筛选场景接口" prefix={<SearchOutlined />} placeholder="搜索接口" value={search} onChange={(e) => setSearch(e.target.value)} /><div className="api-add-steps">{filtered.filter((d) => !d.removed).map((d) => <button key={d.id} onClick={() => {

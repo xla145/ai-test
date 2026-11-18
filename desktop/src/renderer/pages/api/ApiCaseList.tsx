@@ -25,7 +25,7 @@ export function ApiCaseList({ project, env, rows, onEdit, onChanged }: {
     }
   }, "审核通过，可批量执行");
   return <>
-    <Space wrap style={{ marginBlock: 12 }}>
+    <Space wrap className="api-caselist-toolbar">
       <Typography.Text type="secondary">点击用例名称查看步骤、参数与预期；执行选中仅运行确定性接口脚本</Typography.Text>
       <Button disabled={busy || !chosen.length || !chosen.every(reviewable)} loading={activeKey === "review"}
         onClick={() => review(chosen)}>审核选中（{chosen.length}）</Button>
@@ -40,7 +40,7 @@ export function ApiCaseList({ project, env, rows, onEdit, onChanged }: {
           await onChanged();
         })}>执行选中（{chosen.length}）</RunButton>
     </Space>
-    {result && <Alert showIcon style={{ marginBottom: 12 }} type={result.failed + result.error ? "warning" : "success"}
+    {result && <Alert showIcon className="api-caselist-result" type={result.failed + result.error ? "warning" : "success"}
       message={`执行 ${result.total} 条：通过 ${result.passed}，失败 ${result.failed}，错误 ${result.error}，跳过 ${result.skipped}`}
       description="完整执行记录见测试报告" />}
     <Table size="small" rowKey="id" dataSource={rows} pagination={{ pageSize: 8, hideOnSinglePage: true }}

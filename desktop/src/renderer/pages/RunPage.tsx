@@ -84,7 +84,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
       {definitions && <Alert type="info" showIcon style={{ marginBottom: 16 }} message={`当前范围：${definitions.length} 个接口`} description={<>{definitions.map((d) => `${d.method} ${d.path}`).join("、")}。仅执行这些接口的已审核单接口用例；业务场景请在全量范围中单独选择。</>} action={<Button disabled={busy} onClick={onClearScope}>清除接口范围</Button>} />}
       <ApiCasePicker definitions={definitions} projectId={project.id} selected={selected} onSelect={setSelected} onAvailable={setAvailable}
         disabled={busy} onBusyChange={setPreparing} />
-      <Space wrap style={{ marginBottom: 16 }}>
+      <Space wrap className="page-section-b">
         <RunButton project={project} env={env} loading={busy}
           disabled={preparing || !env || !identityReady || !selected.length || selected.some((id) => !available.some((c) => c.id === id))}
           onRun={(confirmProduction) => run(async () => {
@@ -105,7 +105,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
       {result?.analysis?.status === "failed" && <Alert type="warning" showIcon style={{ marginBottom: 16 }}
         message="接口报告已生成，AI 失败分析未完成"
         description={result.analysis.error ? `原始测试结果不受影响。原因：${result.analysis.error}` : "原始测试结果不受影响，请稍后重试分析。"} />}
-      <Collapse size="small" style={{ marginBottom: 16 }} items={[{
+      <Collapse size="small" className="page-section-b" items={[{
         key: "roles",
         label: <Space wrap>多账号<Typography.Text type="secondary" style={{ fontSize: 12 }}>流程用例中每步可用不同角色（如 买家下单 → 运营审核 → 买家退款）</Typography.Text></Space>,
         children: (
@@ -128,9 +128,9 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
             <Card><Statistic title="跳过" value={result.run.skipped} /></Card>
             <Card><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>
-          {failed === 0 && result.run.total > 0 && <Alert style={{ marginTop: 16 }} type="success" showIcon message="全部通过" />}
-          {result.run.total === 0 && <Alert style={{ marginTop: 16 }} type="warning" showIcon message="没有执行任何用例，请检查脚本与测试范围" />}
-          <Space wrap style={{ marginTop: 16 }}>
+          {failed === 0 && result.run.total > 0 && <Alert className="page-section" type="success" showIcon message="全部通过" />}
+          {result.run.total === 0 && <Alert className="page-section" type="warning" showIcon message="没有执行任何用例，请检查脚本与测试范围" />}
+          <Space wrap className="page-section">
             <Button size="small" loading={busy} onClick={() => run(async () => {
               const out = await api().exportReport([result.run.run_id], "html");
               if (out) await api().showInFolder(out.path).catch(() => undefined);
@@ -138,7 +138,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
             <Typography.Text type="secondary">完整执行记录见「测试报告」页</Typography.Text>
           </Space>
           {result.triage && result.triage.length > 0 && (
-            <Card title="失败归因" size="small" style={{ marginTop: 16 }} extra={<Typography.Text type="secondary">在「工程化」页确认归因</Typography.Text>}>
+            <Card title="失败归因" size="small" className="page-section" extra={<Typography.Text type="secondary">在「工程化」页确认归因</Typography.Text>}>
               <CaseTitles projectId={project.id} ids={result.triage.map((t) => t.case_id)}>
               <Table size="small" rowKey="case_id" dataSource={result.triage} scroll={{ x: 640 }}
                 pagination={{ defaultPageSize: 10, size: "small", hideOnSinglePage: true, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}

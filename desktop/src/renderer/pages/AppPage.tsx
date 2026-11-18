@@ -65,31 +65,31 @@ export function AppPage({ project }: { project: Project }) {
       />
 
       {!appId && (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+        <Alert type="warning" showIcon className="page-section-b"
           message={`环境「${env}」没有配置 ${PLATFORM_LABEL[platform]} App`}
           description={`点击顶部项目名旁的设置按钮，在执行环境中填写${platform === "ios" ? " iOS Bundle ID" : " Android 包名"}。`} />
       )}
       {platform === "ios" && (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }}
+        <Alert type="info" showIcon className="page-section-b"
           message="iOS 回归目前只能在模拟器上执行"
           description="Maestro 暂不支持 iOS 真机（Android 真机可以）。探索可以用 Pinky 在 iPhone 真机上进行，生成的脚本在 iOS 模拟器上回归。" />
       )}
       {tools.data && !tools.data.maestro.ok && (
-        <Alert type="warning" showIcon style={{ marginBottom: 16 }} message="未检测到 Maestro，无法执行 App 回归"
+        <Alert type="warning" showIcon className="page-section-b" message="未检测到 Maestro，无法执行 App 回归"
           description="安装 Maestro（maestro.dev，依赖 Java 17+）后，在「全局设置 → 运行环境」中确认路径。测 iOS 需要 Mac 与 Xcode 模拟器。" />
       )}
 
       {result && (
         <>
-          <div className="stat-grid result-summary" style={{ marginBottom: 16 }}>
+          <div className="stat-grid result-summary page-section-b">
             <Card size="small"><Statistic title={`${PLATFORM_LABEL[result.platform]} 用例`} value={result.run.total} /></Card>
             <Card size="small"><Statistic title="通过" value={result.run.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
             <Card size="small"><Statistic title="失败" value={failed} valueStyle={{ color: failed ? "var(--console-error)" : undefined }} /></Card>
             <Card size="small"><Statistic title="执行记录" value={result.run.run_id} valueStyle={{ fontSize: 14 }} className="mono" /></Card>
           </div>
-          {failed === 0 && <Alert style={{ marginBottom: 16 }} type="success" showIcon message="全部通过" />}
+          {failed === 0 && <Alert className="page-section-b" type="success" showIcon message="全部通过" />}
           {result.failures.length > 0 && (
-            <Card size="small" title="失败明细" style={{ marginBottom: 16 }}
+            <Card size="small" title="失败明细" className="page-section-b"
               extra={<Typography.Text type="secondary">截图在 <span className="mono">{result.report}</span>；归因在「工程化 → 失败归因」确认</Typography.Text>}>
               <CaseTitles projectId={project.id} ids={result.failures.map((f) => f.case_id)}>
                 <Table size="small" rowKey="case_id" dataSource={result.failures} scroll={{ x: 640 }}

@@ -14,13 +14,11 @@ import {
   Alert,
   Button,
   Card,
-  Col,
   Descriptions,
   Drawer,
   Dropdown,
   Empty,
   Progress,
-  Row,
   Segmented,
   Space,
   Statistic,
@@ -206,13 +204,13 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
           {suspectPasses > 0 && <Alert type="warning" showIcon style={{ marginTop: 12 }}
             message={`有 ${suspectPasses} 条通过项返回了非成功业务码，请核对业务断言`}
             description="这些可能是预期错误的反例，也可能只校验了 HTTP 200。原始执行结果保留；可关闭“仅看失败”查看响应，新执行建议启用业务码校验。" />}
-          <Row gutter={[16, 16]} style={{ margin: "16px 0 24px" }}>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="执行通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="执行成功" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card></Col>
-            <Col xs={12} md={6}><Card size="small"><Statistic title="验收通过" value={(d.summary.acceptance?.verified_pass ?? 0)} valueStyle={{ color: "var(--console-success)" }} /></Card></Col>
-          </Row>
+          <div className="stat-grid" style={{ margin: "16px 0 24px" }}>
+            <Card size="small"><Statistic title="执行通过率" value={(d.summary.pass_rate * 100).toFixed(1)} suffix="%" /></Card>
+            <Card size="small"><Statistic title="执行成功" value={d.summary.passed} valueStyle={{ color: "var(--console-success)" }} /></Card>
+            <Card size="small"><Statistic title="失败" value={d.summary.failed} valueStyle={{ color: d.summary.failed ? "var(--console-error)" : undefined }} /></Card>
+            <Card size="small"><Statistic title="待复核" value={d.summary.pending_reviews} /></Card>
+            <Card size="small"><Statistic title="验收通过" value={(d.summary.acceptance?.verified_pass ?? 0)} valueStyle={{ color: "var(--console-success)" }} /></Card>
+          </div>
           {Object.keys(d.summary.failure_types).length > 0 && (
             <div style={{ marginBottom: 12 }}><Space wrap>
               <Typography.Text type="secondary">失败归因：</Typography.Text>

@@ -471,8 +471,25 @@ body {
 /* 待处理 */
 .uix-inbox { display: flex; flex-direction: column; gap: 16px; }
 .uix-inbox-empty { padding: 64px 24px; }
-.uix-proposal { padding: 12px; border-radius: 12px; border: 1px solid var(--uix-border); margin-bottom: 12px; }
-.uix-proposal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.uix-proposal { padding: 16px; border-radius: 12px; border: 1px solid var(--uix-border); margin-bottom: 12px; }
+.uix-proposal-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.uix-proposal-main { flex: 1; min-width: 0; }
+.uix-proposal-path { display: block; margin-top: 2px; }
+.uix-proposal-reason { margin: 0 0 10px; }
+.uix-proposal-risk { margin: 0 0 10px; }
+
+/* 角色与登录 */
+.uix-roles { gap: 20px; }
+.uix-roles-left { flex: 1 1 320px; min-width: 0; }
+.uix-roles-right { flex: 1.2 1 380px; min-width: 0; }
+.uix-manual-login { margin-top: 16px; }
+.uix-manual-login-hint { margin-top: 0; }
+.uix-saved-sessions { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.uix-saved-session { display: flex; align-items: center; gap: 8px; }
+
+/* 工作台结果面板 */
+.uix-result-table { padding: 12px; }
+.uix-result-message { margin-bottom: 0; font-size: 12px; }
 @media (max-width: 1180px) {
   .uix-hero { grid-template-columns: 1fr; gap: 12px; }
   .uix-bench { height: calc(100vh - 250px); }
@@ -679,7 +696,7 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-method-post { color: var(--console-accent); }
 .api-method-put, .api-method-patch { color: var(--console-warning); }
 .api-method-delete { color: var(--console-error); }
-.api-intro-empty { min-height: 640px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 48px 64px; }
+.api-intro-empty { display: block; padding: 0; }
 .api-empty-symbol { font-size: 28px; color: var(--console-accent); width: 64px; height: 64px; border: 1px solid var(--console-border); background: var(--console-bg); display: grid; place-items: center; border-radius: 16px; margin-bottom: 24px; }
 .api-intro-empty h2 { font-size: 26px; margin: 0 0 12px; }
 .api-intro-empty > p { font-size: 13px; color: var(--console-secondary); line-height: 24px; max-width: 400px; margin: 0 0 24px; }
@@ -762,7 +779,7 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-tab-dot-fail { background: var(--console-error); }
 
 /* ── Onboarding / Empty state ───────────────────────── */
-.api-onboarding { display: flex; flex-direction: column; align-items: flex-start; gap: 28px; padding: 40px 32px; max-width: 560px; }
+.api-onboarding { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 24px; }
 .api-onboarding-hero { text-align: left; }
 .api-onboarding-hero h2 { margin: 12px 0 6px; font-size: 18px; font-weight: 600; }
 .api-onboarding-desc { color: var(--console-secondary); font-size: 13px; line-height: 1.7; }
@@ -1076,8 +1093,8 @@ button.workflow-step:hover { color: var(--console-accent); }
   .responsive-card .ant-card-head { align-items: flex-start; }
 }
 @container (max-width: 520px) {
-  .api-intro-empty { min-height: 320px; padding: 28px 24px; }
-  .api-intro-empty h2 { font-size: 22px; }
+  .api-intro-empty { padding: 0; }
+  .api-intro-empty h2 { font-size: 18px; }
 }
 
 .section-page .ant-tabs-top > .ant-tabs-nav { margin-bottom: 20px; }
@@ -1114,8 +1131,8 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-section-toolbar { flex-wrap: wrap; }
 .api-editor-toolbar { flex-wrap: wrap; padding: 12px 16px; }
 .api-editor-title { flex: 1 1 240px; }
-.api-intro-empty { min-height: 340px; padding: 28px; }
-.api-empty-symbol { width: 40px; height: 40px; font-size: 22px; border-radius: 10px; margin-bottom: 16px; }
+.api-intro-empty { min-height: 0; padding: 0; }
+.api-empty-symbol { width: 36px; height: 36px; font-size: 18px; border-radius: 8px; margin-bottom: 0; }
 .api-intro-empty h2 { font-size: 20px; }
 .api-empty-sequence { margin: 24px 0 12px; flex-wrap: wrap; gap: 12px; }
 @container (max-width: 680px) {
@@ -1157,6 +1174,43 @@ button.workflow-step:hover { color: var(--console-accent); }
   .api-directory { border-right: 0; border-bottom: 1px solid var(--console-border); }
   .api-workspace { --api-space: 16px; }
 }
+
+/* API 工作台：Drawer 副标题、导入面板、用例参数生成 */
+.api-drawer-subtitle { font-weight: 400; }
+.api-import-source-btn { margin-top: 12px; width: 100%; }
+.api-import-url-hint { font-size: 12px; }
+.api-import-url-note { font-size: 11px; }
+.api-import-url-action { width: 100%; margin-top: 8px; }
+.api-generate-preview { margin-top: 20px; }
+.api-generate-meta { margin-bottom: 12px; }
+.api-generate-notice { margin-bottom: 4px; }
+.api-caselist-toolbar { margin-block: 12px; }
+.api-caselist-result { margin-bottom: 12px; }
+.api-auth-alert { margin-bottom: 12px; }
+.api-truncated-note { margin-bottom: 8px; }
+
+/* 接口引导状态：收紧为工具型提示，去宣传感。
+   原始定义在 Onboarding / Empty state 区块，这里覆盖间距与尺寸。 */
+.api-intro-empty { min-height: 0; padding: 0; display: block; }
+.api-onboarding { gap: 0; padding: 24px; max-width: none; }
+.api-onboarding-status { padding: 16px 20px; background: var(--console-bg); border: 1px solid var(--console-border); border-radius: 10px; }
+.api-onboarding-status .ant-steps-item-title { font-size: 12px !important; white-space: nowrap; }
+.api-onboarding-status .ant-steps-item-description { font-size: 11px !important; color: var(--console-muted) !important; font-variant-numeric: tabular-nums; }
+.api-onboarding-body { margin-top: 24px; }
+.api-onboarding-heading { font-size: 15px; font-weight: 500; margin: 0 0 6px; color: var(--console-text); }
+.api-onboarding-body .api-onboarding-desc { margin: 0 0 16px; font-size: 13px; line-height: 1.6; }
+.api-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 操作卡片保留但不再需要——用普通按钮替代 */
+.api-quick-actions { gap: 8px; }
+.api-action-card { padding: 10px 14px; gap: 10px; border-radius: 8px; }
+.api-action-icon { font-size: 16px; }
+.api-action-copy strong { font-size: 12px; }
+.api-action-copy span { font-size: 11px; }
+.api-action-card > .anticon:last-child { font-size: 10px; }
+/* 左侧批量操作在未勾选时更轻量 */
+.api-directory-batch { padding: 4px 0 8px; margin-bottom: 4px; }
+.api-directory-actions .ant-btn { height: 26px; font-size: 11px; }
+.api-selection-count { font-size: 11px; }
 
 
 /* 浏览器面板使用与参考图一致的无底色分栏图标按钮。 */
@@ -1468,3 +1522,28 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-catalog-layout .api-tree-module { gap: 8px; min-height: 36px; padding-block: 6px; }
 .api-catalog-layout .api-tree-module > .anticon { width: 14px; display: inline-flex; align-items: center; justify-content: center; }
 .api-catalog-layout .api-tree-count { line-height: 20px; }
+
+/* ── 需求与断言覆盖 ── */
+.coverage-panel { display: flex; flex-direction: column; gap: 16px; }
+.coverage-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.coverage-toolbar .ant-select { min-width: 160px; }
+.coverage-summary { font-size: 12px; color: var(--console-secondary); }
+.coverage-requirement-text { white-space: pre-wrap; margin-top: 4px; line-height: 1.65; }
+.coverage-requirement-source { font-size: 12px; color: var(--console-muted); margin-top: 4px; }
+.coverage-mapping { overflow-wrap: anywhere; padding: 8px 0; }
+.coverage-mapping + .coverage-mapping { border-top: 1px solid var(--console-border); }
+.coverage-mapping-assertions { font-size: 12px; color: var(--console-secondary); margin-top: 4px; }
+.coverage-modal-fields { display: flex; flex-direction: column; gap: 12px; }
+.coverage-modal-fields .ant-select { width: 100%; }
+.coverage-blocker-row { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ── 页面间距统一：16 / 24 分别对应常规分隔和主要段落分隔 ── */
+.page-section { margin-top: 16px; }
+.page-section-lg { margin-top: 24px; }
+.page-section-b { margin-bottom: 16px; }
+.page-gap { display: flex; flex-direction: column; gap: 16px; }
+.page-gap-sm { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── 表单区域 ── */
+.form-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.form-row-end { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }

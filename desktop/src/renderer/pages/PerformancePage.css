@@ -1,0 +1,46 @@
+.performance-page { --perf-chart-line: #2856c5; }
+:root[data-theme="dark"] .performance-page { --perf-chart-line: #587fe0; }
+
+.perf-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.perf-stack > *, .perf-source-row > *, .perf-load-row > * { min-width: 0; }
+
+/* ── form ── */
+.perf-form .ant-form-item { margin-bottom: 8px; }
+.perf-source-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.perf-source-env { flex: 0 0 130px; }
+.perf-source-def { flex: 1 1 300px; }
+.perf-source-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0 0; }
+.perf-method-tag.ant-tag { margin-inline-end: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+.perf-params-collapse.ant-collapse-ghost > .ant-collapse-item > .ant-collapse-header { padding: 8px 0; font-size: 13px; color: var(--console-secondary); }
+.perf-params-collapse.ant-collapse-ghost > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box { padding: 0; }
+.perf-parameter-note { margin: 8px 0 0; font-size: 11px; }
+.perf-load-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding-top: 4px; }
+.perf-load-row .ant-form-item { margin-bottom: 0; }
+.perf-load-total { font-size: 12px; padding-bottom: 6px; }
+.perf-run-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--console-border); }
+
+/* ── trend ── */
+.perf-trend-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.perf-trend-filters > .ant-select:first-child { width: 120px; }
+.perf-trend-filters > .ant-select:nth-child(2) { flex: 1 1 280px; min-width: 0; }
+.perf-chart { position: relative; max-width: 920px; }
+.perf-chart svg { display: block; width: 100%; }
+.perf-chart-readout { font-size: 12px; min-height: 18px; color: var(--console-secondary); }
+.perf-chart-grid { stroke: var(--console-border); stroke-width: 1; }
+.perf-chart-label { fill: var(--console-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.perf-chart-line { fill: none; stroke: var(--perf-chart-line); stroke-width: 2; stroke-linejoin: round; }
+.perf-chart-point { fill: var(--perf-chart-line); stroke: var(--console-surface); stroke-width: 2; }
+.perf-chart-crosshair { stroke: var(--console-muted); stroke-width: 1; }
+.perf-chart-hit:focus-visible { outline: none; stroke: var(--console-text); stroke-width: 2; }
+
+/* ── responsive ── */
+@container (max-width: 640px) {
+  .perf-source-row { flex-direction: column; }
+  .perf-source-env { flex-basis: auto; width: 100%; }
+  .perf-load-row { gap: 8px; }
+}
+@media (forced-colors: active) {
+  .perf-chart-line, .perf-chart-point { stroke: CanvasText; }
+  .perf-chart-point { fill: CanvasText; }
+  .perf-chart-label { fill: CanvasText; }
+}

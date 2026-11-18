@@ -69,7 +69,7 @@ export function ResponseBody({ response, onAddAssertion, duration_ms }: Response
       </Space>
     </div>
 
-    {response.truncated && <p className="api-muted" style={{ marginBottom: 8 }}>这条历史响应已被旧版本截断或省略，请重新发送请求获取完整内容。</p>}
+    {response.truncated && <p className="api-muted api-truncated-note">这条历史响应已被旧版本截断或省略，请重新发送请求获取完整内容。</p>}
 
     {/* 工具栏 */}
     <div className="api-response-tools">

@@ -10,7 +10,7 @@ export function StepResult({ step, onAddAssertion }: { step: ApiStepTrace; onAdd
   const body = step.response?.body;
   const unauthorized = step.response?.status_code === 401 || Boolean(body && typeof body === "object" && "code" in body && String(body.code) === "401");
   return <div className="api-step-result">
-    {unauthorized && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message="服务端拒绝了当前请求的身份认证"
+    {unauthorized && <Alert type="warning" showIcon className="api-auth-alert" message="服务端拒绝了当前请求的身份认证"
       description="在「实际请求」中检查鉴权头是否存在（值已隐藏），以及 clientid 是否与登录使用的客户端一致。网页登录后需保存 token；配置了默认登录角色或请求角色时，将优先使用该角色凭据。HTTP 200 中的业务码 401 也表示认证失败，请配置业务码断言。" />}
     {step.error && <div className="api-result-error" role="alert">{step.error}</div>}
     <Tabs size="small" items={[
