@@ -5,31 +5,45 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
 
-from .models import CATEGORIES, PRIORITIES, TestCase
+from .models import CATEGORIES, PRIORITIES, ApiSpec, TestCase, new_id
 
 # Excel 列名 -> TestCase 字段
 DEFAULT_COLUMN_MAP: dict[str, str] = {
+    "用例ID": "id",
     "标题": "title",
     "所属分组": "module_path",
     "维护人": "owner",
+    "测试类型": "type",
+    "执行方式": "execution_mode",
+    "状态": "status",
     "前置条件": "preconditions",
+    "测试数据": "data_refs",
     "步骤描述": "steps",
     "预期结果": "expected",
     "用例等级": "priority",
     "用例类型": "category",
+    "接口配置(JSON)": "api",
+    "接口流程(JSON)": "api_flow",
+    "清理步骤(JSON)": "api_cleanup",
+    "性能配置(JSON)": "performance",
 }
 
 # 常见的列名写法（各测试平台导出格式不同）；列名先去掉「*」「(必填)」等标记再匹配
 COLUMN_ALIASES: dict[str, str] = {
+    "id": "id", "用例编号": "id", "case id": "id",
     "用例标题": "title", "用例名称": "title", "名称": "title", "用例名": "title", "测试标题": "title", "case title": "title", "title": "title",
     "所属模块": "module_path", "模块": "module_path", "功能模块": "module_path", "模块路径": "module_path", "分组": "module_path", "目录": "module_path",
     "负责人": "owner", "创建人": "owner", "编写人": "owner",
+    "测试方式": "execution_mode", "执行模式": "execution_mode",
+    "测试分类": "type", "用例状态": "status",
+    "数据引用": "data_refs", "测试数据引用": "data_refs",
     "前置": "preconditions", "前提条件": "preconditions", "预置条件": "preconditions",
     "步骤": "steps", "操作步骤": "steps", "测试步骤": "steps", "用例步骤": "steps", "执行步骤": "steps",
     "期望结果": "expected", "预期": "expected", "预期输出": "expected",
@@ -149,20 +163,60 @@ def row_to_case(row: dict[str, Any], project_id: str = "", source_row: int | Non
         if prefix and (not module_path or module_path[-1] != prefix):
             module_path.append(prefix)
 
+    def split_values(value: Any) -> list[str]:
+        return [p.strip() for p in re.split(r"[|,，\n]", str(value or "")) if p.strip()]
+
     case = TestCase(
+        id=str(row.get("id") or "").strip() or new_id("tc"),
         title=title,
         project_id=project_id,
+        type=str(row.get("type") or "ui").strip().lower(),
+        execution_mode=str(row.get("execution_mode") or "").strip().lower(),
+        status=str(row.get("status") or "draft").strip().lower(),
         module_path=module_path,
         owner=str(row.get("owner") or "").strip(),
         preconditions=split_numbered(row.get("preconditions")),
+        data_refs=split_values(row.get("data_refs")),
         steps=split_numbered(row.get("steps")),
         expected=split_numbered(row.get("expected")),
         priority=normalize_priority(row.get("priority")),
         category=normalize_category(row.get("category")),
         source_row=source_row,
     )
+    if not case.execution_mode:
+        case.execution_mode = "ui"
+    for field, expected_type in (("api", dict), ("api_flow", list), ("api_cleanup", list), ("performance", dict)):
+        raw = row.get(field)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"第 {source_row} 行「{field}」不是有效 JSON") from exc
+        if not isinstance(value, expected_type):
+            raise ValueError(f"第 {source_row} 行「{field}」JSON 类型错误")
+        if field == "api":
+            items = [value]
+        elif field in ("api_flow", "api_cleanup"):
+            items = value
+        else:
+            case.performance = value
+            continue
+        if any(not isinstance(item, dict) or not isinstance(item.get("method"), str)
+               or not isinstance(item.get("path"), str) or not item["path"].startswith("/")
+               or not isinstance(item.get("expected_status"), list) or not item["expected_status"]
+               for item in items):
+            raise ValueError(f"第 {source_row} 行「{field}」每个请求都须包含 method、以 / 开头的 path 和 expected_status 数组")
+        try:
+            specs = [ApiSpec(**item) for item in items]
+        except TypeError as exc:
+            raise ValueError(f"第 {source_row} 行「{field}」包含不支持的接口字段：{exc}") from exc
+        if field == "api":
+            case.api = specs[0]
+        else:
+            setattr(case, field, specs)
     # 保留原始编号用于连续性检查（不入库）
-    case._raw = {k: row.get(k) for k in ("steps", "expected", "preconditions", "priority", "category", "module_path")}  # type: ignore[attr-defined]
+    case._raw = dict(row)  # type: ignore[attr-defined]
     return case
 
 
@@ -214,17 +268,63 @@ def export_excel(cases: list[TestCase], path: str | Path, column_map: dict[str, 
         if "-" in c.title and group and group[-1] == c.title.split("-", 1)[0].strip():
             group = group[:-1]
         values = {
+            "id": c.id,
             "title": c.title,
+            "type": c.type,
+            "execution_mode": c.execution_mode,
+            "status": c.status,
             "module_path": "|".join(group),
             "owner": c.owner,
             "preconditions": _numbered(c.preconditions),
+            "data_refs": "|".join(c.data_refs),
             "steps": _numbered(c.steps),
             "expected": _numbered(c.expected),
             "priority": c.priority,
             "category": c.category,
+            "api": json.dumps(vars(c.api), ensure_ascii=False) if c.api else "",
+            "api_flow": json.dumps([vars(s) for s in c.api_flow], ensure_ascii=False) if c.api_flow else "",
+            "api_cleanup": json.dumps([vars(s) for s in c.api_cleanup], ensure_ascii=False) if c.api_cleanup else "",
+            "performance": json.dumps(c.performance, ensure_ascii=False) if c.performance else "",
         }
         ws.append([values[column_map[h]] for h in headers])
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(out))
+    return out
+
+
+def export_template(path: str | Path) -> Path:
+    """可填写的严格导入模板；第一张表是唯一导入数据源。"""
+    out = export_excel([], path)
+    wb = load_workbook(out)
+    ws = wb.worksheets[0]
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:Q1"
+    from openpyxl.styles import Font, PatternFill, Alignment
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="174A63")
+        cell.alignment = Alignment(wrap_text=True)
+        ws.column_dimensions[cell.column_letter].width = 24 if cell.value not in ("步骤描述", "预期结果", "前置条件") else 42
+    help_sheet = wb.create_sheet("填写说明")
+    for line in [
+        ["字段", "填写规则"],
+        ["用例ID", "留空，导入时自动生成；不要填写已有 ID"],
+        ["测试类型", "api / ui / app；性能用例填 api，并填写性能配置(JSON)"],
+        ["执行方式", "api / ui / app / capture / doc / manual；性能用例填 api"],
+        ["状态", "draft / reviewed / deprecated；建议先填 draft"],
+        ["所属分组", "用 | 分隔层级，例如 用户管理|创建用户"],
+        ["前置条件", "每行一条，格式：[ENV] 描述、[AUTH] 描述、[DATA] 描述、[RUNTIME] 描述、[STATE] 描述；至少一条 ENV"],
+        ["步骤描述 / 预期结果", "每行一条，一一对应；可用 1.、2. 编号"],
+        ["测试数据", "多个 key 用 | 分隔"],
+        ["接口配置(JSON)", "API 单接口必填，如 {\"method\":\"GET\",\"path\":\"/users\",\"expected_status\":[200]}"],
+        ["接口流程(JSON)", "API 多步骤时填 JSON 数组；与接口配置二选一"],
+        ["性能配置(JSON)", "性能用例填写 PerformanceOptions 对象：path、method、vus、seconds、p95Ms、maxFailureRate 等"],
+        ["参考", "完整字段定义见 docs/test-templates/00-common-meta.md、01-api-test-template.md、02-ui-test-template.md、03-performance-test-template.md"],
+    ]:
+        help_sheet.append(line)
+    help_sheet.column_dimensions["A"].width = 26
+    help_sheet.column_dimensions["B"].width = 110
+    help_sheet.freeze_panes = "A2"
+    wb.save(out)
     return out

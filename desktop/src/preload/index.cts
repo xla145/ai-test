@@ -13,7 +13,7 @@ function subscribe<T>(channel: string, cb: (v: T) => void): () => void {
 const methods = [
   "assistantConversations", "assistantCreateConversation", "assistantConversation", "assistantSend", "assistantConfirm", "assistantCancelOperation", "assistantStop",
   "listApiDefinitions", "previewApiImport", "importApiDefinitions", "saveApiCase", "generateDefinitionCases", "previewApiParameterCases", "saveApiParameterCases", "debugApiRequest", "stopApiDebug", "listApiDebugHistory",
-  "listProjects", "createProject", "importExcel", "lint", "listCases", "updateCase", "applyFix",
+  "listProjects", "createProject", "importExcel", "exportCaseTemplate", "lint", "listCases", "updateCase", "applyFix",
   "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret", "openApiLogin", "saveApiLogin",
   "writeReviewedApiSuite", "listApiTestSets", "saveApiTestSet",
   "setProjectType",

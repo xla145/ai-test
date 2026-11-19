@@ -517,7 +517,7 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
       return out;
     },
     projectOverview: (g: string) => orch.projectOverview(g),
-    importExcel: (p: string, f: string) => orch.importExcel(p, f),
+    importExcel: (p: string, f: string, strictTemplate?: boolean) => orch.importExcel(p, f, strictTemplate ?? false),
     lint: (p: string) => orch.lint(p),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
@@ -762,6 +762,10 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     exportCasesExcel: async (p: string, name: string) => {
       const out = await saveAs(`${name}-用例.xlsx`, [{ name: "Excel", extensions: ["xlsx"] }]);
       return out ? orch.exportCasesExcel(p, out) : null;
+    },
+    exportCaseTemplate: async () => {
+      const out = await saveAs("AIProbe-测试用例模板.xlsx", [{ name: "Excel", extensions: ["xlsx"] }]);
+      return out ? orch.exportCaseTemplate(out) : null;
     },
     openPath: async (target: string) => {
       const p = await assertOpenable(orch, target);

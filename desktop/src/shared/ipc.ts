@@ -325,7 +325,7 @@ export interface AitestApi extends AssistantApi {
   moveProject(projectId: string, parent: string): Promise<unknown>;
   projectOverview(groupId: string): Promise<GroupOverview>;
   getSettingsDetail(projectId: string): Promise<SettingsDetail>;
-  importExcel(projectId: string, file: string): Promise<unknown>;
+  importExcel(projectId: string, file: string, strictTemplate?: boolean): Promise<unknown>;
   lint(projectId: string): Promise<unknown>;
   listCases(projectId: string, filters?: Record<string, string>): Promise<unknown[]>;
   pageCases(projectId: string, q: CaseQuery): Promise<Page<unknown>>;
@@ -442,6 +442,7 @@ export interface AitestApi extends AssistantApi {
   /** 弹出保存对话框；用户取消返回 null */
   exportReport(runIds: string[], format: "html" | "xlsx" | "json"): Promise<{ path: string } | null>;
   exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
+  exportCaseTemplate(): Promise<{ path: string } | null>;
   readEvidenceImage(projectId: string, path: string): Promise<string>;
   openPath(path: string): Promise<void>;
   showInFolder(path: string): Promise<void>;

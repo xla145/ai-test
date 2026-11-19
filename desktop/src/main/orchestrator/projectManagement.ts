@@ -32,8 +32,8 @@ export class ProjectManagementModule {
     return this.deps.engine(["project-overview", "--project", groupId]);
   }
 
-  importExcel(projectId: string, file: string) {
-    return this.deps.engine(["import-excel", "--project", projectId, "--file", file]);
+  importExcel(projectId: string, file: string, strictTemplate = false) {
+    return this.deps.engine(["import-excel", "--project", projectId, "--file", file, ...(strictTemplate ? ["--strict-template"] : [])]);
   }
 
   lint(projectId: string) {
@@ -259,5 +259,9 @@ export class ProjectManagementModule {
 
   exportCasesExcel(projectId: string, out: string) {
     return this.deps.engine<{ path: string; cases: number }>(["export-excel", "--project", projectId, "--out", out]);
+  }
+
+  exportCaseTemplate(out: string) {
+    return this.deps.engine<{ path: string }>(["export-case-template", "--out", out]);
   }
 }

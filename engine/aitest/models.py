@@ -151,6 +151,7 @@ class TestCase:
     api_variable_scope: str = "legacy"
     api_revision: int = 1
     api_needs_review: bool = False
+    performance: dict[str, Any] | None = None
     source_row: int | None = None
     id: str = field(default_factory=lambda: new_id("tc"))
 

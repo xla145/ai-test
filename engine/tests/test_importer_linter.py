@@ -83,6 +83,46 @@ def test_repeat_cli_import_preserves_manual_changes_and_does_not_merge_other_sou
     assert call("get-case", "--case", cid)["status"] == "reviewed"
 
 
+def test_strict_template_rejects_before_writing(tmp_path, capsys):
+    import json
+    from aitest.cli import main
+    from openpyxl import Workbook
+    headers = ["用例ID", "标题", "所属分组", "维护人", "测试类型", "执行方式", "状态", "前置条件",
+               "测试数据", "步骤描述", "预期结果", "用例等级", "用例类型", "接口配置(JSON)",
+               "接口流程(JSON)", "清理步骤(JSON)", "性能配置(JSON)"]
+    path = tmp_path / "invalid.xlsx"
+    wb = Workbook(); ws = wb.active; ws.append(headers)
+    ws.append(["", "用户-创建", "用户", "", "ui", "ui", "draft", "未声明类型", "", "1. 打开", "1. 可见", "P1", "功能测试", "", "", "", ""])
+    wb.save(path)
+    db = str(tmp_path / "db.sqlite")
+    assert main(["--db", db, "init-project", "--name", "p", "--workspace", str(tmp_path / "ws")]) == 0
+    pid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["id"]
+    assert main(["--db", db, "import-excel", "--project", pid, "--file", str(path), "--strict-template"]) == 1
+    capsys.readouterr()
+    assert main(["--db", db, "list-cases", "--project", pid]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"] == []
+
+
+def test_exported_template_accepts_valid_case(tmp_path, capsys):
+    import json
+    from aitest.cli import main
+    from aitest.importer import export_template
+    from openpyxl import load_workbook
+    path = export_template(tmp_path / "template.xlsx")
+    wb = load_workbook(path)
+    assert wb.worksheets[0].auto_filter.ref == "A1:Q1"
+    assert wb.sheetnames == ["用例", "填写说明"]
+    wb.worksheets[0].append(["", "用户-创建-正常", "用户|创建", "", "api", "api", "draft",
+                              "1. [ENV] 测试环境可达\n2. [AUTH] token 已配置", "", "1. 发送请求", "1. HTTP 200",
+                              "P1", "功能测试", json.dumps({"method": "GET", "path": "/users", "expected_status": [200]}), "", "", ""])
+    wb.save(path)
+    db = str(tmp_path / "db.sqlite")
+    assert main(["--db", db, "init-project", "--name", "p", "--workspace", str(tmp_path / "ws")]) == 0
+    pid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["id"]
+    assert main(["--db", db, "import-excel", "--project", pid, "--file", str(path), "--strict-template"]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["created"] == 1
+
+
 def test_import_mapping(tmp_path):
     cases = import_excel(make_excel(tmp_path / "cases.xlsx"), project_id="p1")
     assert len(cases) == 4

@@ -121,6 +121,9 @@
         "null"
       ]
     },
+    "performance": {
+      "type": ["object", "null"]
+    },
     "api": {
       "anyOf": [
         {

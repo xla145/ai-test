@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -143,6 +144,78 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     column_map = json.loads(a.column_map) if a.column_map else None
     info: dict[str, Any] = {}
     cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet, info=info)
+    if a.strict_template:
+        required = {field: label for label, field in importer.DEFAULT_COLUMN_MAP.items()}
+        missing = [label for field, label in required.items() if field not in info.get("columns", {})]
+        if missing:
+            raise ValueError("测试用例模板缺少列：" + "、".join(missing))
+        if not cases:
+            raise ValueError("测试用例模板没有可导入的用例")
+        allowed = {"api", "ui", "app"}
+        modes = {"api", "ui", "app", "capture", "doc", "manual"}
+        statuses = {"draft", "reviewed", "deprecated"}
+        errors: list[str] = []
+        for case in cases:
+            row = case.source_row or 0
+            raw = getattr(case, "_raw", {})
+            if not case.title or not case.module_path or not case.preconditions or not case.steps or not case.expected:
+                errors.append(f"第 {row} 行存在空的必填字段")
+            if not all(re.match(r"^\[(ENV|AUTH|DATA|RUNTIME|STATE)\]\s+\S", p) for p in case.preconditions):
+                errors.append(f"第 {row} 行前置条件须逐条使用 [ENV]/[AUTH]/[DATA]/[RUNTIME]/[STATE] 前缀")
+            if not any(p.startswith("[ENV]") for p in case.preconditions):
+                errors.append(f"第 {row} 行前置条件至少包含一条 [ENV]")
+            for field, label in (("type", "测试类型"), ("execution_mode", "执行方式"), ("status", "状态"),
+                                 ("priority", "用例等级"), ("category", "用例类型")):
+                if not str(raw.get(field) or "").strip():
+                    errors.append(f"第 {row} 行「{label}」不能为空")
+            if str(raw.get("priority") or "").strip() not in ("P0", "P1", "P2", "P3"):
+                errors.append(f"第 {row} 行用例等级须为 P0～P3")
+            if str(raw.get("category") or "").strip() not in ("功能测试", "安全相关", "兼容性", "其它"):
+                errors.append(f"第 {row} 行用例类型无效")
+            if str(raw.get("id") or "").strip():
+                errors.append(f"第 {row} 行用例ID请留空，由系统生成")
+            if len(case.title) > 200:
+                errors.append(f"第 {row} 行标题超过 200 字符")
+            if case.type not in allowed:
+                errors.append(f"第 {row} 行测试类型必须是 api、ui 或 app")
+            if case.execution_mode not in modes:
+                errors.append(f"第 {row} 行执行方式无效：{case.execution_mode}")
+            if case.status not in statuses:
+                errors.append(f"第 {row} 行状态无效：{case.status}")
+            if len(case.steps) != len(case.expected):
+                errors.append(f"第 {row} 行步骤与预期数量不一致")
+            for field, label in (("steps", "步骤描述"), ("expected", "预期结果")):
+                numbers = importer.numbering_of(raw.get(field))
+                if numbers and numbers != list(range(1, len(numbers) + 1)):
+                    errors.append(f"第 {row} 行「{label}」编号须从 1 连续递增")
+            if any(not s.strip() for s in [*case.steps, *case.expected]):
+                errors.append(f"第 {row} 行步骤或预期有空项")
+            if case.type == "api" and not (case.api or case.api_flow or case.performance):
+                errors.append(f"第 {row} 行 API 用例必须填写接口配置(JSON)、接口流程(JSON)或性能配置(JSON)")
+            if case.type == "api" and case.execution_mode != "api":
+                errors.append(f"第 {row} 行 API 用例执行方式须为 api")
+            if case.type != "api" and (case.api or case.api_flow or case.performance):
+                errors.append(f"第 {row} 行非 API 用例不能填写接口或性能配置")
+            if case.performance:
+                p = case.performance
+                if not (isinstance(p.get("path"), str) and p["path"].startswith("/") or isinstance(p.get("scenarioSteps"), list) and p["scenarioSteps"]):
+                    errors.append(f"第 {row} 行性能配置须填写 path 或 scenarioSteps")
+                if not isinstance(p.get("vus"), int) or isinstance(p.get("vus"), bool) or not 1 <= p["vus"] <= 100:
+                    errors.append(f"第 {row} 行性能配置 vus 须为 1～100")
+                if not isinstance(p.get("seconds"), (int, float)) or isinstance(p.get("seconds"), bool) or p["seconds"] <= 0:
+                    errors.append(f"第 {row} 行性能配置 seconds 须大于 0")
+                if not isinstance(p.get("p95Ms"), (int, float)) or isinstance(p.get("p95Ms"), bool) or p["p95Ms"] <= 0:
+                    errors.append(f"第 {row} 行性能配置 p95Ms 须大于 0")
+                if not isinstance(p.get("maxFailureRate"), (int, float)) or isinstance(p.get("maxFailureRate"), bool) or not 0 <= p["maxFailureRate"] < 1:
+                    errors.append(f"第 {row} 行性能配置 maxFailureRate 须在 0～1 之间")
+                durations = [p.get(k, 0) for k in ("rampUp", "seconds", "rampDown")]
+                if any(not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0 for v in durations):
+                    errors.append(f"第 {row} 行性能配置时长参数须为非负数")
+                elif sum(durations) > 300:
+                    errors.append(f"第 {row} 行性能配置总时长不能超过 300 秒")
+            errors.extend(f"第 {row} 行结构错误：{issue}" for issue in validate_case(case.to_dict()))
+        if errors:
+            raise ValueError("测试用例模板校验失败：" + "；".join(errors[:20]))
     # Only deduplicate an identical source and import configuration. Matching
     # row/title across different workbooks would overwrite unrelated or edited
     # cases. Keep manually reviewed/edited records when the source is repeated.
@@ -157,7 +230,8 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
         return {"imported": len(cases), "reused": len(cases), "created": 0,
                 "source_sha256": source_hash, **info,
                 "lint": {k: v for k, v in report.to_dict().items() if k != "issues"}}
-    router.route_all(cases)
+    if not a.strict_template:
+        router.route_all(cases)
     report = linter.lint_cases(cases)
     for c in cases:
         store.upsert_case(c, validate=False)  # 导入的原始用例可能不完整，靠 lint 阻断
@@ -208,6 +282,10 @@ def cmd_apply_fix(store: Store, a: argparse.Namespace) -> Any:
 def cmd_export_excel(store: Store, a: argparse.Namespace) -> Any:
     cases = store.list_cases(a.project)
     return {"path": str(importer.export_excel(cases, a.out)), "cases": len(cases)}
+
+
+def cmd_export_case_template(store: Store, a: argparse.Namespace) -> Any:
+    return {"path": str(importer.export_template(a.out))}
 
 
 def cmd_create_case(store: Store, a: argparse.Namespace) -> Any:
@@ -860,12 +938,13 @@ def build_parser() -> argparse.ArgumentParser:
     add("parse-openapi", cmd_parse_openapi, (("--file",), {**req, "help": "JSON/YAML 文件路径或 HTTP/HTTPS OpenAPI 文档地址"}))
     add("api-workspace", cmd_api_workspace, (("--project",), req), (("--action",), req), (("--file",), {}))
     add("import-excel", cmd_import_excel, (("--project",), req), (("--file",), req), (("--sheet",), {}),
-        (("--column-map",), {}))
+        (("--column-map",), {}), (("--strict-template",), {"action": "store_true"}))
     add("lint", cmd_lint, (("--project",), req), (("--case-ids",), {}),
         (("--p0-threshold",), {"type": float, "default": 0.25}), (("--with-issues",), {"action": "store_true"}))
     add("list-issues", cmd_list_issues, (("--case",), {}), (("--project",), {}), (("--level",), {}), *paging)
     add("apply-fix", cmd_apply_fix, (("--case",), req), (("--field",), req), (("--value",), req))
     add("export-excel", cmd_export_excel, (("--project",), req), (("--out",), req))
+    add("export-case-template", cmd_export_case_template, (("--out",), req))
     add("create-case", cmd_create_case, (("--project",), req), (("--json",), req))
     add("update-case", cmd_update_case, (("--case",), req), (("--json",), req),
         (("--actor",), {"choices": ["agent", "human"], "default": "agent"}))

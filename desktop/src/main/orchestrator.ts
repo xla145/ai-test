@@ -39,6 +39,7 @@ export class Orchestrator extends EventEmitter {
   moveProject(...args: Parameters<ProjectManagementModule["moveProject"]>) { return this.projectManagement.moveProject(...args); }
   projectOverview(...args: Parameters<ProjectManagementModule["projectOverview"]>) { return this.projectManagement.projectOverview(...args); }
   importExcel(...args: Parameters<ProjectManagementModule["importExcel"]>) { return this.projectManagement.importExcel(...args); }
+  exportCaseTemplate(...args: Parameters<ProjectManagementModule["exportCaseTemplate"]>) { return this.projectManagement.exportCaseTemplate(...args); }
   lint(...args: Parameters<ProjectManagementModule["lint"]>) { return this.projectManagement.lint(...args); }
   listCases(...args: Parameters<ProjectManagementModule["listCases"]>) { return this.projectManagement.listCases(...args); }
   pageCases(...args: Parameters<ProjectManagementModule["pageCases"]>) { return this.projectManagement.pageCases(...args); }
