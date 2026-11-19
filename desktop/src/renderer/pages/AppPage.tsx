@@ -1,3 +1,4 @@
+import { useAssistantPageContext } from "../assistant/AssistantContext";
 import { AndroidOutlined, AppleOutlined, CompassOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Empty, Input, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography } from "antd";
 import { useState } from "react";
@@ -25,6 +26,7 @@ export function AppPage({ project }: { project: Project }) {
   const [platform, setPlatform] = useState<Platform>("android");
   const [device, setDevice] = useState("");
   const [result, setResult] = useState<AppRunResult>();
+  useAssistantPageContext({ projectId: project.id, page: "app", env, references: result ? [{ kind: "run", id: result.run.run_id }] : [] });
   const { busy, run } = useAction();
   const view = useLoad(() => api().getGlobalSettings(), []);
   const tools = useLoad(() => api().checkRuntime(), []);
@@ -35,7 +37,7 @@ export function AppPage({ project }: { project: Project }) {
   if (!Object.keys(project.environments).length) return <NoEnvironment project={project} purpose="执行 App 测试" />;
 
   return (
-    <>
+    <div className="page-frame">
       <PageHeader
         title="App 测试"
         workflow={[
@@ -63,6 +65,7 @@ export function AppPage({ project }: { project: Project }) {
           </RunButton>
         </>}
       />
+<div className="page-scroll-body">
 
       {!appId && (
         <Alert type="warning" showIcon className="page-section-b"
@@ -110,7 +113,8 @@ export function AppPage({ project }: { project: Project }) {
       )}
 
       <AppCases project={project} env={env} platform={platform} canExplore={Boolean(appId) && pinkyOn} pinkyOn={pinkyOn} />
-    </>
+    </div>
+</div>
   );
 }
 

@@ -39,8 +39,9 @@ const pct = (v?: number | null) => (v == null ? "—" : `${(v * 100).toFixed(1)}
 
 export function OpsPage({ project }: { project: Project }) {
   return (
-    <div className="section-page ops-page">
+    <div className="page-frame section-page ops-page">
       <PageHeader title="工程化" description="验证指标与门禁、失败归因确认、模型用量与预算、团队共享与 CI。模型服务在「全局设置」中配置。" />
+<div className="page-scroll-body">
       <Tabs
         tabPosition="top"
         items={[
@@ -52,6 +53,7 @@ export function OpsPage({ project }: { project: Project }) {
         ]}
       />
     </div>
+</div>
   );
 }
 

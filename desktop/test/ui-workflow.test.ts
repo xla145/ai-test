@@ -97,7 +97,7 @@ describe("UI workbench orchestration", () => {
         default: return {};
       }
     }) as unknown as EngineCall;
-    const ui = { prepareEmbedded: vi.fn(async () => ({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } })),
+    const ui = { createDebugBrowser: vi.fn(() => ({ newRoleContext: vi.fn(async () => ({ loggedIn: true })), close: vi.fn(async () => {}) })), prepareEmbedded: vi.fn(async () => ({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } })),
       checkData: vi.fn(async () => []), seedData: vi.fn(async () => []),
       runUiSuite: vi.fn(async () => ({ exitCode: 0, htmlReport: "report", reportJson: "", stderr: "", errors: [], results: [{ case_id: "tc_a", status: "passed", duration: 1, message: "", evidence_paths: [], reviews: [] }] })) };
     const agent = vi.fn();

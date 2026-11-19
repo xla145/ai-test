@@ -105,7 +105,7 @@ export function ImportPage({ project }: { project: Project }) {
   const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <>
+    <div className="page-frame import-page">
       <PageHeader
         title="导入与规范检查"
         workflow={[
@@ -120,6 +120,13 @@ export function ImportPage({ project }: { project: Project }) {
           <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
         </>}
       />
+      {report && report.total > 0 && <div className="stat-grid metric-strip import-summary">
+        <Card><Statistic title="用例总数" value={report.total} /></Card>
+        <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
+        <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
+        <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
+      </div>}
+      <div className="page-scroll-body">
       {!report || report.total === 0 ? (
         <Card loading={checking}>
           {!report ? (
@@ -144,17 +151,11 @@ export function ImportPage({ project }: { project: Project }) {
         </Card>
       ) : (
         <>
-          <div className="stat-grid metric-strip">
-            <Card><Statistic title="用例总数" value={report.total} /></Card>
-            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
-            <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
-            <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
-          </div>
           {report.blocked_case_ids.length === 0 && (
             <Alert className="page-section" type="success" showIcon icon={<CheckCircleOutlined />} message="没有阻断级问题，可以进入脚本生成"
               action={goTab && <Button size="small" onClick={() => goTab("cases")}>去用例库审核</Button>} />
           )}
-          <div className="split page-section">
+          <div className="split page-section import-detail-panels">
             <div style={{ flex: "2 1 280px" }}>
               <Card title="规则命中" size="small">
                 <Table
@@ -201,6 +202,7 @@ export function ImportPage({ project }: { project: Project }) {
           </div>
         </>
       )}
-    </>
+    </div>
+</div>
   );
 }

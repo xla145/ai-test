@@ -1,3 +1,4 @@
+import { createAssistantDemo } from "./assistantDemo";
 import { workspaceMock } from "./pages/api/workspaceMock";
 import { createPerformanceDemo } from "./performanceDemo";
 import { rememberNav } from "./nav";
@@ -268,6 +269,7 @@ const eventListeners = new Set<(e: { method: string; params: unknown }) => void>
 listeners.event = event => eventListeners.forEach(cb => cb(event));
 const apiWorkspaceMock = workspaceMock(cases);
 const mockApi: AitestApi = {
+  ...createAssistantDemo(),
   ...apiWorkspaceMock,
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
@@ -447,6 +449,9 @@ const mockApi: AitestApi = {
   },
   uiDebugState: async () => debugSession?.state() ?? null,
   uiTasks: async () => structuredClone(agentDemoTasks),
+  taskSnapshot: async () => ({ revision: Date.now(), tasks: structuredClone(agentDemoTasks) }),
+  taskProgress: async () => ({ events: [], truncated: false }),
+  exportDiagnostics: async () => null,
   stopExecutionTask: async (id) => { const task = agentDemoTasks.find(t => t.id === id); if (task) task.status = "stopped"; },
   stopUiTask: async (projectId, env) => {
     mockUiStopped = true;

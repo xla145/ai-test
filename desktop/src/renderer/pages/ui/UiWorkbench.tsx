@@ -1,3 +1,4 @@
+import { useAssistantPageContext } from "../../assistant/AssistantContext";
 import { readIssue, writeIssue } from "./issueHistory";
 import { useUiTasks, isUiTaskActive } from "../../components/UiTasks";
 import {
@@ -145,6 +146,7 @@ export function UiWorkbench({ project, env, pendingProposals, onWorking, onUpdat
   const currentId = useRef<string>();
   currentId.current = current?.id;
   const [selected, setSelected] = useState<Record<string, UiGroupCase>>({});
+  useAssistantPageContext({ projectId: project.id, page: "ui", env, references: (Object.keys(selected).length ? Object.keys(selected) : current ? [current.id] : []).map(id => ({ kind: "case", id })) });
   const [listCollapsed, setListCollapsed] = useState(false);
   const [compactPanel, setCompactPanel] = useState<"cases" | "steps">("cases");
   const toggleList = (collapsed: boolean) => setListCollapsed(collapsed);

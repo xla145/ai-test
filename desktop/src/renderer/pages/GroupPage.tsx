@@ -25,12 +25,13 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
   const budget = overview.data?.budget;
 
   return (
-    <div className="section-page">
+    <div className="page-frame section-page">
       <PageHeader
         title={group.name}
         description="大项目存放共享的执行环境、凭据、角色账号与预算，子项目自动继承；用例、脚本与执行记录在各子项目中。"
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={onNewChild}>新建子项目</Button>}
       />
+<div className="page-scroll-body">
       <div className="stat-grid metric-strip page-section-b">
         <Card size="small"><Statistic title="子项目" value={children.length} /></Card>
         <Card size="small"><Statistic title="用例总数" value={totalCases} /></Card>
@@ -103,5 +104,6 @@ export function GroupPage({ group, onOpen, onNewChild }: { group: Project; onOpe
         ]}
       />
     </div>
+</div>
   );
 }

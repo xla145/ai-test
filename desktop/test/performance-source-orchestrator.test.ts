@@ -10,12 +10,12 @@ vi.mock("../src/main/performance", async importOriginal => ({
 }));
 const options: PerformanceOptions = { path: "/injected", method: "DELETE", vus: 1, seconds: 1, p95Ms: 500, maxFailureRate: .01, definitionId: "api_products", definitionRevision: 1 };
 
-async function setup() {
+async function setup(secrets: Record<string, string> = { AITEST_AUTH_TOKEN: "fixture-token" }) {
   const definitions = await workspaceMock([]).listApiDefinitions("p");
   const engine = vi.fn(async (args: string[]) => args[0] === "list-projects"
     ? [{ id: "p", workspace_path: "/workspace", environments: { test: { base_url: "http://localhost:3000" }, prod: { base_url: "http://localhost:3000", production: true } } }]
     : definitions);
-  const orch = new Orchestrator({ engine: engine as EngineCall, agent: vi.fn(), secretEnv: () => ({}) });
+  const orch = new Orchestrator({ engine: engine as EngineCall, agent: vi.fn(), secretEnv: () => secrets });
   return { definitions, engine, orch };
 }
 
@@ -28,6 +28,12 @@ describe("性能执行使用当前项目接口目录", () => {
     expect(vi.mocked(runPerformance).mock.calls[0][3]).toMatchObject({
       method: "GET", path: "/products", definitionId: "api_products", definitionRevision: 1, definitionName: "商品列表",
     });
+  });
+
+  it("rejects an authenticated target with no login before launching k6", async () => {
+    const { orch } = await setup({});
+    await expect(orch.runPerformance("p", "test", options)).rejects.toThrow("AUTH_REQUIRED");
+    expect(runPerformance).not.toHaveBeenCalled();
   });
 
   it("rejects a missing selection, another project's ID and a stale revision", async () => {

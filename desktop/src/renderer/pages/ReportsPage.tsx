@@ -1,3 +1,5 @@
+import { AssistantAskButton, useAssistantPageContext } from "../assistant/AssistantContext";
+import { useAssistantNavigation } from "../assistantNavigation";
 import { ExecutionResult } from "./api/ExecutionResult";
 import type { ApiDebugResult } from "../../shared/apiWorkspace";
 import { EvidenceImage } from "../components/EvidenceImage";
@@ -86,6 +88,12 @@ export function ReportsPage({ project }: { project: Project }) {
   const runs = useLoad(() => api().listRuns(project.id, framework === "all" ? undefined : framework) as Promise<RunRow[]>, [project.id, framework]);
   const [selected, setSelected] = useState<string[]>([]);
   const [open, setOpen] = useState<RunRow>();
+  const assistantReferences = (open ? [open.id] : selected).map(id => ({ kind: "run" as const, id }));
+  useAssistantPageContext({ projectId: project.id, page: "reports", references: assistantReferences });
+  useAssistantNavigation(project.id, "reports", !runs.loading && !!runs.data, ref => {
+    const row = runs.data?.find(r => r.id === ref.id);
+    if (row) setOpen(row);
+  });
   const { busy, run } = useAction();
 
   const exportRuns = (ids: string[], format: "html" | "xlsx" | "json") => run(async () => {
@@ -104,11 +112,12 @@ export function ReportsPage({ project }: { project: Project }) {
   });
 
   return (
-    <>
+    <div className="page-frame">
       <PageHeader
         title="测试报告"
         description="查看回归结果与失败明细，勾选多次执行可合并导出报告。"
         extra={<>
+          <AssistantAskButton projectId={project.id} page="reports" references={assistantReferences} mode="report" text="分析这份报告的失败原因，区分证据与推测，并给出下一步排查建议。">分析报告</AssistantAskButton>
           <Segmented value={framework} onChange={(v) => { setFramework(v as typeof framework); setSelected([]); }}
             options={[{ label: "全部", value: "all" }, { label: "接口", value: "pytest" }, { label: "UI", value: "playwright" }]} />
           <Button aria-label="刷新执行记录" title="刷新执行记录" icon={<ReloadOutlined />} onClick={() => runs.reload()} />
@@ -119,6 +128,7 @@ export function ReportsPage({ project }: { project: Project }) {
           </Dropdown>
         </>}
       />
+<div className="page-scroll-body">
       <div className="data-surface reports-surface">
       <Table<RunRow>
         size="small" scroll={{ x: 900 }}
@@ -156,7 +166,8 @@ export function ReportsPage({ project }: { project: Project }) {
       />
       </div>
       {open && <RunDrawer project={project} run={open} onClose={() => setOpen(undefined)} onExport={(f) => exportRuns([open.id], f)} busy={busy} />}
-    </>
+    </div>
+</div>
   );
 }
 
@@ -182,6 +193,7 @@ function RunDrawer({ project, run: r, onClose, onExport, busy }: {
       onClose={onClose}
       title={<Space>{r.framework === "playwright" ? "UI" : "接口"}{MODE[r.mode] ?? r.mode}<Typography.Text type="secondary" className="mono">{r.id}</Typography.Text></Space>}
       extra={<Space wrap>
+        <AssistantAskButton projectId={project.id} page="reports" references={[{ kind: "run", id: r.id }]} mode="report" text="分析这份报告，说明已知事实、可能原因和待确认项。">交给助手分析</AssistantAskButton>
         {r.html_report && <Button icon={<ChromeOutlined />} onClick={() => run(() => api().openPath(r.html_report!))}>Playwright 报告</Button>}
         {(r.html_report || r.junit) && (
           <Button icon={<FolderOpenOutlined />} onClick={() => run(() => api().showInFolder((r.html_report || r.junit)!))}>所在文件夹</Button>

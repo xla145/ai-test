@@ -18,9 +18,9 @@ describe("接口选择执行", () => {
   it("uses case authentication when no environment token exists, while preserving explicit preference", async () => {
     const { orch, engine } = setup("");
     await orch.runRegression("p", "test", { caseIds: ["tc_public"] });
-    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "0" }));
+    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "0" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     await orch.runRegression("p", "test", { caseIds: ["tc_public"], preferEnvToken: true });
-    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "1" }));
+    expect(engine).toHaveBeenLastCalledWith(expect.any(Array), expect.objectContaining({ AITEST_API_PREFER_ENV_TOKEN: "1" }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
   it("keeps selection and credentials through scheduling without a model call", async () => {
     const { orch, engine, agent } = setup();
@@ -28,6 +28,7 @@ describe("接口选择执行", () => {
     expect(engine).toHaveBeenCalledWith(
       ["run-api-suite", "--project", "p", "--env", "test", "--case-ids", '["tc_one","tc_flow"]'],
       { AITEST_AUTH_TOKEN: "test-token", AITEST_API_PREFER_ENV_TOKEN: "1" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(agent).not.toHaveBeenCalled();
   });

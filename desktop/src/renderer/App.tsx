@@ -1,3 +1,5 @@
+import { pages, RegisteredPage } from "./pageRegistry";
+import { AssistantProvider } from "./assistant/AssistantContext";
 import { UiTasksProvider, UiTasksButton } from "./components/UiTasks";
 import { AgentProcessDock } from "./components/AgentProcessDock";
 import { BROWSER_PANEL_HEADER, BROWSER_PANEL_GUTTER } from "../shared/browserPanel";
@@ -55,19 +57,9 @@ import { ProjectSwitcher } from "./components/ProjectSwitcher";
 import { useUpdateState } from "./components/UpdateCard";
 import { useAction, useLoad, useProjectChanged } from "./hooks";
 import { lastNav, NAV_SECTIONS, navLabel, NavContext, rememberNav } from "./nav";
-import { ApiPage } from "./pages/ApiPage";
-import { AppPage } from "./pages/AppPage";
 import { GroupPage } from "./pages/GroupPage";
-import { CasesPage } from "./pages/CasesPage";
-import { DatabasePage } from "./pages/DatabasePage";
-import { HomePage, loadTodos } from "./pages/HomePage";
-import { ImportPage } from "./pages/ImportPage";
-import { OpsPage } from "./pages/OpsPage";
-import { PerformancePage } from "./pages/PerformancePage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { RunPage } from "./pages/RunPage";
+import { loadTodos } from "./pages/HomePage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { UiPage } from "./pages/UiPage";
 
 const { Sider, Header, Content } = Layout;
 
@@ -108,28 +100,14 @@ function describe(method: string, params: any): string | undefined {
   }
 }
 
-const NAV_ICON: Record<string, ReactNode> = {
-  home: <DashboardOutlined />,
-  cases: <AppstoreOutlined />,
-  import: <FileExcelOutlined />,
-  api: <ApiOutlined />,
-  run: <PlayCircleOutlined />,
-  performance: <ThunderboltOutlined />,
-  ui: <ChromeOutlined />,
-  app: <MobileOutlined />,
-  reports: <FileSearchOutlined />,
-  ops: <BarChartOutlined />,
-  db: <DatabaseOutlined />,
-  settings: <ToolOutlined />,
-};
-
 export function App() {
   const { token } = theme.useToken();
   const { data: projects = [], reload } = useLoad(() => api().listProjects() as Promise<Project[]>, []);
   const [currentId, setCurrentId] = useState<string>();
   /** 每个项目当前打开的页面；未打开过的项目回到上次离开时的页面 */
   const [navByProject, setNavByProject] = useState<Record<string, string>>({});
-  const [approval, setApproval] = useState<ApprovalRequest>();
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const approval = approvals[0];
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [activityOpen, setActivityOpen] = useState(false);
   /** 打开活动面板后新到的条数，用于侧栏的提示点 */
@@ -165,12 +143,14 @@ export function App() {
   const savedNav = current ? navByProject[current.id] ?? lastNav(current.id) : "home";
   // 测试端调整后某些页面不再显示：回到概览
   const nav = current && !group && visibleProjectTab(savedNav, current.project_type) && savedNav !== "settings" ? savedNav : "home";
-  const [visitedUi, setVisitedUi] = useState<string[]>([]);
-  const activeUiId = !showSettings && !group && nav === "ui" ? current?.id : undefined;
+  const [visitedPages, setVisitedPages] = useState<{ projectId: string; key: string }[]>([]);
+  const retainedKey = !showSettings && !group && pages.get(nav)?.keepAlive ? nav : undefined;
   useEffect(() => {
-    if (activeUiId) setVisitedUi((ids) => ids.includes(activeUiId) ? ids : [...ids, activeUiId]);
-  }, [activeUiId]);
-  const retainedUiIds = new Set([...visitedUi, ...(activeUiId ? [activeUiId] : [])]);
+    if (retainedKey && current) setVisitedPages(rows => rows.some(row => row.projectId === current.id && row.key === retainedKey)
+      ? rows : [...rows, { projectId: current.id, key: retainedKey }]);
+  }, [retainedKey, current?.id]);
+  const retainedPages = retainedKey && current && !visitedPages.some(row => row.projectId === current.id && row.key === retainedKey)
+    ? [...visitedPages, { projectId: current.id, key: retainedKey }] : visitedPages;
   // 侧栏角标与概览待办：切换页面后重新统计（页面上的审核、合并会改变计数）
   const todos = useLoad(async () => current && !group ? { id: current.id, ...(await loadTodos(current)) } : undefined,
     [current?.id, current?.project_type, nav]);
@@ -180,7 +160,7 @@ export function App() {
 
   const go = useCallback((key: string) => {
     if (!current) return;
-    if (key === "settings") return setProjectSettingsOpen({});
+    if (pages.get(key)?.action === "settings") return setProjectSettingsOpen({});
     setShowSettings(false);
     setNavByProject((m) => ({ ...m, [current.id]: key }));
     rememberNav(current.id, key);
@@ -195,8 +175,9 @@ export function App() {
   };
 
   useEffect(() => {
-    const offApproval = api().onApprovalRequest(setApproval);
+    const offApproval = api().onApprovalRequest(value => setApprovals(rows => rows.some(r => r.id === value.id) ? rows : [...rows, value]));
     const offEvent = api().onEvent((e) => {
+      if (e.method === "aitest/approval-cancelled") setApprovals(rows => rows.filter(r => r.id !== (e.params as { id: string }).id));
       const detail = describe(e.method, e.params);
       if (!detail) return;
       setActivity((xs) => [...xs.slice(-199), { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), method: e.method, detail }]);
@@ -212,7 +193,7 @@ export function App() {
 
   const respond = useCallback((accept: boolean) => {
     if (approval) api().respondApproval(approval.id, accept);
-    setApproval(undefined);
+    setApprovals(rows => rows.filter(row => row.id !== approval?.id));
   }, [approval]);
 
   /** 侧栏角标：需要人处理的数量 */
@@ -248,29 +229,16 @@ export function App() {
       ]
     : NAV_SECTIONS.flatMap<NonNullable<MenuProps["items"]>[number]>((s) => {
         const items = s.items.filter((i) => visibleProjectTab(i.key, current.project_type))
-          .map((i) => ({ key: i.key, icon: NAV_ICON[i.key], label: navLabelNode(i.key, i.label) }));
+          .map((i) => ({ key: i.key, icon: pages.get(i.key)?.icon, label: navLabelNode(i.key, i.label) }));
         return s.title ? [{ type: "group" as const, key: s.key, label: s.title, children: items }] : items;
       });
 
-  const page = (p: Project, key: string): ReactNode => {
-    switch (key) {
-      case "import": return <ImportPage project={p} />;
-      case "api": return <ApiPage project={p} />;
-      case "cases": return <CasesPage project={p} />;
-      case "run": return <RunPage project={p} />;
-      case "performance": return <PerformancePage project={p} />;
-      case "ui": return <UiPage project={p} />;
-      case "db": return <DatabasePage project={p} onChanged={reload} />;
-      case "reports": return <ReportsPage project={p} />;
-      case "app": return <AppPage project={p} />;
-      case "ops": return <OpsPage project={p} />;
-      default: return <HomePage project={p} todos={currentTodos} />;
-    }
-  };
+  const page = (p: Project, key: string): ReactNode => <RegisteredPage pageKey={key} project={p} todos={currentTodos} reload={reload} />;
 
   return (
     <ProjectsContext.Provider value={projectsCtx}>
     <UiTasksProvider>
+    <AssistantProvider projectId={current && !group ? current.id : undefined} page={showSettings ? "settings" : nav}>
     <NavContext.Provider value={navCtx}>
     <Layout className={`app-shell ${viewVisible ? "with-view" : ""} ${window.desktopHost?.platform === "darwin" ? "native-mac" : ""}`}>
       {viewVisible && <aside className="test-browser-panel" aria-label="右侧测试浏览器">
@@ -398,7 +366,7 @@ export function App() {
               <GroupPage group={current} onOpen={openProject} onNewChild={() => setCreating({ parent: current.id })} />
             </div>
           ) : current ? (
-            nav !== "ui" ? <div className="page" key={`${current.id}:${nav}`}>
+            !pages.get(nav)?.keepAlive ? <div className="page" key={`${current.id}:${nav}`}>
               {!compact && <ProjectGuide key={current.id} project={current} />}
               {page(current, nav)}
             </div> : null
@@ -413,12 +381,15 @@ export function App() {
             </Flex>
           )}
           {/* 按项目保留已访问的工作台，后台任务和事件订阅不因导航切换而中断。 */}
-          {projects.filter((p) => retainedUiIds.has(p.id) && !isGroup(p) && visibleProjectTab("ui", p.project_type)).map((p) => (
-            <div className="page" key={`ui:${p.id}`} style={{ display: activeUiId === p.id ? undefined : "none" }} aria-hidden={activeUiId !== p.id}>
+          {retainedPages.map(({ projectId, key }) => {
+            const p = projects.find(project => project.id === projectId);
+            if (!p || isGroup(p) || !visibleProjectTab(key, p.project_type)) return null;
+            const active = current?.id === p.id && retainedKey === key;
+            return <div className="page" key={`${key}:${p.id}`} style={{ display: active ? undefined : "none" }} aria-hidden={!active}>
               {!compact && <ProjectGuide project={p} />}
-              <UiPage project={p} />
-            </div>
-          ))}
+              <RegisteredPage pageKey={key} project={p} reload={reload} />
+            </div>;
+          })}
         </Content>
       </Layout>
       </Layout>
@@ -453,9 +424,10 @@ export function App() {
         )}
       </Modal>
 
-      <AgentProcessDock open={activityOpen} onOpenChange={setActivityOpen} activity={activity} onClearActivity={() => { setActivity([]); setUnread(0); }} />
+      <AgentProcessDock project={current && !group ? current : undefined} page={showSettings ? "settings" : nav} open={activityOpen} onOpenChange={setActivityOpen} activity={activity} onClearActivity={() => { setActivity([]); setUnread(0); }} />
     </Layout>
     </NavContext.Provider>
+    </AssistantProvider>
     </UiTasksProvider>
     </ProjectsContext.Provider>
   );

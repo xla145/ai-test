@@ -1,3 +1,4 @@
+import { ipcError } from "./bridge";
 import { App } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,7 +14,9 @@ export function useAction() {
         if (success) message.success(success);
         return out;
       } catch (e) {
-        message.error({ content: (e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""), duration: 6 });
+        const error = ipcError(e);
+        if (error.message === "任务已停止" || error.message === "UI_TASK_STOPPED") message.info("任务已停止");
+        else message.error({ content: error.message, duration: 6 });
         return undefined;
       } finally {
         setBusy(false);

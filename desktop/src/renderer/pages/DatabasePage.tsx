@@ -67,7 +67,7 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
   });
 
   return (
-    <>
+    <div className="page-frame">
       <PageHeader
         title="数据库"
         description="管理数据库连接，查询接口与 UI 测试的入库结果。所有查询均为只读。"
@@ -77,6 +77,7 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditing({})}>添加连接</Button>
         </>}
       />
+<div className="page-scroll-body">
       {envCfg?.production && (
         <Alert className="page-section-b" type="warning" showIcon icon={<LockOutlined />}
           message="生产环境：只能执行只读查询，数据准备与清理被禁止。" />
@@ -124,7 +125,8 @@ export function DatabasePage({ project, onChanged }: { project: Project; onChang
         <ConnectionModal project={project} env={env} production={!!envCfg?.production} initial={editing}
           onClose={() => setEditing(null)} onSaved={async () => { setEditing(null); await onChanged(); }} />
       )}
-    </>
+    </div>
+</div>
   );
 }
 

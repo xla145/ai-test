@@ -76,9 +76,15 @@ body {
 .sider-user-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
 .sider-user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sider-user-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.page { padding: 28px 32px 40px; overflow: auto; height: 100%; container-type: inline-size; }
-.page-header { margin-bottom: 24px; }
-.page-title.ant-typography { font-size: 26px; font-weight: 500; line-height: 1.3; }
+.page { padding: 20px 32px; overflow: hidden; height: 100%; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.page-header { margin-bottom: 16px; }
+.page-title.ant-typography { font-size: 22px; font-weight: 500; line-height: 1.3; }
+/* Only page-level headings stick; embedded workspaces keep their own toolbar. */
+.page-frame { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.page-frame > .page-header { flex: none; padding-block: 6px 12px; }
+.page-scroll-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 16px; }
+.page > .project-guide { flex: none; max-height: 35%; overflow: auto; }
+.page > .home-overview { flex: 1; min-height: 0; overflow: auto; }
 .page-description.ant-typography { max-width: 840px; margin: 8px 0 0; line-height: 1.65; font-size: 13px; }
 .workspace-header.ant-layout-header {
   flex-shrink: 0; height: 52px; line-height: normal; padding: 0 16px;
@@ -134,7 +140,7 @@ body {
 }
 @keyframes agent-process-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .agent-process-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--console-border); }
-.agent-process-heading, .agent-process-head-actions, .agent-process-summary, .agent-process-section-title, .agent-process-task, .agent-process-foot { display: flex; align-items: center; }
+.agent-process-heading, .agent-process-head-actions, .agent-process-summary, .agent-process-section-title, .agent-process-task { display: flex; align-items: center; }
 .agent-process-heading { gap: 10px; min-width: 0; }
 .agent-process-heading > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .agent-process-heading-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--console-accent); background: var(--console-accent-bg); font-size: 17px; }
@@ -175,7 +181,6 @@ body {
 .agent-process-empty > svg { color: var(--console-accent); font-size: 24px; margin-bottom: 2px; }
 .agent-process-empty small { max-width: 250px; line-height: 1.5; }
 .agent-process-more.ant-btn { padding-inline: 0; font-size: 12px; }
-.agent-process-foot { justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--console-border); font-size: 11px; color: var(--console-muted); }
 .agent-process-status-dot { display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--console-success); vertical-align: 1px; }
 @media (prefers-reduced-motion: reduce) { .agent-process-trigger, .agent-process-panel { animation: none; transition: none; } .agent-process-pulse { animation: none; } }
 @media (max-width: 600px) { .agent-process-trigger { width: 46px; height: 46px; } .agent-process-panel { width: calc(100vw - 32px); } }
@@ -654,6 +659,7 @@ button.workflow-step:hover { color: var(--console-accent); }
 /* API workbench — Unslop direction: precise instruments, quiet chrome.
    Adapted with credit to Damir Sokolovsky (@heydamir), CC BY 4.0. */
 .api-workspace { max-width: 1600px; margin-inline: auto; color: var(--console-text); }
+.api-workspace-sticky-head { flex: none; background: var(--console-bg); padding-top: 1px; }
 .api-workspace h2, .api-workspace h3, .api-workspace h4 { font-weight: 500; }
 .api-workspace h4 { margin: 0 0 12px; font-size: 14px; }
 .api-muted { color: var(--console-secondary); font-size: 12px; }
@@ -1116,7 +1122,7 @@ button.workflow-step:hover { color: var(--console-accent); }
 }
 
 /* 接口工作台：环境和入口集中于页头，数量跟随对应页签。 */
-.api-workspace > .page-header { margin-bottom: 12px; }
+.api-workspace-sticky-head > .page-header { margin-bottom: 12px; }
 .api-tab-count { margin-left: 4px; color: var(--console-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .api-workspace-tabs > .ant-tabs-nav { margin-bottom: 0; }
 .api-directory { padding-top: 12px; }
@@ -1150,7 +1156,7 @@ button.workflow-step:hover { color: var(--console-accent); }
 
 /* 接口页聚焦当前任务：目录作为次级背景，文档作为主阅读面。 */
 .api-workspace { --api-space: 24px; }
-.api-workspace > .page-header .page-title { font-size: 20px; }
+.api-workspace-sticky-head > .page-header .page-title { font-size: 20px; }
 .api-workspace-tabs > .ant-tabs-nav::before { border-bottom: 0; }
 .api-workspace-tabs .ant-tabs-tab { padding: 10px 0 14px; }
 .api-workbench-layout { border-radius: 10px; border: 1px solid var(--console-border); grid-template-columns: 220px minmax(0, 1fr); }
@@ -1200,6 +1206,26 @@ button.workflow-step:hover { color: var(--console-accent); }
 .api-onboarding-heading { font-size: 15px; font-weight: 500; margin: 0 0 6px; color: var(--console-text); }
 .api-onboarding-body .api-onboarding-desc { margin: 0 0 16px; font-size: 13px; line-height: 1.6; }
 .api-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.api-intro-empty { min-height: 100%; background: linear-gradient(145deg, color-mix(in srgb, var(--console-accent-bg) 26%, transparent), transparent 42%); }
+.api-onboarding { min-height: 640px; box-sizing: border-box; padding: 32px 40px 40px; }
+.api-onboarding-status { width: 100%; box-sizing: border-box; padding: 18px 24px; }
+.api-onboarding-status .ant-steps { width: 100%; }
+.api-onboarding-body { flex: 1; width: 100%; max-width: 880px; display: flex; flex-direction: column; justify-content: center; margin: 0 auto; padding: 52px 7% 40px; box-sizing: border-box; }
+.api-onboarding-heading { font-size: clamp(24px, 3vw, 34px); line-height: 1.25; letter-spacing: -.02em; margin-bottom: 12px; }
+.api-onboarding-body .api-onboarding-desc { max-width: 560px; margin-bottom: 24px; font-size: 14px; line-height: 1.8; }
+.api-onboarding-actions { gap: 10px; }
+.api-onboarding-actions .ant-btn { height: 40px; padding-inline: 18px; }
+.api-onboarding-hint { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; margin-top: 56px; padding-top: 22px; border-top: 1px solid var(--console-border); }
+.api-onboarding-hint > div { display: flex; gap: 10px; min-width: 0; align-items: flex-start; }
+.api-onboarding-hint-index { flex: 0 0 auto; color: var(--console-accent); font: 600 11px/22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.api-onboarding-hint strong, .api-onboarding-hint small { display: block; }
+.api-onboarding-hint strong { font-size: 12px; font-weight: 500; line-height: 20px; }
+.api-onboarding-hint small { color: var(--console-secondary); font-size: 11px; line-height: 18px; }
+@container (max-width: 760px) {
+  .api-onboarding { min-height: 520px; padding: 24px; }
+  .api-onboarding-body { padding: 40px 4% 24px; }
+  .api-onboarding-hint { grid-template-columns: 1fr; gap: 10px; margin-top: 40px; }
+}
 /* 操作卡片保留但不再需要——用普通按钮替代 */
 .api-quick-actions { gap: 8px; }
 .api-action-card { padding: 10px 14px; gap: 10px; border-radius: 8px; }
@@ -1228,8 +1254,8 @@ button.workflow-step:hover { color: var(--console-accent); }
 
 /* API 工作台：让页头、页签和编辑区形成连续的任务面板。 */
 .api-workspace { max-width: 1440px; }
-.api-workspace > .page-header { padding: 6px 0 0; }
-.api-workspace > .page-header .page-header-main { min-height: 44px; }
+.api-workspace-sticky-head > .page-header { padding: 6px 0 0; }
+.api-workspace-sticky-head > .page-header .page-header-main { min-height: 44px; }
 .api-workspace-tabs > .ant-tabs-nav { padding: 0 24px; background: var(--console-surface); border: 1px solid var(--console-border); border-bottom: 0; border-radius: 10px 10px 0 0; }
 .api-workspace-tabs > .ant-tabs-content-holder { border: 0; }
 .api-workspace-tabs .ant-tabs-tab { padding: 12px 4px 13px; margin-inline-end: 24px !important; }
@@ -1547,3 +1573,55 @@ button.workflow-step:hover { color: var(--console-accent); }
 /* ── 表单区域 ── */
 .form-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .form-row-end { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+
+/* Viewport-sized workspaces: headers stay outside the scrolling content. */
+.page > .api-workspace { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.api-workspace > .api-workbench-layout { flex: 1; min-height: 0; overflow: hidden; }
+.api-workbench-layout > .api-directory { min-height: 0; overflow: hidden; }
+.api-workbench-layout .api-directory-list { min-height: 0; max-height: none; overflow: auto; }
+.api-workbench-layout > .api-workbench-main { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.api-workspace > .api-regression, .api-workspace > .api-login-workspace { flex: 1; min-height: 0; overflow: auto; }
+.api-regression > .page-frame { height: 100%; }
+.page > .uix { flex: 1; min-height: 0; overflow: hidden; }
+.uix > .uix-heading, .uix > .uix-nav { flex: none; }
+.uix > .uix-view { flex: 1; min-height: 0; overflow: auto; }
+.uix-view .uix-bench, .uix-view .uix-bench.has-banner { height: 100%; min-height: 0; }
+@media (max-width: 700px) {
+  .api-workbench-layout > .api-directory { max-height: 220px; }
+  .api-catalog-layout { grid-template-rows: auto minmax(0, 1fr); }
+}
+.uix-content-scroll { flex: 1; min-height: 0; overflow: auto; }
+.uix-content-scroll > .uix-view { height: 100%; min-height: 0; }
+.page-frame:has(> .page-scroll-body > .cases-surface), .page-frame:has(> .page-scroll-body > .reports-surface) { overflow: hidden; }
+.page-scroll-body:has(> .cases-surface), .page-scroll-body:has(> .reports-surface) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+.page-scroll-body > .cases-surface, .page-scroll-body > .reports-surface { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cases-surface > .case-filter-grid, .reports-surface > .reports-toolbar { flex: none; }
+.cases-surface > .ant-table-wrapper, .reports-surface > .ant-table-wrapper { flex: 1; min-height: 0; }
+.cases-surface .ant-spin-nested-loading, .reports-surface .ant-spin-nested-loading { height: 100%; }
+.cases-surface .ant-spin-container, .reports-surface .ant-spin-container { height: 100%; display: flex; flex-direction: column; }
+.cases-surface .ant-table, .reports-surface .ant-table { flex: 1; min-height: 0; overflow: auto; }
+.cases-surface .ant-pagination, .reports-surface .ant-pagination { flex: none; }
+/* Keep section tabs above long forms and reports. */
+.page-scroll-body:has(> .ant-tabs) { overflow: hidden; }
+.page-scroll-body > .ant-tabs { height: 100%; min-height: 0; }
+.page-scroll-body > .ant-tabs > .ant-tabs-nav { flex: none; }
+.page-scroll-body > .ant-tabs > .ant-tabs-content-holder { min-height: 0; overflow: hidden; }
+.page-scroll-body > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content { height: 100%; }
+.page-scroll-body > .ant-tabs > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane-active { height: 100%; overflow: auto; overscroll-behavior: contain; }
+
+/* Import summary is outside the details scroll container. */
+.page-frame > .import-summary { flex: none; margin-bottom: 16px; }
+.import-summary + .page-scroll-body > .split.page-section:first-child { margin-top: 0; }
+
+/* Rule hits and issue details own their scroll positions. */
+.import-page > .page-scroll-body { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+.import-page > .page-scroll-body > .ant-alert { flex: none; margin-bottom: 16px; }
+.import-detail-panels { flex: 1; min-height: 0; margin-top: 0; align-items: stretch; flex-wrap: nowrap; overflow: hidden; }
+.import-detail-panels > div { min-height: 0; display: flex; flex-direction: column; }
+.import-detail-panels > div > .ant-card { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.import-detail-panels .ant-card-head { flex: none; }
+.import-detail-panels .ant-card-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+@container (max-width: 700px) {
+  .import-detail-panels { flex-wrap: nowrap; flex-direction: column; gap: 12px; }
+  .import-detail-panels > div { flex: 1 1 0 !important; }
+}

@@ -42,8 +42,11 @@ function setup(options: { blocked?: boolean; generate?: boolean; malformed?: boo
     }
     return { threadId: "th", turnId: "execute", status: "completed", tokens: 20, message: "生成完成" };
   });
-  const make = () => new Orchestrator({ engine, agent: async () => ({ startThread, runTurn }), secretEnv: () => ({}) });
-  return { workspace, project, source, runTurn, startThread, make, contract, setRoles: (next: string[]) => { roles = next; } };
+  const checkLogin = vi.fn(async () => ({ loggedIn: true }));
+  const closeBrowser = vi.fn(async () => {});
+  const ui = { createDebugBrowser: () => ({ newRoleContext: checkLogin, close: closeBrowser }), runUiSuite: vi.fn(), checkData: vi.fn(), seedData: vi.fn() };
+  const make = () => new Orchestrator({ engine, ui: ui as any, agent: async () => ({ startThread, runTurn }), secretEnv: () => ({}) });
+  return { workspace, project, source, runTurn, startThread, make, contract, checkLogin, closeBrowser, setRoles: (next: string[]) => { roles = next; } };
 }
 
 describe("persisted UI conversion and script reuse", () => {
@@ -180,4 +183,13 @@ it('retains fingerprinted plan history when a case changes and is restored', asy
   expect(result.contractReused).toBe(true);
   expect(f.runTurn.mock.calls.filter(([,p])=>p.includes('仅把 UI 用例转换'))).toHaveLength(2);
   expect(readdirSync(join(f.workspace,'.aitest/ui-contracts/versions'))).toHaveLength(2);
+});
+
+it("blocks an invalid selected login before creating model threads and closes the check session", async () => {
+  const f = setup();
+  f.checkLogin.mockRejectedValueOnce(new Error("session expired"));
+  await expect(f.make().exploreUiCase("p", "test", "tc_a", { selectedRole: "admin" })).rejects.toThrow("AUTH_REQUIRED");
+  expect(f.checkLogin).toHaveBeenCalledWith("admin", { requireLogin: true, login: undefined });
+  expect(f.closeBrowser).toHaveBeenCalledOnce();
+  expect(f.startThread).not.toHaveBeenCalled();
 });

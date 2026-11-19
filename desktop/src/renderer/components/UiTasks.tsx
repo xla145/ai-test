@@ -1,4 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useState } from "react";
+import { useTasks } from "../stores/taskStore";
+export { TaskProvider as UiTasksProvider } from "../stores/taskStore";
 import { Badge, Button, Drawer, Empty, List, Space, Tag, Typography, Alert } from "antd";
 import { UnorderedListOutlined } from "@ant-design/icons";
 import type { UiTaskRecord } from "../../shared/ipc";
@@ -6,43 +8,22 @@ import { api } from "../api";
 import { useProjects } from "./ProjectSettings";
 import { useAction } from "../hooks";
 
-const Context = createContext<UiTaskRecord[]>([]);
-export const useUiTasks = () => useContext(Context);
-export const isUiTaskActive = (task: UiTaskRecord) => task.status === "running" || task.status === "stopping";
+export const useUiTasks = useTasks;
+export const isUiTaskActive = (task: UiTaskRecord) => task.status === "queued" || task.status === "running" || task.status === "stopping";
 export const isUiExecutionTask = (task: UiTaskRecord) => (task.source ?? "ui") === "ui";
 
-/** 主进程快照是事实来源，页面挂载和事件丢失不会影响任务恢复。 */
-export function UiTasksProvider({ children }: { children: ReactNode }) {
-  const [tasks, setTasks] = useState<UiTaskRecord[]>([]);
-  useEffect(() => {
-    let disposed = false;
-    let pending = false;
-    const refresh = async () => {
-      if (pending) return;
-      pending = true;
-      try { const value = await api().uiTasks(); if (!disposed) setTasks(value); }
-      catch { /* 下次轮询恢复 */ }
-      finally { pending = false; }
-    };
-    void refresh();
-    const timer = setInterval(() => void refresh(), 1000);
-    const off = api().onEvent(e => { if (e.method === "aitest/progress") void refresh(); });
-    return () => { disposed = true; clearInterval(timer); off(); };
-  }, []);
-  return <Context.Provider value={tasks}>{children}</Context.Provider>;
-}
-const labels = { running: "执行中", stopping: "正在停止", completed: "已完成", failed: "未通过", stopped: "已停止" };
-const colors = { running: "processing", stopping: "warning", completed: "success", failed: "error", stopped: "default" };
+const labels = { queued: "排队中", running: "执行中", stopping: "正在停止", completed: "已完成", failed: "未通过", stopped: "已停止" };
+const colors = { queued: "default", running: "processing", stopping: "warning", completed: "success", failed: "error", stopped: "default" };
 
 export function UiTaskList({ projectId }: { projectId?: string }) {
-  const tasks = useUiTasks().filter(t => isUiExecutionTask(t) && (!projectId || t.projectId === projectId));
+  const tasks = useUiTasks().filter(t => !projectId || t.projectId === projectId);
   const { projects } = useProjects();
   const { run, busy } = useAction();
-  return <List dataSource={tasks} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无 UI 任务" /> }}
-    renderItem={task => <List.Item actions={isUiTaskActive(task) ? [
+  return <List dataSource={tasks} locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行任务" /> }}
+    renderItem={task => <List.Item actions={[<Button key="diagnostics" size="small" onClick={() => run(() => api().exportDiagnostics(task.id))}>导出诊断</Button>, ...(isUiTaskActive(task) ? [
       <Button key="stop" size="small" danger disabled={busy || task.status === "stopping"}
-        onClick={() => run(() => api().stopUiTask(task.projectId, task.env))}>停止</Button>,
-    ] : []}>
+        onClick={() => run(() => api().stopExecutionTask(task.id))}>停止</Button>,
+    ] : [])]}>
       <List.Item.Meta title={<Space wrap><Typography.Text strong>{task.kind}</Typography.Text><Tag color={colors[task.status]}>{labels[task.status]}</Tag></Space>}
         description={<Space direction="vertical" size={3} style={{ width: "100%" }}>
           <span>{projects.find(p => p.id === task.projectId)?.name ?? task.projectId} · {task.env} · {new Date(task.startedAt).toLocaleTimeString()}</span>
@@ -55,15 +36,15 @@ export function UiTaskList({ projectId }: { projectId?: string }) {
 }
 
 export function UiTasksButton() {
-  const tasks = useUiTasks().filter(isUiExecutionTask);
+  const tasks = useUiTasks();
   const [open, setOpen] = useState(false);
   return <>
-    <Button type="text" className="header-ui-tasks" aria-label="UI 任务列表" title="UI 任务列表" onClick={() => setOpen(true)}
+    <Button type="text" className="header-ui-tasks" aria-label="执行任务列表" title="执行任务列表" onClick={() => setOpen(true)}
       icon={<Badge count={tasks.filter(isUiTaskActive).length} size="small"><UnorderedListOutlined /></Badge>}>
       <span className="header-ui-tasks-label">任务</span>
     </Button>
-    <Drawer title="UI 任务" open={open} onClose={() => setOpen(false)} width={560}>
-      <Typography.Paragraph type="secondary">切换页面不会中断后台任务。保留本次启动期间最近 100 条任务。</Typography.Paragraph>
+    <Drawer title="执行任务" open={open} onClose={() => setOpen(false)} width={560}>
+      <Typography.Paragraph type="secondary">切换页面不会中断后台任务。保留全部活跃任务及最近 100 条结束记录，重启后不会自动重放。</Typography.Paragraph>
       <UiTaskList />
     </Drawer>
   </>;

@@ -30,7 +30,7 @@ describe("Orchestrator", () => {
     expect(run.passed).toBe(3);
     expect(triage).toBeUndefined();
     expect(agent).not.toHaveBeenCalled();
-    expect(orch.uiTasks()).toEqual([]);
+    expect(orch.uiTasks()).toEqual([expect.objectContaining({ source: "api", status: "completed", runId: "r1" })]);
     const runCall = calls.find(([a]) => a[0] === "run-api-suite")!;
     expect(runCall[0]).toEqual(["run-api-suite", "--project", "p1", "--env", "test"]);
     expect(runCall[1]).toEqual({ AITEST_AUTH_TOKEN: "Bearer s", AITEST_API_PREFER_ENV_TOKEN: "1" });
@@ -75,7 +75,7 @@ describe("Orchestrator", () => {
     expect(runTurn.mock.calls[0][2]).toEqual({ tokenLimit: 5000, signal: expect.any(AbortSignal) });
     expect(calls.map(([a]) => a[0])).toContain("agent-session");
     expect(calls.find(([a]) => a[0] === "add-tokens")![0]).toEqual(["add-tokens", "--session", "as_1", "--tokens", "777"]);
-    expect(orch.uiTasks()).toEqual([expect.objectContaining({ source: "agent", kind: "分析失败原因", status: "completed", canStop: true, finishedAt: expect.any(String) })]);
+    expect(orch.uiTasks()).toEqual([expect.objectContaining({ source: "agent", kind: "分析失败原因", status: "completed", canStop: false, parentTaskId: expect.any(String), finishedAt: expect.any(String) }), expect.objectContaining({ source: "api", status: "failed", runId: "r2" })]);
   });
 
   it("exposes API enrichment while running and preserves its failure", async () => {
@@ -123,6 +123,17 @@ describe("Orchestrator", () => {
     expect(agent).not.toHaveBeenCalled();
   });
 
+  it("skips AI triage when the deterministic report identifies an auth failure", async () => {
+    const { engine } = fakeEngine({ run_id: "r-auth", total: 1, passed: 0, failed: 1, error: 0, skipped: 0,
+      pass_rate: 0, failure_types: { auth: 1 }, needs_agent: ["tc_x"] });
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine, agent, secretEnv: () => ({}) });
+    const result = await orch.runRegression("p1", "test");
+    expect(result.triage).toBeUndefined();
+    expect(result.analysis).toMatchObject({ status: "skipped", error: expect.stringContaining("登录态") });
+    expect(agent).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["interrupted_budget", '[{"case_id":"tc_x","failure_type":"data"}]'],
     ["completed", '[{"case_id":"another-case","failure_type":"data"}]'],
@@ -147,6 +158,17 @@ describe("parseTriage", () => {
   it("accepts the unified failure taxonomy and rejects invalid field types", () => {
     expect(parseTriage('[{"case_id":"a","failure_type":"auth","reason":"登录失效"},{"case_id":"b","failure_type":"unknown"}]')).toHaveLength(2);
     expect(parseTriage('[{"case_id":"a","failure_type":"made-up"},{"case_id":"b","failure_type":"model","reason":{}}]')).toEqual([]);
+  });
+});
+
+describe("performance auth preflight", () => {
+  it("stops an authenticated run without a saved token before starting k6", async () => {
+    const { engine } = fakeEngine({});
+    const orch = new Orchestrator({ engine, agent: vi.fn(), secretEnv: () => ({}) });
+    await expect(orch.runPerformance("p1", "test", { path: "/orders", auth: true, vus: 1, seconds: 1,
+      p95Ms: 1000, maxFailureRate: 0.01, scenarioSteps: [{ name: "orders", method: "GET", path: "/orders" }] }))
+      .rejects.toThrow("AUTH_REQUIRED");
+    expect(orch.uiTasks()[0]).toMatchObject({ source: "performance", status: "failed" });
   });
 });
 

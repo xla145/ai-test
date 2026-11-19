@@ -5,19 +5,9 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import type { GlobalSettingsView } from "../shared/ipc";
 import { SETTINGS_EVENT } from "./pages/SettingsPage";
-import { consoleTheme } from "./theme";
+import { api } from "./api";
+import { consoleTheme, useSystemTheme } from "./theme";
 import "./styles.css";
-
-function usePrefersDark(): boolean {
-  const query = window.matchMedia("(prefers-color-scheme: dark)");
-  const [dark, setDark] = useState(query.matches);
-  useEffect(() => {
-    const on = (e: MediaQueryListEvent) => setDark(e.matches);
-    query.addEventListener("change", on);
-    return () => query.removeEventListener("change", on);
-  }, [query]);
-  return dark;
-}
 
 type ThemeMode = "system" | "light" | "dark";
 
@@ -25,18 +15,18 @@ type ThemeMode = "system" | "light" | "dark";
 function useThemeMode(): ThemeMode {
   const [mode, setMode] = useState<ThemeMode>("system");
   useEffect(() => {
-    window.aitest.getGlobalSettings().then((v) => setMode(v.settings.general.theme), () => undefined);
-    const on = (e: Event) => setMode((e as CustomEvent<GlobalSettingsView>).detail.settings.general.theme);
+    let stale = false;
+    api().getGlobalSettings().then((v) => { if (!stale) setMode(v.settings.general.theme); }, () => undefined);
+    const on = (e: Event) => { stale = true; setMode((e as CustomEvent<GlobalSettingsView>).detail.settings.general.theme); };
     window.addEventListener(SETTINGS_EVENT, on);
-    return () => window.removeEventListener(SETTINGS_EVENT, on);
+    return () => { stale = true; window.removeEventListener(SETTINGS_EVENT, on); };
   }, []);
   return mode;
 }
 
 function Root() {
-  const prefersDark = usePrefersDark();
   const mode = useThemeMode();
-  const dark = mode === "system" ? prefersDark : mode === "dark";
+  const dark = useSystemTheme(mode);
   useEffect(() => { document.documentElement.dataset.theme = dark ? "dark" : "light"; }, [dark]);
   return (
     <ConfigProvider

@@ -1,3 +1,4 @@
+import { useCallback, useSyncExternalStore } from "react";
 import { theme, type ThemeConfig } from "antd";
 
 /** 测试控制台：中性工作区，颜色只表达操作与测试状态。 */
@@ -57,4 +58,20 @@ export function consoleTheme(dark: boolean): ThemeConfig {
       Segmented: { trackBg: dark ? "#25262a" : "#eceef2", itemSelectedBg: dark ? "#3b3e45" : "#ffffff" },
     },
   };
+}
+
+export type ThemePreference = "system" | "light" | "dark";
+export function observeSystemTheme(query: MediaQueryList, notify: () => void): () => void {
+  query.addEventListener("change", notify);
+  return () => query.removeEventListener("change", notify);
+}
+let systemQuery: MediaQueryList | undefined;
+const media = () => systemQuery ??= window.matchMedia("(prefers-color-scheme: dark)");
+/** Explicit preferences never subscribe to system changes; the query survives rerenders. */
+export function useSystemTheme(preference: ThemePreference): boolean {
+  const subscribe = useCallback((notify: () => void) => preference === "system"
+    ? observeSystemTheme(media(), notify) : () => {}, [preference]);
+  return useSyncExternalStore(subscribe,
+    () => preference === "system" ? media().matches : preference === "dark",
+    () => preference === "dark");
 }
