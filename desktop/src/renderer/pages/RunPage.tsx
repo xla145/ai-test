@@ -1,3 +1,5 @@
+import { AssistantAskButton, useAssistantPageContext } from "../assistant/AssistantContext";
+import { TaskProgressPanel } from "../components/TaskProgressPanel";
 import type { ApiDefinition } from "../../shared/apiWorkspace";
 import { ChromeOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Collapse, Progress, Select, Space, Statistic, Switch, Table, Tooltip, Typography } from "antd";
@@ -16,7 +18,7 @@ import { useAction, useLoad, useProjectChanged, notifyProjectChanged } from "../
 interface RunResult {
   run: { run_id: string; total: number; passed: number; failed: number; error: number; skipped: number; pass_rate: number };
   triage?: { case_id: string; failure_type: string; reason?: string; suggestion?: string }[];
-  analysis?: { status: "completed" | "failed"; error?: string };
+  analysis?: { status: "completed" | "failed" | "skipped"; error?: string };
 }
 
 type RunPageProps = { project: Project; definitions?: ApiDefinition[]; onClearScope?: () => void };
@@ -30,6 +32,8 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
   const [result, setResult] = useState<RunResult>();
   const [selected, setSelected] = useState<string[]>([]);
   const [available, setAvailable] = useState<TestCase[]>([]);
+  const assistantReferences = selected.map(id => ({ kind: "case" as const, id, label: available.find(c => c.id === id)?.title || id }));
+  useAssistantPageContext({ projectId: project.id, page: definitions ? "api" : "run", env, references: assistantReferences });
   const [preparing, setPreparing] = useState(false);
   const [autoTriage, setAutoTriage] = useState(true);
   const [checkBusinessCode, setCheckBusinessCode] = useState(true);
@@ -49,7 +53,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
   const failed = result ? result.run.failed + result.run.error : 0;
 
   return (
-    <>
+    <div className="page-frame">
       <PageHeader
         title="接口回归"
         workflow={[
@@ -60,6 +64,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
         ]}
         description="直接执行已生成的脚本，不调用模型；只有原因不明的失败才交给 agent 归因。"
         extra={<>
+          <AssistantAskButton projectId={project.id} page={definitions ? "api" : "run"} env={env} references={assistantReferences} mode="regression" text="为选中的已审核接口用例准备回归操作，先让我确认执行范围。" disabled={!selected.length}>助手准备回归</AssistantAskButton>
           <Space><Typography.Text type="secondary">环境</Typography.Text><EnvSelect project={project} value={env} onChange={setEnv} showUrl disabled={busy} /></Space>
           <Space><Typography.Text type="secondary">调用身份</Typography.Text><Select aria-label="批量执行调用身份" placeholder="请选择调用身份"
             style={{ minWidth: 200 }} value={selectedRole} onChange={setSelectedRole} loading={roles.loading} disabled={busy}
@@ -75,6 +80,8 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
           </RunButton>
         </>}
       />
+<div className="page-scroll-body">
+      <TaskProgressPanel projectId={project.id} source="api" env={env} />
       <Typography.Paragraph type="secondary">
         {selectedRole === undefined ? "执行前请选择调用身份。" : selectedRole === ""
           ? "统一使用所选环境手动保存的 token，覆盖用例角色及默认不携带鉴权的设置；请先在当前环境手动登录并保存 token。"
@@ -105,6 +112,8 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
       {result?.analysis?.status === "failed" && <Alert type="warning" showIcon style={{ marginBottom: 16 }}
         message="接口报告已生成，AI 失败分析未完成"
         description={result.analysis.error ? `原始测试结果不受影响。原因：${result.analysis.error}` : "原始测试结果不受影响，请稍后重试分析。"} />}
+      {result?.analysis?.status === "skipped" && <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+        message="登录态无效，已停止 AI 分析" description={result.analysis.error} />}
       <Collapse size="small" className="page-section-b" items={[{
         key: "roles",
         label: <Space wrap>多账号<Typography.Text type="secondary" style={{ fontSize: 12 }}>流程用例中每步可用不同角色（如 买家下单 → 运营审核 → 买家退款）</Typography.Text></Space>,
@@ -153,6 +162,7 @@ function ApiRunPage({ project, definitions, onClearScope }: RunPageProps) {
           )}
         </>
       )}
-    </>
+    </div>
+</div>
   );
 }

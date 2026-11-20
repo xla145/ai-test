@@ -1,3 +1,4 @@
+import { ProjectTaskSummary } from "../components/TaskProgressPanel";
 import {
   ApiOutlined,
   ArrowRightOutlined,
@@ -84,6 +85,7 @@ export function HomePage({ project, todos }: { project: Project; todos?: Project
 
   return (
     <div className="home-overview">
+      <ProjectTaskSummary projectId={project.id} />
       <Flex className="home-header" justify="space-between" align="flex-start" gap="16px 24px" wrap>
         <div style={{ flex: "1 1 320px", minWidth: 0 }}>
           <div className="console-section-label">项目概览</div>

@@ -1,5 +1,10 @@
+import { AssistantPanel } from "../assistant/AssistantPanel";
+import { useAssistantContext } from "../assistant/AssistantContext";
+import { navigateAssistantReference } from "../assistantNavigation";
+import { useNav } from "../nav";
+import type { Project } from "../api";
 import { CheckCircleFilled, CloseOutlined, LoadingOutlined, PauseCircleOutlined, UserOutlined, StopOutlined, ToolOutlined, WarningFilled } from "@ant-design/icons";
-import { Alert, Badge, Button, Tooltip, Typography } from "antd";
+import { Alert, Badge, Button, Segmented, Tooltip, Typography } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UiTaskRecord } from "../../shared/ipc";
 import { api } from "../api";
@@ -10,11 +15,11 @@ import { useProjects } from "./ProjectSettings";
 interface ActivityItem { time: string; method: string; detail: string }
 
 const statusLabel: Record<UiTaskRecord["status"], string> = {
-  running: "执行中", stopping: "正在停止", completed: "已完成", failed: "未通过", stopped: "已停止",
+  queued: "排队中", running: "执行中", stopping: "正在停止", completed: "已完成", failed: "未通过", stopped: "已停止",
 };
 
 const sourceLabel: Record<NonNullable<UiTaskRecord["source"]>, string> = {
-  ui: "UI", agent: "Agent", performance: "性能测试",
+  api: "接口", app: "App", ui: "UI", agent: "Agent", performance: "性能测试",
 };
 
 function TaskIcon({ status }: { status: UiTaskRecord["status"] }) {
@@ -24,10 +29,17 @@ function TaskIcon({ status }: { status: UiTaskRecord["status"] }) {
   return <LoadingOutlined spin={status === "running"} className={`agent-process-icon ${status === "stopping" ? "warning" : "running"}`} />;
 }
 
-export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange }: {
+export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange, project, page }: {
+  project?: Project; page: string;
   activity: ActivityItem[]; onClearActivity: () => void; open: boolean; onOpenChange: (open: boolean) => void;
 }) {
   const tasks = useUiTasks();
+  const [tab, setTab] = useState("chat");
+  const assistant = useAssistantContext();
+  const { go } = useNav();
+  useEffect(() => {
+    if (assistant.requestVersion > 0) { setTab("chat"); onOpenChange(true); }
+  }, [assistant.requestVersion, onOpenChange]);
   const { projects } = useProjects();
   const [showAll, setShowAll] = useState(false);
   const [anchor, setAnchor] = useState({ right: 24, bottom: 24 });
@@ -39,27 +51,21 @@ export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange
   const recent = useMemo(() => activity.slice(showAll ? -200 : -6).reverse(), [activity, showAll]);
   const recentTasks = [...tasks.filter(isUiTaskActive), ...tasks.filter((task) => !isUiTaskActive(task)).slice(0, 4)];
 
-  // WebContentsView 位于 DOM 之上：入口避开原生浏览器，面板展开时由 BrowserDock 暂停相交视图。
+  // WebContentsView 位于 DOM 之上：入口固定在可操作区域的右下角，面板展开时由 BrowserDock 暂停相交视图。
   useEffect(() => {
     let view = { visible: false, docked: false };
     let frame = 0;
     const measure = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        let right = window.innerWidth <= 600 ? 16 : 24;
-        let bottom = window.innerWidth <= 600 ? 16 : 24;
-        if (view.visible && !view.docked) right = window.innerWidth / 2 + 16;
-        if (view.visible && view.docked) {
-          for (const box of document.querySelectorAll<HTMLElement>('.browser-dock-view')) {
-            const rect = box.getBoundingClientRect();
-            if (!rect.width || !rect.height) continue;
-            const x = window.innerWidth - right - 48, y = window.innerHeight - bottom - 48;
-            if (x < rect.right && x + 48 > rect.left && y < rect.bottom && y + 48 > rect.top) {
-              if (rect.left >= 76) right = window.innerWidth - rect.left + 12;
-              else bottom = window.innerHeight - rect.top + 12;
-            }
-          }
-        }
+        const inset = window.innerWidth <= 600 ? 16 : 24;
+        const dock = [...document.querySelectorAll<HTMLElement>('.browser-dock')]
+          .find(box => box.getClientRects().length && box.getBoundingClientRect().width > 0);
+        const workspaceEdge = view.visible
+          ? dock?.getBoundingClientRect().left ?? document.querySelector<HTMLElement>('.app-shell')?.getBoundingClientRect().right ?? window.innerWidth / 2
+          : window.innerWidth;
+        const right = Math.max(inset, Math.min(window.innerWidth - 64, window.innerWidth - workspaceEdge + inset));
+        const bottom = inset;
         setAnchor((old) => old.right === right && old.bottom === bottom ? old : { right, bottom });
       });
     };
@@ -79,6 +85,7 @@ export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange
       }
     };
     const onPointer = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".assistant-popup")) return;
       if (event.target instanceof Node && !panel.current?.contains(event.target) && !trigger.current?.contains(event.target)) onOpenChange(false);
     };
     document.addEventListener('keydown', onKey);
@@ -87,8 +94,8 @@ export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange
   }, [open, onOpenChange]);
 
   return <>
-    <Tooltip title={active.length ? `Agent 执行中（${active.length}）` : "查看 Agent 执行过程"} placement="left">
-      <button ref={trigger} type="button" style={anchor} className={`agent-process-trigger ${active.length ? "is-active" : ""}`} aria-label="查看 Agent 执行过程" aria-expanded={open} aria-controls={open ? 'agent-process-panel' : undefined}
+    <Tooltip title={active.length ? `执行中（${active.length}）· 打开 AI 助手` : "打开 AI 助手"} placement="left">
+      <button ref={trigger} type="button" style={anchor} className={`agent-process-trigger ${active.length ? "is-active" : ""}`} aria-label="打开 AI 助手" aria-expanded={open} aria-controls={open ? 'agent-process-panel' : undefined}
         onClick={() => onOpenChange(!open)}>
         <Badge count={active.length || undefined} size="small" offset={[-2, 2]}>
           <span className="agent-process-avatar"><UserOutlined /></span>
@@ -98,23 +105,28 @@ export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange
     </Tooltip>
 
     {open && <section ref={panel} id="agent-process-panel" tabIndex={-1} role="dialog" aria-modal="false" className="agent-process-panel" style={{
-      right: anchor.right, width: `min(390px, calc(100vw - ${anchor.right + 16}px))`,
+      right: anchor.right, width: `min(460px, calc(100vw - ${anchor.right + 16}px))`,
+      height: tab === "chat" ? `min(680px, calc(100vh - ${anchor.bottom + 76}px))` : undefined,
       ...(anchor.bottom > window.innerHeight / 2
         ? { top: window.innerHeight - anchor.bottom + 12, maxHeight: anchor.bottom - 28 }
         : { bottom: anchor.bottom + 60, maxHeight: `min(620px, calc(100vh - ${anchor.bottom + 76}px))` }),
-    }} aria-label="Agent 执行过程">
+    }} aria-label="AI 测试助手">
       <header className="agent-process-head">
         <div className="agent-process-heading">
           <span className="agent-process-heading-icon"><UserOutlined /></span>
-          <div><Typography.Text strong>Agent 执行过程</Typography.Text><Typography.Text type="secondary">实时任务与工具活动</Typography.Text></div>
+          <div><Typography.Text strong>AI 测试助手</Typography.Text><Typography.Text type="secondary">{project?.name ?? "请选择项目"}{window.desktopHost ? "" : " · 演示预览"}</Typography.Text></div>
         </div>
         <div className="agent-process-head-actions">
-          {activity.length > 0 && <Button type="text" size="small" onClick={onClearActivity}>清空记录</Button>}
-          <Button type="text" size="small" aria-label="关闭 Agent 执行过程" icon={<CloseOutlined />} onClick={() => { onOpenChange(false); trigger.current?.focus(); }} />
+          {tab === "process" && activity.length > 0 && <Button type="text" size="small" onClick={onClearActivity}>清空记录</Button>}
+          <Button type="text" size="small" aria-label="关闭 AI 助手" title={tab === "process" ? "关闭面板后任务继续执行" : undefined} icon={<CloseOutlined />} onClick={() => { onOpenChange(false); trigger.current?.focus(); }} />
         </div>
       </header>
 
-      <div className="agent-process-body">
+      <div style={{ padding: "0 16px 10px" }}><Segmented block aria-label="助手视图" value={tab} onChange={value => setTab(String(value))}
+        options={[{ label: "对话", value: "chat" }, { label: `执行过程${active.length ? ` · ${active.length}` : ""}`, value: "process" }]} /></div>
+      {tab === "chat" ? (project ? <AssistantPanel key={project.id} project={project} page={page}
+        onNavigate={reference => navigateAssistantReference(project.id, reference, go)} />
+        : <div className="agent-process-empty">选择一个具体项目后，即可分析报告、补充用例或准备回归。</div>) : <div className="agent-process-body">
         <div className="agent-process-summary">
           <div><span className="agent-process-summary-label">执行任务</span><strong>{active.length ? `${active.length} 个执行中` : "当前无执行任务"}</strong></div>
           <div><span className="agent-process-summary-label">最近活动</span><strong>{latest?.time ?? "—"}</strong></div>
@@ -139,7 +151,7 @@ export function AgentProcessDock({ activity, onClearActivity, open, onOpenChange
           {activity.length > 6 && <Button type="link" size="small" className="agent-process-more" onClick={() => setShowAll(!showAll)}>{showAll ? '收起记录' : `查看全部 ${activity.length} 条活动`}</Button>}
         </div>
       </div>
-      <footer className="agent-process-foot"><span>{window.desktopHost ? '保留最近 100 条任务' : '浏览器预览 · 演示数据'}</span><Typography.Text type="secondary">关闭面板不影响执行</Typography.Text></footer>
+      }
     </section>}
   </>;
 }

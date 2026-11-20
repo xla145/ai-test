@@ -1,3 +1,4 @@
+import { pages } from "./pageRegistry";
 import { createContext, useContext } from "react";
 
 /**
@@ -17,27 +18,9 @@ export interface NavSection {
 }
 
 export const NAV_SECTIONS: NavSection[] = [
-  { key: "overview", items: [{ key: "home", label: "概览" }] },
-  { key: "prepare", title: "用例", items: [
-    { key: "cases", label: "用例库" },
-    { key: "import", label: "导入与规范检查" },
-    { key: "api", label: "接口测试" },
-  ] },
-  { key: "execute", title: "执行", items: [
-    { key: "run", label: "接口回归" },
-    { key: "performance", label: "性能测试" },
-    { key: "ui", label: "Web UI 测试" },
-    { key: "app", label: "App 测试" },
-  ] },
-  { key: "analyze", title: "结果", items: [
-    { key: "reports", label: "测试报告" },
-    { key: "ops", label: "工程化" },
-  ] },
-  { key: "config", title: "配置", items: [
-    { key: "db", label: "数据库" },
-    { key: "settings", label: "项目设置" },
-  ] },
-];
+  { key: "overview" }, { key: "prepare", title: "用例" }, { key: "execute", title: "执行" },
+  { key: "analyze", title: "结果" }, { key: "config", title: "配置" },
+].map(section => ({ ...section, items: pages.list().filter(p => p.section === section.key).map(p => ({ key: p.key, label: p.label })) }));
 
 export const navLabel = (key: string) =>
   NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.key === key)?.label ?? key;

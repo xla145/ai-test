@@ -7,7 +7,7 @@ declare global {
   }
 }
 
-export const api = (): AitestApi => window.aitest;
+export { api } from "./bridge";
 
 export interface Project {
   id: string;

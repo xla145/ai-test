@@ -1,4 +1,4 @@
-import { numericEqual, readValue, equalValue, validateObservedExpectation, checkCollection, validateCollectionRule, type CollectionRule, type ValueSource } from "./components.js";
+import { assertRuntimeInput, resolveInputParams, type RuntimeRule, createUiInputs, type UiInput, numericEqual, readValue, equalValue, validateObservedExpectation, checkCollection, validateCollectionRule, type CollectionRule, type ValueSource } from "./components.js";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { chromium, selectors, type Browser, type BrowserContext, type Page } from "playwright-core";
@@ -101,6 +101,7 @@ export class BrowserSession {
   private refs = new Map<string, RefEntry>();
   private refSeq = 0;
   private steps: UiStep[] = [];
+  private inputs = createUiInputs();
   private observed = new Map<string, unknown>();
   /** 之后录制的步骤对应用例第几步（从 1 开始），用于界面对照 */
   currentCaseStep?: number;
@@ -534,11 +535,11 @@ export class BrowserSession {
     return { locator: spec, url: page.url() };
   }
 
-  async type(ref: string, text: string, opts: { secretEnv?: string } = {}) {
+  async type(ref: string, text: string, opts: { secretEnv?: string; generated?: UiInput } = {}) {
     ref = await this.adaptRef(ref, "fill");
     const { page, spec, role } = await this.target(ref);
-    await toLocator(page, spec).fill(text);
-    this.record({ action: "fill", target: spec, value: opts.secretEnv ? "" : text, secretEnv: opts.secretEnv, role });
+    await toLocator(page, spec).fill(opts.generated ? this.inputs[opts.generated] : text);
+    this.record({ action: "fill", target: spec, value: opts.secretEnv || opts.generated ? "" : text, ...opts, role });
     return { locator: spec };
   }
 
@@ -628,9 +629,11 @@ export class BrowserSession {
   }
 
   /** 原生控件读取 value；Element Plus 下拉框读取展示文字并录制精确文本断言。 */
-  async expectValue(ref: string, value: string, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS) {
+  async expectValue(ref: string, value: string, timeoutMs = EXPLORE_ASSERT_TIMEOUT_MS, valueRef?: UiInput) {
+    if (valueRef) value = this.inputs[valueRef];
     const selected = await this.adaptRef(ref, "selected");
     if (selected !== ref) {
+      if (valueRef) throw new Error("VALUE_INVALID: 运行时输入引用仅支持输入框断言");
       // Bind to the original control, not the value-dependent selected-item node.
       const { page, spec, role } = await this.target(ref, { avoidText: value, independent: true });
       const loc = toLocator(page, spec);
@@ -643,8 +646,9 @@ export class BrowserSession {
     const loc = toLocator(page, spec);
     let actual = "";
     const ok = await poll(async () => (actual = await loc.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === value, timeoutMs);
+    if (!ok && valueRef) throw new Error("ASSERTION_FAILED: 输入值与运行时变量不一致");
     if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${value}」`);
-    const recorded = this.recordAssertion({ action: "expectValue", target: spec, value, role });
+    const recorded = this.recordAssertion({ action: "expectValue", target: spec, value: valueRef ? "" : value, ...(valueRef ? { valueRef } : {}), role });
     return { locator: spec, ...(recorded ? {} : { note: "与已录入的断言相同，未重复录入" }) };
   }
 
@@ -747,6 +751,14 @@ export class BrowserSession {
   }
 
   /** 数据库断言：由调用方先验证通过（引擎 db-check），这里只录入脚本 */
+  resolveDbCheck(check: DbCheck) { return resolveInputParams(check, this.inputs); }
+
+  expectRuntimeInput(rule: RuntimeRule) {
+    assertRuntimeInput(this.inputs, rule);
+    this.record({ action: "expectRuntimeInput", rule });
+    return { ok: true };
+  }
+
   recordDbCheck(check: DbCheck) {
     this.record({ action: "expectDb", check });
   }
@@ -794,7 +806,8 @@ export class BrowserSession {
     return this.recording();
   }
 
-  resetRecording(): void {
+  resetRecording(newCase = false): void {
+    if (newCase) this.inputs = createUiInputs();
     this.steps = [];
     this.observed.clear();
     this.currentCaseStep = undefined;
@@ -816,6 +829,16 @@ export class BrowserSession {
    * 断言失败时抛错，错误信息用于界面展示；visualCheck 只截图，不判定。
    */
   async runStep(step: Step, opts: StepRunOptions = {}): Promise<{ note?: string; evidence?: string }> {
+    // Pure input and database checks must work before a page or role session exists.
+    if (step.action === "expectRuntimeInput") {
+      assertRuntimeInput(this.inputs, step.rule);
+      return {};
+    }
+    if (step.action === "expectDb") {
+      if (!opts.dbCheck) throw new Error("DB_UNAVAILABLE: 调试模式未连接数据库，无法验证");
+      await opts.dbCheck(this.resolveDbCheck(step.check));
+      return {};
+    }
     const timeout = opts.timeoutMs ?? 5000;
     const role = step.role ?? DEFAULT_ROLE;
     const page = await this.page(role);
@@ -833,7 +856,7 @@ export class BrowserSession {
         await loc!.click({ timeout });
         return {};
       case "fill": {
-        const value = step.secretEnv ? opts.secrets?.[step.secretEnv] : step.value;
+        const value = step.generated ? this.inputs[step.generated] : step.secretEnv ? opts.secrets?.[step.secretEnv] : step.value;
         if (step.secretEnv && value === undefined) throw new Error(`缺少敏感值 ${step.secretEnv}，请在「角色与登录」中配置`);
         await loc!.fill(value ?? "", { timeout });
         return {};
@@ -877,7 +900,8 @@ export class BrowserSession {
       }
       case "expectValue": {
         let actual = "";
-        const ok = await poll(async () => (actual = await loc!.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === step.value, timeout);
+        const ok = await poll(async () => (actual = await loc!.inputValue({ timeout: 1000 }).catch(() => "\u0000")) === (step.valueRef ? this.inputs[step.valueRef] : step.value), timeout);
+        if (!ok && step.valueRef) throw new Error("ASSERTION_FAILED: 输入值与运行时变量不一致");
         if (!ok) throw new Error(`断言不成立：当前值为「${actual === "\u0000" ? "（无法读取）" : actual}」，期望「${step.value}」`);
         return {};
       }
@@ -940,10 +964,6 @@ export class BrowserSession {
         return {};
       case "fastForward":
         await page.clock.fastForward(step.ms);
-        return {};
-      case "expectDb":
-        if (!opts.dbCheck) return { note: "调试模式未连接数据库，已跳过" };
-        await opts.dbCheck(step.check);
         return {};
       case "visualCheck": {
         if (!opts.evidenceDir) return { note: "视觉判定需人工确认" };

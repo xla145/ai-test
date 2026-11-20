@@ -1,3 +1,4 @@
+import { pages } from "./pageRegistry";
 import type { ProjectType } from "../shared/ipc";
 
 export const projectTypeOptions: { value: ProjectType; label: string }[] = [
@@ -8,7 +9,5 @@ export const projectTypeOptions: { value: ProjectType; label: string }[] = [
 ];
 
 export function visibleProjectTab(key: string, type: ProjectType = "multi"): boolean {
-  if (key === "ui") return type === "web" || type === "multi";
-  if (key === "app") return type === "app" || type === "multi";
-  return true;
+  return pages.list(type).some(page => page.key === key);
 }

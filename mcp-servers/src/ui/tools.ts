@@ -1,7 +1,7 @@
 import { coverageIssues } from "./coverage.js";
 import { UiBindings } from "./bindings.js";
 import { ExecutionGuard } from './executionGuard.js';
-import { validateExecutionContract } from './contract.js';
+import { inputRefSchema, validateExecutionContract } from './contract.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -55,6 +55,7 @@ interface ActiveProject {
 }
 
 const states = new WeakMap<UiToolContext, ActiveProject>();
+const initializationFailures = new WeakMap<UiToolContext, string>();
 /** 本会话最近一次保存的用例与步骤，供 save_ui_script(append) 追加断言 */
 const savedSteps = new WeakMap<UiToolContext, { caseId: string; steps: UiStep[] }>();
 
@@ -95,7 +96,11 @@ function browserTools(ctx: UiToolContext): UiTool[] {
   const tools = allBrowserTools(ctx);
   // 未启用 Midscene 时不提供视觉工具，免得 agent 反复尝试
   return (ctx.vision ? tools : tools.filter((t) => !t.name.startsWith("ai_"))).map(tool => ({ ...tool, handler: async input => {
+    const initializationFailure = initializationFailures.get(ctx);
+    if (initializationFailure) throw new Error(initializationFailure);
     const guard = states.get(ctx)?.guard;
+    if (guard?.blocked && !['precondition_status', 'recording', 'screenshot', 'open_project'].includes(tool.name)
+      && !(tool.name === 'wait_ready' && guard.blocked.startsWith('UI_RESULT_NOT_READY:'))) guard.assertActive();
     const assertion = tool.name.startsWith('expect_') || tool.name === 'db_check';
     const controlled = assertion || ['click', 'type', 'select', 'check', 'press', 'navigate', 'ai_locate', 'ai_act', 'case_step', 'save_ui_script', 'run_playwright_script'].includes(tool.name);
     const key = tool.name === 'ai_locate' ? `locate:${ctx.session.currentCaseStep ?? 'preconditions'}`
@@ -115,19 +120,26 @@ function browserTools(ctx: UiToolContext): UiTool[] {
       // 断言成功后清除覆盖声明（失败时保留，允许重试同一断言）
       if (assertion || tool.name === 'visual_check') {
         ctx.session.currentExpected = []; ctx.session.currentPreconditions = []; ctx.session.currentPreconditionChecks = [];
+        if (guard) guard.dirty = true;
       }
       return out;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      if (tool.name === 'open_project' && !guard) initializationFailures.set(ctx, 'UI_INITIALIZATION_FAILED: 项目或执行计划初始化失败，请结束本次任务后重试');
       if (guard && controlled) {
         if (/UI_ENVIRONMENT_BLOCKED|UI_RESULT_NOT_READY/.test(reason)) guard.blocked = reason;
-        else if (assertion && checkIds.length && /断言不成立|ASSERTION_FAILED/.test(reason)) guard.failChecks(checkIds, reason);
+        else if (assertion && checkIds.length && /断言不成立|ASSERTION_FAILED/.test(reason)) {
+          guard.failChecks(checkIds, reason);
+          guard.assertActive();
+        }
         else if (key) guard.failedAttempt(key, tool.name);
       }
       throw error;
     } finally {
       const current = states.get(ctx)?.guard;
-      current?.persist(ctx.session.recording().length ? ctx.session.recording() : savedSteps.get(ctx)?.steps ?? []);
+      if (current?.dirty) {
+        current.persist(ctx.session.recording().length ? ctx.session.recording() : savedSteps.get(ctx)?.steps ?? []);
+      }
     }
   } }));
 }
@@ -164,8 +176,8 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
           reuseExistingSession: Boolean(ctx.cdpEndpoint),
           openView: ctx.secrets.openView ? (role) => ctx.secrets.openView!(project_id, role, env) : undefined,
         });
-        s.resetRecording();
-        return { project: project.name, env, base_url: envCfg.base_url, mode: ctx.cdpEndpoint ? "内嵌浏览器" : "独立 Chromium", ...(guard ? { execution: guard.snapshot([]), artifactPath: guard.path } : {}) };
+        s.resetRecording(true);
+        return { planStatus: "前置条件尚未验证", project: project.name, env, base_url: envCfg.base_url, mode: ctx.cdpEndpoint ? "内嵌浏览器" : "独立 Chromium", ...(guard ? { execution: guard.snapshot([]), artifactPath: guard.path } : {}) };
       },
     },
     {
@@ -239,8 +251,11 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     {
       name: "type",
       description: "在输入框填写文本。敏感值不要直接传：用 secret_env 指定由客户端注入的环境变量名",
-      input: { ref, text: z.string(), secret_env: z.string().optional() },
-      handler: ({ ref, text, secret_env }) => s.type(ref, secret_env ? process.env[secret_env] ?? "" : text, { secretEnv: secret_env }),
+      input: { ref, text: z.string().optional(), secret_env: z.string().optional(), generated: inputRefSchema.optional(), value_ref: inputRefSchema.optional() },
+      handler: ({ ref, text, secret_env, generated, value_ref }) => {
+        if ([text, secret_env, generated, value_ref].filter(v => v !== undefined).length !== 1) throw new Error("请指定 text、secret_env、generated 或 value_ref 中的一种输入来源");
+        return s.type(ref, secret_env ? process.env[secret_env] ?? "" : text ?? "", { secretEnv: secret_env, generated: value_ref ?? generated });
+      },
     },
     { name: "select", description: "下拉选择。返回值带选择后的页面快照", input: { ref, value: z.string() }, handler: async ({ ref, value }) => withSnapshot(s, await s.select(ref, value)) },
     { name: "check", description: "勾选 / 取消勾选", input: { ref, checked: z.boolean() }, handler: ({ ref, checked }) => s.check(ref, checked) },
@@ -281,8 +296,11 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
     {
       name: "expect_value",
       description: "断言输入框 / 下拉框的当前值。调用前先用 assertion_coverage 声明覆盖序号（原生下拉框比较 option 的 value；Element Plus 下拉框比较展示文字，包括空选时的提示文字；清空的输入框为空字符串）",
-      input: { ref, value: z.string() },
-      handler: ({ ref, value }) => s.expectValue(ref, value),
+      input: { ref, value: z.string().optional(), value_ref: inputRefSchema.optional() },
+      handler: ({ ref, value, value_ref }) => {
+        if ((value !== undefined) === (value_ref !== undefined)) throw new Error("VALUE_INVALID: value 与 value_ref 必须且只能提供一个");
+        return s.expectValue(ref, value ?? "", undefined, value_ref);
+      },
     },
     { name: "expect_url", description: "断言当前 URL 包含片段", input: { pattern: z.string() }, handler: ({ pattern }) => s.expectUrl(pattern) },
     {
@@ -310,6 +328,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
         db: z.string().optional().describe("连接名；只有一个连接时可省略"),
         sql: z.string().describe("单条只读 SQL，参数用 :name"),
         params: z.record(z.string(), z.unknown()).optional(),
+        paramRefs: z.record(z.string(), inputRefSchema).optional().describe("SQL 参数名到运行时变量名；与 type.value_ref 使用同一个值"),
         expect: z.record(z.string(), z.unknown()).optional(),
         timeout_ms: z.number().int().optional(),
         description: z.string().optional().describe("这条校验在验证什么，如「新用户已入库」"),
@@ -318,10 +337,22 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
         const { project, env } = active(ctx);
         const secretEnv = await ctx.secrets.resolve(project.id, env);
         const res = await ctx.engine<{ ok: boolean; errors: string[]; rows: unknown[] }>(
-          ["db-check", "--project", project.id, "--env", env, "--spec", JSON.stringify(check)], secretEnv);
+          ["db-check", "--project", project.id, "--env", env, "--spec", JSON.stringify(s.resolveDbCheck(check))], secretEnv);
         if (!res.ok) throw new Error(`断言不成立：${res.errors.join("；")}；查询结果：${JSON.stringify(res.rows.slice(0, 5))}`);
         s.recordDbCheck(check);
         return { ok: true, rows: res.rows.slice(0, 5) };
+      },
+    },
+    {
+      name: "expect_runtime_input",
+      description: "验证当前原子前置检查中声明的运行时长度、字节数和不同值约束，不证明数据库唯一性。先 assertion_coverage 指定对应 check_id。",
+      input: {},
+      handler: async () => {
+        const guard = active(ctx).guard;
+        const ids = s.currentPreconditionChecks;
+        const check = ids.length === 1 ? guard?.checks.find(c => c.id === ids[0]) : undefined;
+        if (check?.method !== "runtime" || !check.runtime) throw new Error("RUNTIME_CHECK_REQUIRED: 请先映射运行时检查");
+        return s.expectRuntimeInput(check.runtime);
       },
     },
     {
@@ -512,6 +543,7 @@ function allBrowserTools(ctx: UiToolContext): UiTool[] {
       description: "（Midscene）执行自然语言操作。不会录入脚本，仅在探索卡住时使用",
       input: { prompt: z.string() },
       handler: async ({ prompt }) => {
+        if (states.get(ctx)?.guard) throw new Error("UNRECORDED_ACTION_BLOCKED: 绑定执行计划时禁止 ai_act，请用定位工具与可录制动作");
         const agent = await vision(ctx);
         await agent.aiAct(prompt);
         return { note: "该操作未录入脚本，请用 snapshot + click/type 重新走一遍以生成确定性脚本" };

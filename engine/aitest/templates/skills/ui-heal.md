@@ -3,6 +3,7 @@
 输入：失败用例的错误信息、脚本路径、trace 与失败截图路径（只含失败步骤）。
 
 1. 先归因：product_bug（页面行为与需求不符）/ script_error（页面改版、定位器失效）/ environment（环境不可用）/ data（前置数据缺失）/ auth（认证或角色前置条件不满足）/ model（模型或 Agent 不可用）/ unknown（证据不足）。只有脚本问题可以提出脚本修复，其余类型保留证据并交人工处理。
+   动态输入、数据库唯一性和运行时前置检查失败归为 data 或 environment；不得在自愈中重新生成 username/email/password、改写 `value_ref`、绕过 `expect_runtime_input` 或删除 `paramRefs`。
 2. 只有 script_error 才自愈：在内嵌浏览器里复现到失败步骤（`browser.navigate`、`browser.snapshot`），找到新的稳定定位器。
 3. 只修改失败步骤相关的行，保持其余脚本不变；用 `report.propose_script_fix` 提交完整的新脚本内容，由用户审核 diff 后合并。
 4. product_bug 不修改脚本，只在结论中说明。

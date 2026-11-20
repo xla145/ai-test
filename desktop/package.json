@@ -44,7 +44,9 @@
     "@ai-test/mcp-servers": "*",
     "better-sqlite3": "^13.2.0",
     "electron-updater": "^6.8.11",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "productName": "AIProbe",
   "author": "AIProbe",

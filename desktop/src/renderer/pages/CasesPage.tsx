@@ -1,3 +1,5 @@
+import { AssistantAskButton, useAssistantPageContext } from "../assistant/AssistantContext";
+import { useAssistantNavigation } from "../assistantNavigation";
 import { CheckOutlined, ClearOutlined, FileExcelOutlined, SearchOutlined, StopOutlined } from "@ant-design/icons";
 import { App, Button, Flex, Input, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import { useRef, useState } from "react";
@@ -15,6 +17,13 @@ export function CasesPage({ project }: { project: Project }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [detail, setDetail] = useState<TestCase>();
   const [editing, setEditing] = useState<TestCase>();
+  const currentProject = useRef(project.id);
+  currentProject.current = project.id;
+  const assistantReferences = (selected.length ? selected : detail ? [detail.id] : []).map(id => ({ kind: "case" as const, id }));
+  useAssistantPageContext({ projectId: project.id, page: "cases", references: assistantReferences });
+  useAssistantNavigation(project.id, "cases", true, ref => {
+    void run(async () => { const rows = await api().listCases(project.id, { ids: ref.id }); const c = (rows as TestCase[]).find(c => c.id === ref.id); if (c && currentProject.current === project.id) setDetail(c); });
+  });
   const { run } = useAction();
   const [activeAction, setActiveAction] = useState<string>();
   const actionRef = useRef<string>();
@@ -75,7 +84,7 @@ export function CasesPage({ project }: { project: Project }) {
   const options = (map: Record<string, { text: string }>) => Object.entries(map).map(([value, v]) => ({ value, label: v.text }));
 
   return (
-    <>
+    <div className="page-frame">
       <PageHeader title="用例库"
         workflow={[
           { title: "筛选用例", description: "按模块、执行方式、等级和审核状态筛选" },
@@ -84,6 +93,7 @@ export function CasesPage({ project }: { project: Project }) {
           { title: "执行回归", description: "到对应测试页面生成并执行脚本" },
         ]} description="用例需人工审核后才进入回归；有阻断问题的用例不会生成脚本。"
         extra={<>
+          <AssistantAskButton projectId={project.id} page="cases" references={assistantReferences} mode="draft" text="检查这些用例的覆盖缺口，并补充边界与异常场景草稿。">交给助手</AssistantAskButton>
           <Button icon={<FileExcelOutlined />} loading={activeAction === "export"} disabled={busy && activeAction !== "export"}
           onClick={() => runAction("export", async () => {
             const out = await api().exportCasesExcel(project.id, project.name);
@@ -91,6 +101,7 @@ export function CasesPage({ project }: { project: Project }) {
           })}>导出 Excel</Button>
           <Button type="text" danger icon={<ClearOutlined />} loading={activeAction === "clear"} disabled={busy || !pagination.total} onClick={clearAll}>清空用例库</Button>
         </>} />
+<div className="page-scroll-body">
       <div className="data-surface cases-surface">
         <div className="case-filter-grid">
           <Input className="case-search" aria-label="搜索用例" allowClear prefix={<SearchOutlined />} placeholder="搜索标题、模块或用例 ID"
@@ -130,6 +141,7 @@ export function CasesPage({ project }: { project: Project }) {
           { title: "等级", dataIndex: "priority", width: 80,
             render: (p: string) => <Tag color={PRIORITY_COLOR[p]} bordered={false}>{p}</Tag> },
           { title: "执行方式", dataIndex: "execution_mode", width: 110, render: (v: string) => <LabelTag map={MODE} value={v} /> },
+          { title: "测试目标", dataIndex: "type", width: 90, render: (target: string) => ({ api: "接口", ui: "UI", app: "移动端", performance: "性能" }[target] ?? target) },
           { title: "规范检查", dataIndex: "lint_status", width: 100, render: (v: string) => <LabelTag map={LINT} value={v} /> },
           { title: "状态", dataIndex: "status", width: 80, render: (v: string) => <LabelTag map={STATUS} value={v} /> },
           { title: "", width: 100, render: (_: unknown, r: TestCase) => r.status === "draft" && (
@@ -147,6 +159,7 @@ export function CasesPage({ project }: { project: Project }) {
       {editing && <CaseEditor key={editing.id} value={editing} onClose={() => setEditing(undefined)} onSaved={(updated) => {
         setDetail(updated); setEditing(undefined); notifyProjectChanged(project.id); void reload();
       }} />}
-    </>
+    </div>
+</div>
   );
 }

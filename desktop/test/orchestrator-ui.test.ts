@@ -91,6 +91,61 @@ describe("UI regression orchestration", () => {
     expect(await orch.exploreUiCase("p1", "test", "tc_a")).toMatchObject({ scriptGenerated: false, needsClarification: true, tokens: 0 });
     expect(startThread).not.toHaveBeenCalled();
   });
+
+  it("checks a selected UI role before creating the conversion agent", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const checked = vi.fn(async () => { throw new Error("登录前置条件未满足"); });
+    const close = vi.fn(async () => {});
+    ui.createDebugBrowser = vi.fn(() => ({ newRoleContext: checked, close })) as any;
+    const withSteps = (async (args: string[], env?: Record<string, string>) => args[0] === "list-cases"
+      ? [{ ...cases[0], steps: ["打开业务页面"], expected: ["页面显示数据"] }]
+      : engine(args, env)) as EngineCall;
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine: withSteps, ui, secretEnv, agent });
+    await expect(orch.exploreUiCase("p1", "test", "tc_a", { selectedRole: "admin" })).rejects.toThrow("AUTH_REQUIRED");
+    expect(checked).toHaveBeenCalledWith("admin", expect.objectContaining({ requireLogin: true }));
+    expect(close).toHaveBeenCalled();
+    expect(agent).not.toHaveBeenCalled();
+  });
+
+  it("checks the role named by a login precondition before creating the agent", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const checked = vi.fn(async () => { throw new Error("登录前置条件未满足"); });
+    ui.createDebugBrowser = vi.fn(() => ({ newRoleContext: checked, close: async () => {} })) as any;
+    const withSteps = (async (args: string[], env?: Record<string, string>) => args[0] === "list-cases"
+      ? [{ ...cases[0], preconditions: ["admin 已登录"], steps: ["打开业务页面"], expected: ["页面显示数据"] }]
+      : engine(args, env)) as EngineCall;
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine: withSteps, ui, secretEnv, agent });
+    await expect(orch.exploreUiCase("p1", "test", "tc_a")).rejects.toThrow("AUTH_REQUIRED");
+    expect(checked).toHaveBeenCalledWith("admin", expect.objectContaining({ requireLogin: true }));
+    expect(agent).not.toHaveBeenCalled();
+  });
+
+  it("prepares a seed-only binding when no check is configured", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const fixtures = (async (args: string[]) => args[0] === "list-test-data"
+      ? [{ key: "DEM-1002", seed_script: "create-fixture" }] : engine(args)) as EngineCall;
+    vi.mocked(ui.checkData).mockResolvedValue([{ key: "DEM-1002", exists: null, via: "none" }]);
+    const orch = new Orchestrator({ engine: fixtures, ui, secretEnv, agent: vi.fn() });
+    expect(await orch.prepareData("p1", "test", [cases[1]])).toEqual({ missing: [], degraded: [] });
+    expect(ui.seedData).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks unresolved data references before creating the conversion agent", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const withSteps = (async (args: string[], env?: Record<string, string>) => args[0] === "list-cases"
+      ? [{ ...cases[1], preconditions: ["[ENV] 测试环境可用"], steps: ["打开用户页面"], expected: ["页面可见"] }]
+      : engine(args, env)) as EngineCall;
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine: withSteps, ui, secretEnv, agent });
+    vi.mocked(ui.checkData).mockResolvedValue([{ key: "DEM-1002", exists: null, via: "api" }]);
+    const out = await orch.exploreUiCase("p1", "test", "tc_b");
+    expect(ui.seedData).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ scriptGenerated: false, needsClarification: true, tokens: 0 });
+    expect(out.message).toContain("DEM-1002");
+    expect(agent).not.toHaveBeenCalled();
+  });
 });
 
 describe("reports", () => {
@@ -270,6 +325,7 @@ describe("App testing", () => {
     const out = await orch.runAppRegression("p1", "test", "ios", { device: "UDID-1" });
     expect(agent).not.toHaveBeenCalled();
     expect(runAppSuite).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
       workspace: "/ws", platform: "ios", appId: "com.example.shop.ios", caseIds: ["tc_a", "tc_b"], device: "UDID-1",
       roles: [{ role: "admin", username: "u", password: "p" }], maestroBin: "/opt/maestro",
     });

@@ -1,4 +1,4 @@
-import { ApiOutlined, CheckCircleOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import { ApiOutlined, CheckCircleOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Card, Empty, Segmented, Space, Statistic, Table, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type LintIssue, type Project } from "../api";
@@ -10,8 +10,6 @@ import { useAction, usePaged, useProjectChanged, notifyProjectChanged } from "..
 
 interface ImportResult {
   imported: number;
-  missing_columns?: string[];
-  unknown_columns?: string[];
 }
 
 const RULE_LABEL: Record<string, string> = {
@@ -44,7 +42,7 @@ export function ImportPage({ project }: { project: Project }) {
   const checkSeq = useRef(0);
   const [level, setLevel] = useState<string>("all");
   const { busy, run } = useAction();
-  const { modal, message } = App.useApp();
+  const { message } = App.useApp();
   const { goTab } = useProjects();
   // 进入页面和项目数据变化后都执行本地规范检查，同步统计与问题明细。
   const refresh = useCallback(async () => {
@@ -78,48 +76,46 @@ export function ImportPage({ project }: { project: Project }) {
   const importExcel = () => run(async () => {
     const file = await api().pickFile([{ name: "Excel", extensions: ["xlsx"] }]);
     if (!file) return;
-    const out = await api().importExcel(project.id, file) as ImportResult;
+    const out = await api().importExcel(project.id, file, true) as ImportResult;
     notifyProjectChanged(project.id);
-    if (out?.missing_columns?.length) {
-      // 列名没对上时整批用例会缺字段并被阻断，明确告诉用户是哪一列
-      modal.warning({
-        title: `已导入 ${out.imported} 条，但没有找到列：${out.missing_columns.join("、")}`,
-        width: 520,
-        content: (
-          <>
-            <p>这些字段会是空的，相关用例会被规范检查阻断。请把 Excel 表头改成下列名称之一后重新导入：</p>
-            <ul style={{ paddingInlineStart: 18 }}>
-              <li>标题：标题 / 用例标题 / 用例名称</li>
-              <li>步骤描述：步骤描述 / 操作步骤 / 测试步骤</li>
-              <li>预期结果：预期结果 / 期望结果</li>
-              <li>用例等级：用例等级 / 优先级 / 等级</li>
-            </ul>
-            {out.unknown_columns?.length ? <p>表头中未识别的列：{out.unknown_columns.join("、")}</p> : null}
-          </>
-        ),
-      });
-    } else message.success(`导入 ${out?.imported ?? 0} 条，正在自动检查`);
+    message.success(`导入 ${out?.imported ?? 0} 条，正在自动检查`);
+  });
+
+  const downloadTemplate = () => run(async () => {
+    const out = await api().exportCaseTemplate();
+    if (out?.path) {
+      await api().showInFolder(out.path);
+      message.success("测试用例模板已生成");
+    }
   });
 
   const recheck = () => { void refresh(); };
   const totalIssues = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
-    <>
+    <div className="page-frame import-page">
       <PageHeader
         title="导入与规范检查"
         workflow={[
-          { title: "导入 Excel", description: "选择团队已有的 Excel 用例文件" },
+          { title: "导入 Excel", description: "按下载的模板填写；格式错误时整批不入库" },
           { title: "规范检查", description: "检查结构、步骤、预期和用例等级，不调用模型" },
           { title: "修复阻断", description: "阻断级问题修复前不会生成脚本" },
           { title: "人工审核", description: "在用例库中审核后进入回归" },
         ]}
-        description="导入 Excel 后自动检查规范；修复阻断问题并审核后，才能生成回归脚本。"
+        description="按通用模板填写测试场景、步骤和预期，整批校验通过后存为草稿。接口文档、UI 脚本和压测参数可后续配置。"
         extra={<>
           <Button icon={<ReloadOutlined />} loading={checking} disabled={busy} onClick={recheck}>重新检查</Button>
+          <Button icon={<DownloadOutlined />} loading={busy} disabled={checking} onClick={downloadTemplate}>下载测试用例模板</Button>
           <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
         </>}
       />
+      {report && report.total > 0 && <div className="stat-grid metric-strip import-summary">
+        <Card><Statistic title="用例总数" value={report.total} /></Card>
+        <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
+        <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
+        <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
+      </div>}
+      <div className="page-scroll-body">
       {!report || report.total === 0 ? (
         <Card loading={checking}>
           {!report ? (
@@ -131,11 +127,12 @@ export function ImportPage({ project }: { project: Project }) {
               <Space direction="vertical" size={4}>
                 <Typography.Text>项目里还没有用例</Typography.Text>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  导入团队已有的 Excel 用例（表头含 标题 / 步骤描述 / 预期结果 / 用例等级），导入后自动检查
+                  先下载模板并填写用例。导入时校验全部数据；格式错误不会写入用例库。
                 </Typography.Text>
               </Space>
             }>
               <Space wrap style={{ justifyContent: "center" }}>
+                <Button icon={<DownloadOutlined />} loading={busy} disabled={checking} onClick={downloadTemplate}>下载测试用例模板</Button>
                 <Button type="primary" icon={<UploadOutlined />} loading={busy} disabled={checking} onClick={importExcel}>导入 Excel</Button>
                 {goTab && <Button icon={<ApiOutlined />} onClick={() => goTab("api")}>从 OpenAPI / 需求文档生成</Button>}
               </Space>
@@ -144,17 +141,11 @@ export function ImportPage({ project }: { project: Project }) {
         </Card>
       ) : (
         <>
-          <div className="stat-grid metric-strip">
-            <Card><Statistic title="用例总数" value={report.total} /></Card>
-            <Card><Statistic title="阻断" value={report.blocked_case_ids.length} valueStyle={{ color: report.blocked_case_ids.length ? "var(--console-error)" : undefined }} /></Card>
-            <Card><Statistic title="警告" value={counts.warn ?? 0} /></Card>
-            <Card><Statistic title="P0 占比" value={((report.stats.p0_ratio ?? 0) * 100).toFixed(1)} suffix="%" /></Card>
-          </div>
           {report.blocked_case_ids.length === 0 && (
             <Alert className="page-section" type="success" showIcon icon={<CheckCircleOutlined />} message="没有阻断级问题，可以进入脚本生成"
               action={goTab && <Button size="small" onClick={() => goTab("cases")}>去用例库审核</Button>} />
           )}
-          <div className="split page-section">
+          <div className="split page-section import-detail-panels">
             <div style={{ flex: "2 1 280px" }}>
               <Card title="规则命中" size="small">
                 <Table
@@ -201,6 +192,7 @@ export function ImportPage({ project }: { project: Project }) {
           </div>
         </>
       )}
-    </>
+    </div>
+</div>
   );
 }

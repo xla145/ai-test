@@ -10,13 +10,13 @@ import { toCode, validateReplayTarget, type LocatorSpec } from "./locator.js";
  */
 export const DEFAULT_ROLE = "default";
 
-import { validateObservedExpectation, type ValueSource, type CollectionRule } from "./components.js";
+import { validateObservedExpectation, type UiInput, type ValueSource, type CollectionRule } from "./components.js";
 type Base = { role?: string };
 export type Step = Base &
   (
     | { action: "goto"; url: string }
     | { action: "click"; target: LocatorSpec; scroll?: "center" }
-    | { action: "fill"; target: LocatorSpec; value: string; secretEnv?: string }
+    | { action: "fill"; target: LocatorSpec; value: string; secretEnv?: string; generated?: UiInput }
     | { action: "select"; target: LocatorSpec; value: string }
     | { action: "check"; target: LocatorSpec; checked: boolean }
     | { action: "press"; key: string }
@@ -25,7 +25,7 @@ export type Step = Base &
     | { action: "expectEnabled"; target: LocatorSpec; enabled: boolean }
     | { action: "expectText"; target: LocatorSpec; text: string; exact?: boolean }
     | { action: "expectNoText"; target: LocatorSpec; text: string }
-    | { action: "expectValue"; target: LocatorSpec; value: string }
+    | { action: "expectValue"; target: LocatorSpec; value: string; valueRef?: UiInput }
     | { action: "expectNumber"; target: LocatorSpec; value: string | number; tolerance?: string | number }
     | { action: "expectCollection"; target: LocatorSpec; rule: CollectionRule }
     | { action: "readValue"; target: LocatorSpec; name: string; valueSource: ValueSource }
@@ -38,6 +38,7 @@ export type Step = Base &
     | { action: "fastForward"; ms: number }
     | { action: "visualCheck"; description: string }
     | { action: "expectDb"; check: DbCheck }
+    | { action: "expectRuntimeInput"; rule: import("./components.js").RuntimeRule }
   );
 
 /** 数据库断言（与引擎 db.check 的 spec 一致） */
@@ -45,6 +46,7 @@ export interface DbCheck {
   db?: string;
   sql: string;
   params?: Record<string, unknown>;
+  paramRefs?: Record<string, UiInput>;
   expect?: Record<string, unknown>;
   timeout_ms?: number;
   description?: string;
@@ -114,7 +116,8 @@ export function generateSpec(input: SpecInput): string {
     }
     if ("target" in step) validateReplayTarget(step.target);
   }
-  const roles = [...new Set(input.steps.map((st) => st.role ?? DEFAULT_ROLE))];
+  const roles = [...new Set(input.steps.filter(st => !["expectDb", "expectRuntimeInput"].includes(st.action)).map((st) => st.role ?? DEFAULT_ROLE))];
+  if (!roles.length) roles.push(DEFAULT_ROLE);
   const singleNamedRole = roles.length === 1 && roles[0] !== DEFAULT_ROLE ? roles[0] : undefined;
   const pageVars = new Map<string, string>();
   roles.forEach((r, i) => {
@@ -123,6 +126,10 @@ export function generateSpec(input: SpecInput): string {
   const helpers = new Set<string>();
   const body: string[] = input.steps.some(st => st.action === "readValue" || st.action === "expectObserved") ? ["const observed = new Map<string, unknown>();"] : [];
 
+  if (input.steps.some(st => (st.action === "fill" && st.generated) || (st.action === "expectValue" && st.valueRef) || st.action === "expectRuntimeInput" || (st.action === "expectDb" && st.check.paramRefs))) {
+    helpers.add("createUiInputs");
+    body.push("const inputs = createUiInputs();");
+  }
   for (const r of roles) {
     if (pageVars.get(r) !== "page") {
       helpers.add("openAs");
@@ -144,7 +151,8 @@ export function generateSpec(input: SpecInput): string {
         wrap(`${st.scroll === "center" ? `await ${loc}.scrollIntoViewIfNeeded(); await ${loc}.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" })); ` : ""}await ${loc}.click();`);
         break;
       case "fill":
-        if (st.secretEnv) wrap(`await ${loc}.fill(process.env[${s(st.secretEnv)}] ?? "");`, "敏感值由客户端注入");
+        if (st.generated) wrap(`await ${loc}.fill(inputs[${s(st.generated)}]);`);
+        else if (st.secretEnv) wrap(`await ${loc}.fill(process.env[${s(st.secretEnv)}] ?? "");`, "敏感值由客户端注入");
         else wrap(`await ${loc}.fill(${s(st.value)});`);
         break;
       case "select":
@@ -173,7 +181,7 @@ export function generateSpec(input: SpecInput): string {
         wrap(`await expect(${loc}).not.toContainText(${s(st.text)}, { useInnerText: true });`);
         break;
       case "expectValue":
-        wrap(`await expect(${loc}).toHaveValue(${s(st.value)});`);
+        wrap(`await expect(${loc}).toHaveValue(${st.valueRef ? `inputs[${s(st.valueRef)}]` : s(st.value)});`);
         break;
       case "expectCollection":
         helpers.add('expectCollection');
@@ -212,9 +220,14 @@ export function generateSpec(input: SpecInput): string {
       case "fastForward":
         wrap(`await ${p}.clock.fastForward(${st.ms});`);
         break;
+      case "expectRuntimeInput":
+        helpers.add("assertRuntimeInput");
+        wrap(`assertRuntimeInput(inputs, ${s(st.rule)});`);
+        break;
       case "expectDb":
         helpers.add("expectDb");
-        wrap(`await expectDb(${s(st.check)});`, st.check.description?.replace(/\n/g, " "));
+        if (st.check.paramRefs) helpers.add("resolveInputParams");
+        wrap(`await expectDb(${st.check.paramRefs ? `resolveInputParams(${s(st.check)}, inputs)` : s(st.check)});`, st.check.description?.replace(/\n/g, " "));
         break;
       case "visualCheck":
         helpers.add("visualCheck");
@@ -295,7 +308,7 @@ export function describeStep(st: Step): string {
   switch (st.action) {
     case "goto": return `打开 ${st.url}`;
     case "click": return `点击 ${describeTarget(st.target)}`;
-    case "fill": return `在 ${describeTarget(st.target)} 输入 ${st.secretEnv ? "（敏感值）" : `「${st.value}」`}`;
+    case "fill": return `在 ${describeTarget(st.target)} 输入 ${st.generated ? `（本例 ${st.generated}）` : st.secretEnv ? "（敏感值）" : `「${st.value}」`}`;
     case "select": return `在 ${describeTarget(st.target)} 选择「${st.value}」`;
     case "check": return `${st.checked ? "勾选" : "取消勾选"} ${describeTarget(st.target)}`;
     case "press": return `按键 ${st.key}`;
@@ -304,7 +317,7 @@ export function describeStep(st: Step): string {
     case "expectHidden": return `断言隐藏 ${describeTarget(st.target)}`;
     case "expectText": return `断言 ${describeTarget(st.target)} ${st.exact ? "等于" : "包含"}「${st.text}」`;
     case "expectNoText": return `断言 ${describeTarget(st.target)} 不包含「${st.text}」`;
-    case "expectValue": return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
+    case "expectValue": if (st.valueRef) return `断言 ${describeTarget(st.target)} 的值等于本例 ${st.valueRef}`; return st.value ? `断言 ${describeTarget(st.target)} 的值为「${st.value}」` : `断言 ${describeTarget(st.target)} 为空`;
     case "expectCollection": return `验证 ${describeTarget(st.target)} 内集合规则 ${JSON.stringify(st.rule)}`;
     case "readValue": return `读取 ${describeTarget(st.target)} 到 ${st.name}`;
     case "expectObserved": return `比较 ${describeTarget(st.target)}（读取 ${st.valueSource}，${st.normalize ?? "exact"}）与 ${st.name ? `来源变量「${st.name}」` : JSON.stringify(st.expected)}`;
@@ -316,6 +329,7 @@ export function describeStep(st: Step): string {
     case "installClock": return `固定前端时间 ${st.time}`;
     case "fastForward": return `时间快进 ${st.ms}ms`;
     case "visualCheck": return `视觉判定：${st.description}`;
+    case "expectRuntimeInput": return `验证运行时输入 ${st.rule.valueRef}`;
     case "expectDb": return `数据库断言${st.check.description ? `：${st.check.description}` : ""}`;
   }
 }

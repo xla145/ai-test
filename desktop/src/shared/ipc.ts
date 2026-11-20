@@ -1,11 +1,13 @@
+import type { AssistantApi } from "./assistant.js";
+import type { TaskSnapshot, TaskProgressSnapshot } from "./taskProgress.js";
 import type { PerformanceOptions, PerformanceResult, PerformanceScenarioStep } from "./performance.js";
 export interface UiTaskRecord {
   id: string; projectId: string; env: string; kind: string; caseIds: string[];
-  status: "running" | "stopping" | "completed" | "failed" | "stopped";
+  status: "queued" | "running" | "stopping" | "completed" | "failed" | "stopped";
   startedAt: string; updatedAt: string; finishedAt?: string;
   stage: string; detail?: string; runId?: string;
   /** UI、Agent 或未来的性能任务；保留 UiTaskRecord 名称以兼容现有 IPC。 */
-  source?: "ui" | "agent" | "performance";
+  source?: "ui" | "agent" | "performance" | "api" | "app";
   canStop?: boolean;
   parentTaskId?: string;
   purpose?: string;
@@ -304,7 +306,7 @@ export interface UiScriptState {
   executionRole?: string;
 }
 
-export interface AitestApi {
+export interface AitestApi extends AssistantApi {
   listApiDefinitions(projectId: string): Promise<ApiDefinition[]>;
   previewApiImport(projectId: string, source: string): Promise<ApiImportPreview>;
   importApiDefinitions(projectId: string, preview: ApiImportPreview): Promise<{ definitions: ApiDefinition[] }>;
@@ -323,7 +325,7 @@ export interface AitestApi {
   moveProject(projectId: string, parent: string): Promise<unknown>;
   projectOverview(groupId: string): Promise<GroupOverview>;
   getSettingsDetail(projectId: string): Promise<SettingsDetail>;
-  importExcel(projectId: string, file: string): Promise<unknown>;
+  importExcel(projectId: string, file: string, strictTemplate?: boolean): Promise<unknown>;
   lint(projectId: string): Promise<unknown>;
   listCases(projectId: string, filters?: Record<string, string>): Promise<unknown[]>;
   pageCases(projectId: string, q: CaseQuery): Promise<Page<unknown>>;
@@ -377,6 +379,9 @@ export interface AitestApi {
   /** 当前调试会话（没有则为 null），页面重新进入时恢复 */
   uiDebugState(): Promise<UiDebugState | null>;
   uiTasks(): Promise<UiTaskRecord[]>;
+  taskSnapshot(): Promise<TaskSnapshot>;
+  taskProgress(taskId: string): Promise<TaskProgressSnapshot>;
+  exportDiagnostics(taskId?: string): Promise<{ path: string } | null>;
   stopExecutionTask(taskId: string): Promise<void>;
   stopUiTask(projectId: string, env: string): Promise<void>;
   reviseUiScript(projectId: string, env: string, caseId: string, feedback: string, opts?: { confirmProduction?: boolean }): Promise<unknown>;
@@ -422,7 +427,7 @@ export interface AitestApi {
   saveGlobalSettings(settings: GlobalSettings, keys?: Record<string, string>): Promise<GlobalSettingsView>;
   /** 用已保存的配置测试某个模型的连通性 */
   checkModel(modelId: string): Promise<ModelCheckResult>;
-  checkRuntime(): Promise<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>;
+  checkRuntime(): Promise<import("./executors.js").RuntimeChecks>;
   getUserInfo(): Promise<UserInfo>;
   openDataDir(): Promise<string>;
   saveDatabase(projectId: string, env: string, name: string, cfg: Record<string, unknown>, password?: string): Promise<unknown>;
@@ -437,6 +442,7 @@ export interface AitestApi {
   /** 弹出保存对话框；用户取消返回 null */
   exportReport(runIds: string[], format: "html" | "xlsx" | "json"): Promise<{ path: string } | null>;
   exportCasesExcel(projectId: string, projectName: string): Promise<{ path: string; cases: number } | null>;
+  exportCaseTemplate(): Promise<{ path: string } | null>;
   readEvidenceImage(projectId: string, path: string): Promise<string>;
   openPath(path: string): Promise<void>;
   showInFolder(path: string): Promise<void>;

@@ -1,0 +1,764 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>UI 测试执行优化分析</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: single-column document with anchored nav, technical report style */
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a2e;
+    --fg-muted: #5a5a72;
+    --surface: #ffffff;
+    --surface-alt: #f0f0f5;
+    --border: #e0e0ea;
+    --accent: #4361ee;
+    --accent-light: #eef0ff;
+    --danger: #dc2626;
+    --danger-light: #fef2f2;
+    --warning: #d97706;
+    --warning-light: #fffbeb;
+    --success: #059669;
+    --success-light: #ecfdf5;
+    --code-bg: #f5f5fa;
+    --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f0f1a;
+      --fg: #e0e0ef;
+      --fg-muted: #8888a0;
+      --surface: #1a1a2e;
+      --surface-alt: #22223a;
+      --border: #2a2a44;
+      --accent: #6b8aff;
+      --accent-light: #1a1a3a;
+      --danger: #f87171;
+      --danger-light: #2a1515;
+      --warning: #fbbf24;
+      --warning-light: #2a2515;
+      --success: #34d399;
+      --success-light: #0a2a1a;
+      --code-bg: #16162a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f0f1a;
+    --fg: #e0e0ef;
+    --fg-muted: #8888a0;
+    --surface: #1a1a2e;
+    --surface-alt: #22223a;
+    --border: #2a2a44;
+    --accent: #6b8aff;
+    --accent-light: #1a1a3a;
+    --danger: #f87171;
+    --danger-light: #2a1515;
+    --warning: #fbbf24;
+    --warning-light: #2a2515;
+    --success: #34d399;
+    --success-light: #0a2a1a;
+    --code-bg: #16162a;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.65;
+    margin: 0;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 2rem 4rem;
+  }
+
+  .container { max-width: 820px; margin: 0 auto; }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.25rem;
+    text-wrap: balance;
+  }
+  .subtitle {
+    color: var(--fg-muted);
+    font-size: 0.9rem;
+    margin: 0 0 2.5rem;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 2.5rem 0 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--accent);
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 1.75rem 0 0.75rem;
+    color: var(--fg);
+  }
+
+  p { margin: 0 0 1rem; }
+  ul, ol { margin: 0 0 1rem; padding-left: 1.5rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--fg-muted); }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+  }
+
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 1rem 0 1.5rem;
+  }
+  .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .metric-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    margin-bottom: 4px;
+  }
+  .metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-note {
+    font-size: 0.8rem;
+    color: var(--fg-muted);
+    margin-top: 2px;
+  }
+
+  .issue-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 1rem 0;
+    border-left: 4px solid var(--accent);
+  }
+  .issue-card.critical { border-left-color: var(--danger); }
+  .issue-card.warning { border-left-color: var(--warning); }
+  .issue-card.info { border-left-color: var(--success); }
+
+  .issue-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+  }
+  .issue-title {
+    font-weight: 600;
+    font-size: 1rem;
+    flex: 1;
+    min-width: 0;
+  }
+  .tag {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .tag-critical { background: var(--danger-light); color: var(--danger); }
+  .tag-warning { background: var(--warning-light); color: var(--warning); }
+  .tag-info { background: var(--success-light); color: var(--success); }
+  .tag-token { background: var(--accent-light); color: var(--accent); }
+
+  .issue-body { font-size: 0.92rem; color: var(--fg); }
+  .issue-body p:last-child { margin-bottom: 0; }
+
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    white-space: pre;
+  }
+
+  .flow-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 1rem 0;
+    overflow-x: auto;
+  }
+  .flow-diagram pre {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 0;
+    color: var(--fg);
+    white-space: pre;
+  }
+
+  .summary-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  .summary-table th {
+    text-align: left;
+    font-weight: 600;
+    padding: 10px 12px;
+    background: var(--surface-alt);
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .summary-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .summary-table tr:last-child td { border-bottom: none; }
+
+  .priority-badge {
+    display: inline-block;
+    width: 22px; height: 22px;
+    line-height: 22px;
+    text-align: center;
+    border-radius: 50%;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .p0 { background: var(--danger); }
+  .p1 { background: var(--warning); }
+  .p2 { background: var(--accent); }
+
+  .savings {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    color: var(--success);
+    font-size: 0.85rem;
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 0 0 2rem;
+  }
+  .toc-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+    margin-bottom: 10px;
+  }
+  .toc ol {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+  .toc li {
+    margin-bottom: 4px;
+    font-size: 0.9rem;
+  }
+  .toc a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .toc a:hover { text-decoration: underline; }
+
+  .callout {
+    background: var(--accent-light);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    border-radius: 0 8px 8px 0;
+    margin: 1.25rem 0;
+    font-size: 0.92rem;
+  }
+
+  @media (max-width: 600px) {
+    h1 { font-size: 1.4rem; }
+    .metric-grid { grid-template-columns: 1fr 1fr; }
+    .issue-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+  }
+</style>
+
+<div class="container">
+  <h1>UI 测试智能执行：问题诊断与优化方案</h1>
+  <p class="subtitle">基于 <code>ui-testing-technical-implementation-plan.md</code> 及实际代码的深度分析 — 2026-11-20</p>
+
+  <div class="toc">
+    <div class="toc-title">目录</div>
+    <ol>
+      <li><a href="#current">现状数据：一条用例执行到底消耗了什么</a></li>
+      <li><a href="#problems">六大核心问题</a></li>
+      <li><a href="#optimization">优化方案：按 ROI 排序</a></li>
+      <li><a href="#plan">实施路线图</a></li>
+    </ol>
+  </div>
+
+  <!-- ====== Section 1 ====== -->
+  <h2 id="current">1. 现状数据：一条用例执行到底消耗了什么</h2>
+
+  <p>从代码追踪 <code>exploreUiCase()</code> 的完整调用链，单条 UI 用例从开始到生成 Playwright 脚本，经历以下阶段：</p>
+
+  <div class="flow-diagram"><pre>
+用例文本
+  │
+  ├─① uiContractPrompt (8KB prompt) ──→ Agent 转换 ──→ JSON 解析+校验
+  │     ↓ 失败？
+  │     repairPrompt (8KB 原 prompt + 上轮输出 + 错误) ──→ Agent 修复
+  │
+  ├─② stillCurrent() ── 拉项目、角色、数据配方，算指纹
+  │
+  ├─③ explorePrompt (15KB prompt + contract JSON + brief JSON)
+  │     ──→ Agent 浏览器探索 ──→ 多轮 MCP 工具调用
+  │       每次工具调用：
+  │         ├─ executionGuard.persist() 写 JSON
+  │         ├─ withSnapshot() 获取页面快照
+  │         └─ Midscene aiLocate (视觉模型) [可选]
+  │
+  ├─④ save_ui_script → run_playwright_script 试跑
+  │
+  └─⑤ stillCurrent() 再算一次指纹 → 保存缓存</pre></div>
+
+  <div class="metric-grid">
+    <div class="metric">
+      <div class="metric-label">Prompt 总大小</div>
+      <div class="metric-value">~25KB</div>
+      <div class="metric-note">合约 8KB + 探索 15KB + JSON 数据</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">AI 调用次数</div>
+      <div class="metric-value">2–3 次</div>
+      <div class="metric-note">合约转换 + 修复 + 探索</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">探索轮工具调用</div>
+      <div class="metric-value">30–80 次</div>
+      <div class="metric-note">每次携带页面快照上下文</div>
+    </div>
+    <div class="metric">
+      <div class="metric-label">prompt 文件总量</div>
+      <div class="metric-value">39KB</div>
+      <div class="metric-note">prompts.ts + skill 模板</div>
+    </div>
+  </div>
+
+  <!-- ====== Section 2 ====== -->
+  <h2 id="problems">2. 六大核心问题</h2>
+
+  <!-- Problem 1 -->
+  <div class="issue-card critical">
+    <div class="issue-header">
+      <span class="priority-badge p0">P0</span>
+      <span class="issue-title">Prompt 膨胀：规则堆积导致 token 浪费与模型注意力稀释</span>
+      <span class="tag tag-critical">Token 消耗</span>
+      <span class="tag tag-critical">效果差</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong><code>explorePrompt()</code> 单个函数生成 ~15KB 文本（约 5000+ token），包含 <strong>47 条</strong>内联规则。<code>uiContractPrompt()</code> ~8KB，包含 <strong>26 条</strong>规则。许多规则是对同一语义的反复强调：</p>
+      <div class="code-block">// prompts.ts 中重复出现 ≥3 次的规则模式：
+"不要换数据" / "不擅自创建或替换数据" / "不能用相近数据替代"
+"不要遍历系统管理菜单" / "不要在代码库查找" / "不要用 shell 翻看"
+"停止" / "立即停止" / "停止并报告" / "阻塞" (出现 20+ 次)
+"角色精确匹配" / "不使用名称相近的角色替代" (3 处)
+"不要虚构" / "不能臆造" / "不用第一行替代" (5 处)</div>
+      <p><strong>根因：</strong>规则是追加式写入的——每次发现 agent 犯一个新错误，就加一条禁止规则。<strong>但这些规则并没有降低出错率</strong>，因为：</p>
+      <ul>
+        <li>模型的注意力在 5000+ token 的规则海洋中被稀释，越重要的规则越可能被淹没</li>
+        <li>否定式规则（"不要 X"）比肯定式规则（"必须 Y"）消耗更多 token 且效果更差</li>
+        <li>规则之间存在矛盾（例如同时要求"不虚构 target"和"必须提供 target 或 targetHint"）</li>
+      </ul>
+      <p><strong>影响：</strong>每条用例多消耗 ~3000-5000 个无效 token；模型不遵守规则不是因为没看到，而是因为规则太多无法全部满足。</p>
+    </div>
+  </div>
+
+  <!-- Problem 2 -->
+  <div class="issue-card critical">
+    <div class="issue-header">
+      <span class="priority-badge p0">P0</span>
+      <span class="issue-title">合约转换 + 修复 = 两次完整 prompt 发送</span>
+      <span class="tag tag-critical">Token 消耗</span>
+      <span class="tag tag-warning">速度慢</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong>合约转换失败时，修复 prompt 把<strong>整个 <code>uiContractPrompt</code></strong>（8KB）连同上一轮的完整输出和错误信息重新发送：</p>
+      <div class="code-block">// uiTesting.ts:148-153
+const repairPrompt = [
+  "这是一次受限的结构修复...",
+  `上一轮输出：${converted.message}`,     // 完整的 JSON 输出 (~2-5KB)
+  `校验错误：${(conversionError).message}`,
+  uiContractPrompt(brief, roles, ...),   // 再发一次完整 8KB prompt
+].join("\n");</div>
+      <p><strong>根因：</strong>没有使用结构化输出（Structured Output / JSON Schema constrained decoding）。模型自由输出 JSON，格式错误只能靠<strong>事后校验 + 整轮重试</strong>。</p>
+      <p><strong>影响：</strong>转换失败率（文档称"revision 9 补全"说明至少迭代了 9 次）意味着大量用例要走两轮，每轮 ~15KB，合计 ~30KB prompt token + 两次模型调用的延迟。</p>
+    </div>
+  </div>
+
+  <!-- Problem 3 -->
+  <div class="issue-card critical">
+    <div class="issue-header">
+      <span class="priority-badge p0">P0</span>
+      <span class="issue-title">Prompt 与 Skill 模板双重维护、语义冲突</span>
+      <span class="tag tag-critical">效果差</span>
+      <span class="tag tag-token">维护成本</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong><code>explorePrompt()</code> 中写"规则以本提示为准"（line 59），但 <code>ui-explore.md</code> 仍然包含 50 行独立规则。两处规则存在分歧：</p>
+      <div class="code-block">// prompts.ts line 59:
+"已给出，不必再调用 case-store.list_cases，
+ 也不必再读 .agents/skills/ui-explore.md，规则以本提示为准"
+
+// 但 ui-explore.md 仍有独立于 prompts.ts 的内容：
+// 如"完整回放门禁"章节的 expect_observed/expect_number 规则
+// 这些规则不在 explorePrompt 中</div>
+      <p><strong>根因：</strong>Prompt 演化路径分叉——<code>prompts.ts</code> 和 <code>ui-explore.md</code> 是两个独立维护的规则源。explorePrompt 试图用"以本提示为准"覆盖 skill 文件，但 agent 实际上可能仍会读到 skill 文件。</p>
+      <p><strong>影响：</strong>agent 收到矛盾指令时行为不可预测。某些只在 skill 文件中的规则不生效，某些 prompt 中的新规则被 skill 文件中的旧规则覆盖。</p>
+    </div>
+  </div>
+
+  <!-- Problem 4 -->
+  <div class="issue-card warning">
+    <div class="issue-header">
+      <span class="priority-badge p1">P1</span>
+      <span class="issue-title">探索阶段每次工具调用都执行 Guard 持久化</span>
+      <span class="tag tag-warning">速度慢</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong>在 <code>tools.ts:139</code>，<strong>每次</strong>工具调用结束时都执行 <code>guard.persist()</code>，即把完整的前置检查状态 + 所有已录制步骤序列化为 JSON 写磁盘：</p>
+      <div class="code-block">// tools.ts:137-140
+} finally {
+  const current = states.get(ctx)?.guard;
+  current?.persist(
+    ctx.session.recording().length
+      ? ctx.session.recording()
+      : savedSteps.get(ctx)?.steps ?? []
+  );
+}</div>
+      <p><strong>根因：</strong>为了在进程崩溃时不丢证据，选择了最保守的持久化策略。</p>
+      <p><strong>影响：</strong>一条用例探索期间有 30-80 次工具调用，每次都序列化并写入一个不断膨胀的 JSON 文件。随着录制步骤增多，每次写入的数据量从几百字节增长到几十 KB。累计 IO 开销可观。</p>
+    </div>
+  </div>
+
+  <!-- Problem 5 -->
+  <div class="issue-card warning">
+    <div class="issue-header">
+      <span class="priority-badge p1">P1</span>
+      <span class="issue-title"><code>stillCurrent()</code> 双重执行 + 重复拉取</span>
+      <span class="tag tag-warning">速度慢</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong>在 <code>uiTesting.ts</code> 中，<code>stillCurrent()</code> 被调用<strong>两次</strong>（探索前 line 206、探索后 line 217），每次都重新拉取项目配置、角色列表、数据配方列表并计算指纹：</p>
+      <div class="code-block">// uiTesting.ts:199-206 — 每次 stillCurrent() 执行：
+const latest = await this.uiCase(projectId, env, caseId, ...);  // 拉用例
+const latestProject = await this.services.project(projectId);    // 拉项目
+const latestRoles = await this.deps.engine([
+  "list-roles", "--project", projectId
+]);                                                              // 拉角色
+const latestData = await this.deps.engine([
+  "list-test-data", "--project", projectId
+]);                                                              // 拉数据配方
+// 然后计算 sha256 指纹对比</div>
+      <p><strong>根因：</strong>防止用例在转换/探索期间被修改导致脏数据，但实现方式是全量重新拉取而非增量校验。</p>
+      <p><strong>影响：</strong>每次 <code>stillCurrent()</code> 调用 4 次 engine 子进程 + 1 次 SHA-256 计算。两次调用 = 8 次子进程 + 2 次哈希。这是纯粹的防御性开销。</p>
+    </div>
+  </div>
+
+  <!-- Problem 6 -->
+  <div class="issue-card warning">
+    <div class="issue-header">
+      <span class="priority-badge p1">P1</span>
+      <span class="issue-title">缓存指纹过度敏感，命中率低</span>
+      <span class="tag tag-warning">速度慢</span>
+      <span class="tag tag-token">Token 消耗</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong>缓存指纹包含 <strong>11 个维度</strong>，任何一个变化都会使缓存失效，触发完整的 AI 转换：</p>
+      <div class="code-block">// uiExecutionContract.ts:30-31
+this.fingerprint = sha256(JSON.stringify(canonical({
+  revision: REVISION,          // 转换规则版本
+  projectId,                   // 项目
+  env,                         // 环境名
+  caseId,                      // 用例 ID
+  source: {
+    title, steps, expected,    // 用例内容
+    preconditions, data_refs,  // 前置/数据
+    available_data,            // 数据配方目录 ← 任何配方变化都失效
+    capabilities               // 验证能力
+  },
+  roles: [...roles].sort(),    // 全部角色 ← 新增无关角色也失效
+  environment,                 // 完整环境配置 ← 改 login 也失效
+  selectedRole,                // 选择的角色
+  dataFingerprint              // 数据配方脚本摘要
+})));</div>
+      <p><strong>根因：</strong>指纹设计过于保守。<code>roles</code> 包含<strong>所有</strong>配置角色而非用例关联角色；<code>environment</code> 包含<strong>完整</strong>环境配置而非合约相关字段；<code>available_data</code> 在新增无关配方时也变化。</p>
+      <p><strong>影响：</strong>在活跃开发的项目中，缓存几乎总是失效。每次失效 = 一次完整 AI 转换（8KB prompt + 模型调用）。</p>
+    </div>
+  </div>
+
+  <!-- ====== Section 3 ====== -->
+  <h2 id="optimization">3. 优化方案：按 ROI 排序</h2>
+
+  <div class="callout">
+    <strong>优化原则：</strong>不动架构大手术，先把投入产出比最高的改动做了。下面按"节省 token / 提速效果 × 实现难度的倒数"排序。
+  </div>
+
+  <!-- Opt 1 -->
+  <h3>🔴 优化 1：Prompt 瘦身 — 规则合并、去重、结构化</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">↓ 50-60% prompt token</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>做法：</strong></p>
+      <ol>
+        <li><strong>将 47 条规则压缩为 ~15 条结构化指令</strong>。用肯定式（"必须"）替代否定式（"不要/不能/禁止"）。例如：
+          <div class="code-block">// BEFORE: 5 条分散规则
+"不擅自创建或替换数据"
+"不能用相近数据替代"
+"不要遍历系统管理菜单"
+"不替换测试数据或削弱断言"
+"不要在代码库或文件里查找账号"
+
+// AFTER: 1 条结构化规则
+"数据来源：只使用用例声明的 data_refs 和 valueRef 变量。
+ 缺失时报告阻塞（data_blocked）。"</div>
+        </li>
+        <li><strong>将规则分层</strong>：核心规则（5 条）放在 prompt 顶部；边界规则（10 条）放在 prompt 底部的 "constraints" 块中。消除 skill 文件与 prompt 的重叠。</li>
+        <li><strong>删除 <code>ui-explore.md</code> 中与 <code>explorePrompt</code> 重复的内容</strong>，只保留 <code>explorePrompt</code> 中明确引用的补充规则。</li>
+      </ol>
+      <p><strong>预估：</strong><code>explorePrompt</code> 从 ~15KB → ~6KB，<code>uiContractPrompt</code> 从 ~8KB → ~3.5KB。每条用例节省 ~8000 token。</p>
+      <p><strong>风险：</strong>低。规则精简后需要在 3-5 个典型用例上验证 agent 行为没有退化。</p>
+    </div>
+  </div>
+
+  <!-- Opt 2 -->
+  <h3>🔴 优化 2：结构化输出 — 消除合约修复轮次</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">↓ 1 次 AI 调用 / 失败用例</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>做法：</strong></p>
+      <ol>
+        <li>从 <code>executionContractSchema</code>（Zod schema）<strong>自动生成 JSON Schema</strong>，作为 AI 调用的 <code>response_format</code> 传入。Claude API 支持 <code>tool_use</code> 或 <code>json_schema</code> 模式的结构化输出。</li>
+        <li>结构化输出保证返回的 JSON 一定符合 schema，<strong>完全消除格式修复轮次</strong>。</li>
+        <li>语义校验（如 sourceQuotes 必须匹配原文）仍由 <code>validateExecutionContract()</code> 执行，但格式永远不会出错。</li>
+      </ol>
+      <div class="code-block">// 当前方式：自由输出 → 解析 → 校验 → 失败则修复
+agentTask("ui_contract", uiContractPrompt(...))
+  → JSON.parse(message)
+  → validateExecutionContract()
+  → 失败？→ agentTask("ui_contract_repair", ...)  // 又一轮
+
+// 优化后：结构化输出 → 格式保证正确 → 只做语义校验
+agentTask("ui_contract", prompt, {
+  response_format: { type: "json_schema", schema: contractJsonSchema }
+})
+  → validateExecutionContract()  // 只校验语义</div>
+      <p><strong>预估：</strong>消除 ~40% 的合约转换失败（格式问题占比），节省修复轮的 ~15KB prompt token 和一次模型调用延迟。</p>
+      <p><strong>这正是文档 §18 末尾提到但标注"尚未实现"的内容。</strong></p>
+    </div>
+  </div>
+
+  <!-- Opt 3 -->
+  <h3>🟡 优化 3：缓存指纹收窄 — 提高命中率</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">缓存命中率 ↑ 2-3×</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>做法：</strong></p>
+      <ul>
+        <li><code>roles</code>：只纳入<strong>用例关联角色</strong>（即合约中实际引用的 role），而非全部配置角色</li>
+        <li><code>environment</code>：只纳入 <code>base_url</code> + <code>databases</code> 存在性 + <code>data_api</code> 存在性，不纳入 <code>login</code> 细节</li>
+        <li><code>available_data</code>：只纳入用例的 <code>data_refs</code> 关联项，新增无关配方不影响指纹</li>
+      </ul>
+      <div class="code-block">// BEFORE: 11 维完整指纹
+{ revision, projectId, env, caseId, source: {...全部}, roles: 全部角色,
+  environment: 完整环境配置, selectedRole, dataFingerprint }
+
+// AFTER: 只纳入影响合约输出的维度
+{ revision, projectId, env, caseId,
+  source: { title, steps, expected, preconditions, data_refs },
+  roles: 用例引用的角色,
+  capabilities: { database: bool, dataApi: bool },
+  selectedRole,
+  relatedDataFingerprint: 只有 data_refs 关联项的摘要
+}</div>
+      <p><strong>风险：</strong>中。需验证收窄后不会复用过时的合约。建议保留 <code>versionFile</code> 机制作为安全网。</p>
+    </div>
+  </div>
+
+  <!-- Opt 4 -->
+  <h3>🟡 优化 4：Guard 持久化降频</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">IO 次数 ↓ 80%</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>做法：</strong></p>
+      <ol>
+        <li>只在<strong>状态变化时</strong>持久化：前置检查通过/失败、case_step 推进、阻塞、录制步骤变化</li>
+        <li>其余工具调用（snapshot、find_text、navigate 等只读操作）不触发 persist</li>
+        <li>添加 <code>dirty</code> 标记，只有标记为 dirty 时才实际写入</li>
+      </ol>
+      <div class="code-block">// BEFORE: 每次工具调用都 persist
+} finally { current?.persist(steps); }
+
+// AFTER: 只在状态变化时 persist
+} finally {
+  if (current?.dirty) {
+    current.persist(steps);
+    current.dirty = false;
+  }
+}</div>
+    </div>
+  </div>
+
+  <!-- Opt 5 -->
+  <h3>🟡 优化 5：<code>stillCurrent()</code> 轻量化</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">子进程调用 ↓ 6 次/用例</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>做法：</strong></p>
+      <ol>
+        <li>首次调用时缓存项目配置、角色列表和数据配方的哈希值</li>
+        <li><code>stillCurrent()</code> 改为比较<strong>哈希</strong>而非重新拉取全部数据：用 engine 提供一个 <code>fingerprint</code> 子命令，在 Python 侧计算并返回单个哈希</li>
+        <li>探索前的 <code>stillCurrent()</code> 可以去掉——合约刚转换完成，用例不可能在毫秒内变化</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- Opt 6 -->
+  <h3>🟢 优化 6：探索上下文裁剪 — 合约 JSON 瘦身</h3>
+  <div class="issue-card info">
+    <div class="issue-header">
+      <span class="issue-title">预估收益</span>
+      <span class="savings">探索 prompt ↓ 20-30%</span>
+    </div>
+    <div class="issue-body">
+      <p><strong>现象：</strong>在 <code>explorePrompt</code> 中，完整的 contract JSON 被 <code>JSON.stringify</code> 内联：</p>
+      <div class="code-block">// prompts.ts:71
+...(contract
+  ? ["已转换的执行用例：", JSON.stringify(contract), ...]
+  : caseBlock),</div>
+      <p><strong>做法：</strong></p>
+      <ul>
+        <li>移除合约 JSON 中的 <code>sourceQuotes</code>（已在原始用例中）</li>
+        <li>移除 <code>verificationHint</code>（agent 已有页面上下文）</li>
+        <li>只传 <code>steps[].actions</code> 和 <code>preconditionChecks[].id/method/runtime/paramRefs</code></li>
+        <li>将 JSON 改为紧凑格式而非缩进格式</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ====== Section 4 ====== -->
+  <h2 id="plan">4. 实施路线图</h2>
+
+  <p>按"实施难度 × 收益"排序，建议分三批落地：</p>
+
+  <div style="overflow-x:auto">
+  <table class="summary-table">
+    <thead>
+      <tr>
+        <th>批次</th>
+        <th>优化项</th>
+        <th>改动范围</th>
+        <th>预估节省</th>
+        <th>风险</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td rowspan="2"><strong>第 1 批</strong><br><span style="color:var(--fg-muted);font-size:0.8rem">1-2 天</span></td>
+        <td>Prompt 瘦身 + 去重</td>
+        <td><code>prompts.ts</code> + <code>ui-explore.md</code></td>
+        <td><span class="savings">~8K token/用例</span></td>
+        <td>低</td>
+      </tr>
+      <tr>
+        <td>Guard 持久化降频</td>
+        <td><code>tools.ts</code></td>
+        <td><span class="savings">IO ↓ 80%</span></td>
+        <td>低</td>
+      </tr>
+      <tr>
+        <td rowspan="2"><strong>第 2 批</strong><br><span style="color:var(--fg-muted);font-size:0.8rem">2-3 天</span></td>
+        <td>结构化输出</td>
+        <td><code>agentTasks.ts</code> + <code>contract.ts</code></td>
+        <td><span class="savings">↓ 1 次 AI 调用</span></td>
+        <td>中</td>
+      </tr>
+      <tr>
+        <td>缓存指纹收窄</td>
+        <td><code>uiExecutionContract.ts</code></td>
+        <td><span class="savings">命中率 ↑ 2-3×</span></td>
+        <td>中</td>
+      </tr>
+      <tr>
+        <td rowspan="2"><strong>第 3 批</strong><br><span style="color:var(--fg-muted);font-size:0.8rem">1-2 天</span></td>
+        <td><code>stillCurrent()</code> 轻量化</td>
+        <td><code>uiTesting.ts</code> + engine CLI</td>
+        <td><span class="savings">子进程 ↓ 6 次</span></td>
+        <td>低</td>
+      </tr>
+      <tr>
+        <td>探索上下文裁剪</td>
+        <td><code>prompts.ts</code></td>
+        <td><span class="savings">prompt ↓ 20-30%</span></td>
+        <td>低</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <strong>总预估：</strong>全部落地后，单条用例的 token 消耗预计下降 <strong>40-60%</strong>，端到端耗时下降 <strong>30-50%</strong>（主要来自消除修复轮次和提高缓存命中率）。效果改善主要来自 prompt 精简后模型注意力集中度提升。
+  </div>
+
+  <h3>关于文档本身的建议</h3>
+  <p>当前 <code>ui-testing-technical-implementation-plan.md</code> 有 832 行，§1-15 是完整 v2 蓝图，§16-18 是三次增量补丁。存在以下问题：</p>
+  <ul>
+    <li><strong>蓝图与现实脱节</strong>：§4 定义的 ExecutionContract v2（分层 runtimeData、环境/会话/数据/业务检查）至今未落地，实际仍是 v1 + 四个内置变量</li>
+    <li><strong>追加式写作导致重复</strong>：§16 的"首批落地范围"和 §18 的"revision 9 补全"都在重述 §4-5 的子集，且有不一致</li>
+    <li><strong>缺少度量基线</strong>：文档定义了 §13 验收指标但没有给出当前值。"执行慢、效果差、token 多"没有量化</li>
+  </ul>
+  <p><strong>建议：</strong>冻结当前文档为历史参考，新建一份聚焦"当前态 → 目标态"的实施清单，附带量化基线。</p>
+
+</div>

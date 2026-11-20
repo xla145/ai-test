@@ -2,13 +2,25 @@ import { z } from "zod";
 import { visualTargetSchema } from "./target.js";
 
 const text = z.string().min(1).max(4000);
+export const inputRefSchema = z.enum(["username", "email", "password", "other_password"]);
+export const runtimeRuleSchema = z.object({
+  valueRef: inputRefSchema,
+  minLength: z.number().int().positive().optional(),
+  maxLength: z.number().int().positive().optional(),
+  maxUtf8Bytes: z.number().int().positive().optional(),
+  differentFrom: inputRefSchema.optional(),
+}).strict().refine(rule => rule.minLength !== undefined || rule.maxLength !== undefined
+  || rule.maxUtf8Bytes !== undefined || rule.differentFrom !== undefined,
+{ message: "runtime 必须至少声明一项实际约束，不能仅引用变量证明合法性" });
 const preconditionCheck = z.object({
   id: z.string().regex(/^P\d+(?:\.\d+)*$/),
   sourceIndices: z.array(z.number().int().positive()).min(1),
   sourceQuotes: z.array(text).min(1),
   statement: text,
   expected: text,
-  method: z.enum(["session", "ui", "api", "database", "manual"]),
+  method: z.enum(["session", "ui", "api", "database", "manual", "runtime"]),
+  paramRefs: z.record(z.string(), inputRefSchema).optional(),
+  runtime: runtimeRuleSchema.optional(),
   verificationHint: text.optional(),
   dependsOn: z.array(z.string().regex(/^P\d+(?:\.\d+)*$/)).default([]),
 }).strict();
@@ -16,6 +28,7 @@ export const executionContractSchema = z.object({
   version: z.literal(1),
   status: z.enum(["ready", "needs_clarification"]),
   issues: z.array(text).max(50),
+  dataRefs: z.array(text).max(100).optional(),
   // 原始前置条件和预期必须原样保留，不能通过转换删减覆盖。
   preconditions: z.array(text),
   // Optional during migration; when present it is the atomic, evidence-bearing plan.
@@ -31,6 +44,8 @@ export const executionContractSchema = z.object({
       targetHint: text.optional(),
       role: text.optional(),
       value: z.union([z.string(), z.boolean(), z.number()]).optional(),
+      valueRef: inputRefSchema.optional(),
+      paramRefs: z.record(z.string(), inputRefSchema).optional(),
     }).strict()).max(50),
     expected: z.array(text),
   }).strict()).max(200),
@@ -57,7 +72,7 @@ export function validateExecutionContract(value: unknown, source: ContractCase, 
     // Index base belongs to the whole response, not each individual check.
     // Require a zero plus matching verbatim quotes for every shifted reference;
     // mixed bases, fractions and invalid references remain validation errors.
-    const zeroBased = Array.isArray(rawChecks) && rawChecks.some(check => check?.sourceIndices?.includes(0))
+    const zeroBased = Array.isArray(rawChecks) && rawChecks.some(check => Array.isArray(check?.sourceIndices) && check.sourceIndices.includes(0))
       && rawChecks.every(check => check && Array.isArray(check.sourceIndices) && check.sourceIndices.length
         && check.sourceIndices.every((i: unknown) => typeof i === "number" && Number.isInteger(i) && i >= 0 && i < conditions.length)
         && Array.isArray(check.sourceQuotes) && check.sourceQuotes.length
@@ -82,6 +97,10 @@ export function validateExecutionContract(value: unknown, source: ContractCase, 
   if (contract.preconditionChecks) {
     const ids = new Set<string>();
     for (const check of contract.preconditionChecks) {
+      if (check.paramRefs && (check.method !== "database" || !Object.keys(check.paramRefs).length)) throw new Error("paramRefs 仅用于 database 检查，且不能为空");
+      if ((check.method === "runtime") !== Boolean(check.runtime)) throw new Error("运行时检查必须提供 runtime 规则，其他方法不能携带 runtime");
+      if (check.runtime && ((check.runtime.minLength ?? 1) > (check.runtime.maxLength ?? Infinity)
+        || check.runtime.differentFrom === check.runtime.valueRef)) throw new Error("运行时检查约束矛盾");
       if (ids.has(check.id)) throw new Error(`前置检查 ID 重复：${check.id}`);
       ids.add(check.id);
       if (check.sourceIndices.some(i => i > contract.preconditions.length)) throw new Error(`前置检查 ${check.id} 引用不存在的原文条件`);
@@ -102,6 +121,8 @@ export function validateExecutionContract(value: unknown, source: ContractCase, 
   if (contract.steps.length !== (source.steps ?? []).length || contract.steps.some((s, i) => s.index !== i + 1 || s.source !== source.steps![i])) throw new Error("转换不得修改或遗漏原始步骤");
   if (!same(contract.steps.flatMap(s => s.expected), source.expected ?? [])) throw new Error("转换不得修改或遗漏原始预期");
   for (const step of contract.steps) for (const action of step.actions) {
+    if (action.paramRefs && (action.action !== "database" || !Object.keys(action.paramRefs).length)) throw new Error("paramRefs 仅用于 database 动作，且不能为空");
+    if (action.valueRef && (action.action !== "fill" || action.value !== undefined)) throw new Error("valueRef 仅用于 fill，且不能同时提供 value");
     if (contract.status === "ready" && action.role && action.role !== "default" && !roles.includes(action.role)) throw new Error(`转换使用了未配置角色：${action.role}`);
     if (["click", "fill", "check", "select"].includes(action.action) && !action.target && !action.targetHint && contract.status === "ready") throw new Error("交互动作必须提供 target 或待页面确认的 targetHint");
     if (action.action === "fill" && action.target && action.target.control !== "textbox") throw new Error("输入动作必须绑定输入框");

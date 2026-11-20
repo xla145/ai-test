@@ -1,3 +1,4 @@
+import { createAssistantDemo } from "./assistantDemo";
 import { workspaceMock } from "./pages/api/workspaceMock";
 import { createPerformanceDemo } from "./performanceDemo";
 import { rememberNav } from "./nav";
@@ -268,6 +269,7 @@ const eventListeners = new Set<(e: { method: string; params: unknown }) => void>
 listeners.event = event => eventListeners.forEach(cb => cb(event));
 const apiWorkspaceMock = workspaceMock(cases);
 const mockApi: AitestApi = {
+  ...createAssistantDemo(),
   ...apiWorkspaceMock,
   listProjects: () => delay(projects.map(view)),
   createProject: async (name, workspace, environments, opts) => {
@@ -447,6 +449,9 @@ const mockApi: AitestApi = {
   },
   uiDebugState: async () => debugSession?.state() ?? null,
   uiTasks: async () => structuredClone(agentDemoTasks),
+  taskSnapshot: async () => ({ revision: Date.now(), tasks: structuredClone(agentDemoTasks) }),
+  taskProgress: async () => ({ events: [], truncated: false }),
+  exportDiagnostics: async () => null,
   stopExecutionTask: async (id) => { const task = agentDemoTasks.find(t => t.id === id); if (task) task.status = "stopped"; },
   stopUiTask: async (projectId, env) => {
     mockUiStopped = true;
@@ -613,6 +618,7 @@ const mockApi: AitestApi = {
   runDetail: (id) => delay(mockDetail(id)),
   exportReport: (ids, format) => delay({ path: `/Users/demo/Documents/测试报告-${ids[0]}.${format}` }, 500),
   exportCasesExcel: (_p, name) => delay({ path: `/Users/demo/Documents/${name}-用例.xlsx`, cases: 349 }, 500),
+  exportCaseTemplate: () => delay({ path: "/Users/demo/Documents/AIProbe-测试用例模板.xlsx" }, 500),
   readEvidenceImage: () => delay("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a/6kAAAAASUVORK5CYII="),
   openPath: () => delay(undefined),
   showInFolder: () => delay(undefined),

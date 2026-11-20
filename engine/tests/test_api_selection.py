@@ -157,6 +157,8 @@ def test_business_auth_failure_is_classified_without_agent():
     from aitest.runner import classify_failure
     assert classify_failure('第 1 步：业务码 401 不在成功码 [0, 200] 中') == 'auth'
     assert classify_failure('角色「tester」没有接口凭据') == 'auth'
+    assert classify_failure('状态码 401 不在预期 [200] 中') == 'auth'
+    assert classify_failure('HTTP 403 Forbidden') == 'auth'
 
 
 def test_environment_token_preflight_bypasses_unconfigured_case_roles():

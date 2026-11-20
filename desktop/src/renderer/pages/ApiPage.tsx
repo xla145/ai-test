@@ -1,3 +1,5 @@
+import { AssistantAskButton, useAssistantPageContext } from "../assistant/AssistantContext";
+import { useAssistantNavigation } from "../assistantNavigation";
 import { ApiCaseList } from "./api/ApiCaseList";
 import { groupDefinitions, type ApiDirectoryNode } from "../../shared/apiDirectory";
 import { clusterImportChanges } from "../../shared/apiImportClusters";
@@ -87,6 +89,8 @@ function ApiWorkspace({ project }: { project: Project }) {
   const importClusters = useMemo(() => preview ? clusterImportChanges(preview.changes) : [], [preview]);
   const [env, setEnv] = useEnvChoice(project);
   const selected = definitions.find((d) => d.id === selectedId);
+  const assistantReferences = (checkedIds.length ? checkedIds : selected ? [selected.id] : []).map(id => ({ kind: "definition" as const, id, label: definitions.find(d => d.id === id)?.summary || id }));
+  useAssistantPageContext({ projectId: project.id, page: "api", env, references: assistantReferences });
   const isFlow = tab === "flows";
   const draft = isFlow ? flow : single;
   const setDraft = (next: ApiCaseDraft) => {
@@ -264,6 +268,10 @@ function ApiWorkspace({ project }: { project: Project }) {
         initialTab={request.body != null ? "body" : "params"} onValidity={(key, ok) => validity(`${isFlow ? "flow" : "single"}:${target}:${index}:${key}`, ok)} />
     </div>;
   };
+  useAssistantNavigation(project.id, "api", !loading && definitions.length > 0, ref => {
+    const definition = definitions.find(d => d.id === ref.id);
+    if (definition) selectDefinition(definition);
+  });
   const executionToolbar = <div className="api-editor-toolbar"><div className="api-editor-title"><Input aria-label={isFlow ? "场景名称" : "用例名称"} value={draft.title} placeholder={isFlow ? "例如：订单-创建后取消" : "用例名称"} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /><span className="api-muted">{(isFlow ? flowDirty : singleDirty) ? "未保存" : draft.id ? "已保存" : "临时请求"}</span></div>
     <Space className="api-editor-actions">{!isFlow && single.steps[0]?.definition_id && <button className="api-toolbar-cases-badge" onClick={() => { if (related.length) setCasesDrawerOpen(true); }} title={related.length ? `${related.length} 条用例，点击查看` : "暂无用例"}><span className="api-toolbar-cases-count">{related.length}</span><span className="api-toolbar-cases-label">用例</span></button>}{!isFlow && <Dropdown trigger={["click"]} menu={{ items: [
       { key: "generate", label: "生成用例", icon: <PlusOutlined />, disabled: busy || !valid || !supported || !single.steps[0]?.definition_id, onClick: () => setGenerationDraft(clone(single)) },
@@ -280,7 +288,9 @@ function ApiWorkspace({ project }: { project: Project }) {
   </>;
 
   return <div className="api-workspace">
+    <div className="api-workspace-sticky-head">
     <PageHeader title="接口测试" extra={<Space wrap>
+      <AssistantAskButton projectId={project.id} page="api" env={env} references={assistantReferences} mode="draft" text="根据已保存的接口定义，补充正常、边界和异常场景的测试草稿。">交给助手</AssistantAskButton>
       {tab !== "regression" && (env ? <EnvSelect project={project} value={env} onChange={setEnv} disabled={busy} width={160} /> : <Button size="small" onClick={() => openSettings?.({ addEnv: true })}>配置环境</Button>)}
       <Dropdown trigger={["click"]} menu={{ items: [
         { key: "history", label: "调试历史", icon: <HistoryOutlined /> },
@@ -300,6 +310,7 @@ function ApiWorkspace({ project }: { project: Project }) {
       { key: "regression", label: "回归执行" },
       { key: "login", label: "登录与加密" },
     ]} />
+    </div>
     {loading ? <div className="api-loading"><Spin tip="正在读取接口资产" /></div> : tab === "login" ? <ApiLoginWorkspace project={project} env={env} onProtocol={() => setProtocolOpen(true)} /> : tab === "regression" ? <div className="api-regression"><RunPage project={project} definitions={regressionDefinitions} onClearScope={() => setRegressionDefinitions(undefined)} /></div> : tab === "flows" ? <div className="api-workbench-layout api-flow-layout">
       <aside className="api-directory"><div className="api-directory-top"><span>业务场景</span><Button size="small" type="text" aria-label="新建业务场景" icon={<PlusOutlined />} onClick={() => askDiscard(flowDirty, () => { setFlow(newDraft("flow")); setFlowDirty(false); setFlowResult(undefined); resetEditor(); })} /></div><div className="api-directory-list">{flows.map((c) => <button className={`api-directory-row ${flow.id === c.id ? "selected" : ""}`} key={c.id} onClick={() => loadCase(c)}><span>{c.title}</span><span className="api-directory-path">{c.api_flow!.length} 个步骤 · {c.api_needs_review ? "接口待检查" : c.status === "reviewed" ? "已审核" : "草稿"}</span></button>)}{!flows.length && <p className="api-muted api-directory-empty">创建场景，将多个请求串成业务流程</p>}</div><div className="api-directory-note">测试集用于批量选择，业务场景负责顺序与依赖</div></aside>
       <main className="api-workbench-main">{executionToolbar}<div className="api-flow-editor"><Collapse ghost items={[{ key: "inputs", label: "场景输入参数", children: <JsonField key={`inputs:${editorKey}`} label="场景输入参数" object value={draft.inputs} onChange={(inputs) => setDraft({ ...draft, inputs })} onValidity={(v) => validity("flow:inputs", v)} rows={4} /> }]} />{flowSteps("steps")}{!flow.steps.length && <div className="api-flow-empty"><span className="api-step-number">1</span><h3>添加第一个业务请求</h3><p>从已导入的接口开始，再为后续步骤提取和引用变量</p><Button icon={<PlusOutlined />} disabled={!currentDefinitions.length} onClick={() => setAddTo("steps")}>选择接口</Button>{!currentDefinitions.length && <Button type="link" onClick={() => setImportOpen(true)}>先导入接口</Button>}</div>}{flowSteps("cleanup")}</div><ExecutionResult result={flowResult} />{flow.id && <div className="api-related-cases"><h4>当前场景</h4>{caseRows(cases.filter((c) => c.id === flow.id))}</div>}</main>
@@ -344,6 +355,11 @@ function ApiWorkspace({ project }: { project: Project }) {
                   <Button type="primary" icon={<SendOutlined />} onClick={() => selectDefinition(currentDefinitions[0])}>打开第一个接口</Button>
                   <Button icon={<ApiOutlined />} onClick={() => setTab("request")}>请求调试</Button>
                 </>}
+              </div>
+              <div className="api-onboarding-hint" aria-label="接口工作台提示">
+                <div><span className="api-onboarding-hint-index">01</span><span><strong>先确认接口契约</strong><small>查看参数、鉴权与响应定义</small></span></div>
+                <div><span className="api-onboarding-hint-index">02</span><span><strong>再生成可执行用例</strong><small>从请求快速开始参数化测试</small></span></div>
+                <div><span className="api-onboarding-hint-index">03</span><span><strong>最后纳入回归</strong><small>持续追踪接口变更与结果</small></span></div>
               </div>
             </div>
           </div>

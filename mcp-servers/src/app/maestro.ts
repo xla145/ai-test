@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -23,6 +23,7 @@ export interface AppRunOptions {
   /** maestro 可执行文件，默认 PATH 上的 maestro */
   maestroBin?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface AppCaseResult {
@@ -158,6 +159,7 @@ function findScreenshots(dir: string, caseId: string, workspace: string): string
 }
 
 export async function runAppSuite(opts: AppRunOptions): Promise<AppRunOutput> {
+  opts.signal?.throwIfAborted();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const outDir = join(opts.workspace, "reports", `app-${opts.platform}-${stamp}`);
   mkdirSync(outDir, { recursive: true });
@@ -174,20 +176,31 @@ export async function runAppSuite(opts: AppRunOptions): Promise<AppRunOutput> {
   const args = maestroArgs(opts, files, junit, debugDir);
   const { code, stderr } = await new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
     // stdin 关闭：连接多台设备时 Maestro 会交互式询问，不能让它挂起
-    const child = spawn(bin, args, { cwd: opts.workspace, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(bin, args, { cwd: opts.workspace, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, detached: process.platform !== "win32" });
     let err = "";
-    child.stdout.on("data", (d) => (err += String(d)));
-    child.stderr.on("data", (d) => (err += String(d)));
-    const timer = setTimeout(() => child.kill(), opts.timeoutMs ?? 60 * 60_000);
+    let force: ReturnType<typeof setTimeout> | undefined;
+    const kill = (signal: NodeJS.Signals) => {
+      if (!child.pid) return;
+      if (process.platform === "win32") execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], () => {});
+      else { try { process.kill(-child.pid, signal); } catch { child.kill(signal); } }
+    };
+    const abort = () => { kill("SIGTERM"); if (!force) { force = setTimeout(() => kill("SIGKILL"), 2000); force.unref(); } };
+    opts.signal?.addEventListener("abort", abort, { once: true });
+    if (opts.signal?.aborted) abort();
+    const cleanup = () => { clearTimeout(timer); if (force) clearTimeout(force); opts.signal?.removeEventListener("abort", abort); if (opts.signal?.aborted) kill("SIGKILL"); };
+    child.stdout.on("data", (d) => (err = (err + String(d)).slice(-8000)));
+    child.stderr.on("data", (d) => (err = (err + String(d)).slice(-8000)));
+    const timer = setTimeout(() => kill("SIGKILL"), opts.timeoutMs ?? 60 * 60_000);
     child.on("error", (e: NodeJS.ErrnoException) => {
-      clearTimeout(timer);
+      cleanup();
       reject(e.code === "ENOENT" ? new Error(`未找到 Maestro（${bin}），请安装后在「全局设置 → 运行环境」中配置路径`) : e);
     });
     child.on("close", (c) => {
-      clearTimeout(timer);
+      cleanup();
       resolve({ code: c, stderr: err });
     });
   });
+  opts.signal?.throwIfAborted();
   const results = existsSync(junit) ? parseJunit(readFileSync(junit, "utf8"), ids) : [];
   for (const r of results) if (r.status !== "passed") r.evidence_paths = findScreenshots(debugDir, r.case_id, opts.workspace);
   const errors = results.length ? [] : [stderr.trim().split("\n").slice(-20).join("\n") || `Maestro 退出码 ${code}`];

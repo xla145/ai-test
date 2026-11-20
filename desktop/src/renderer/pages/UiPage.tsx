@@ -75,6 +75,7 @@ export function UiPage({ project }: { project: Project }) {
         { value: "inbox", label: <span className="uix-nav-item">待处理<Badge count={todo} size="small" /></span> },
         { value: "roles", label: "角色与登录" },
       ]} />
+      <div className="uix-content-scroll">
       {/* 工作台常驻挂载：切到其它页签时保留当前用例、执行进度与调试会话 */}
       <div className="uix-view" style={{ display: view === "workspace" ? undefined : "none" }}>
         <UiWorkbench key={`${project.id}:${env}`} project={project} env={env} pendingProposals={proposals.total}
@@ -84,6 +85,7 @@ export function UiPage({ project }: { project: Project }) {
       {view === "tasks" && <UiTaskList projectId={project.id} />}
       {view === "inbox" && <UiInbox project={project} proposals={proposals} reviews={reviews} />}
       {view === "roles" && <Roles project={project} env={env} />}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,9 @@
+import { PerformanceMetrics, JsonLinesTail } from "./performanceProgress.js";
+import type { TaskProgressData } from "../shared/taskProgress.js";
+import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { DegradationResult, PerformanceMethod, PerformanceOptions, PerformanceResult, StepMetrics } from "../shared/performance.js";
 import { resolvePerformancePath } from "../shared/performanceSource.js";
@@ -443,7 +446,9 @@ export function redactPerformanceOptions(options: PerformanceOptions, secrets: R
 export async function runPerformance(
   workspace: string, env: string, base: string, options: PerformanceOptions,
   signal: AbortSignal, secrets?: Record<string, string>,
+  observer?: { onProgress: (event: TaskProgressData) => void; onStep: (step: string, data?: Record<string, unknown>) => void },
 ): Promise<PerformanceResult> {
+  observer?.onStep("generate-plan");
   const isScenario = options.scenarioSteps && options.scenarioSteps.length > 0;
   const plan = isScenario ? scenarioPlan(base, options) : performancePlan(base, options);
   signal.throwIfAborted();
@@ -485,19 +490,33 @@ export async function runPerformance(
     }
 
     const timeoutMs = computeTimeout(options);
-    const exitCode = await new Promise<number | null>((resolveExit, reject) => {
-      const child = spawn(k6Executable(), ["run", "--quiet", "--no-usage-report", script], {
+    const liveDir = mkdtempSync(join(tmpdir(), "aiprobe-metrics-"));
+    const jsonOut = join(liveDir, "metrics.jsonl");
+    writeFileSync(jsonOut, "", { mode: 0o600 });
+    const metricsWindow = new PerformanceMetrics(Date.now());
+    const tail = new JsonLinesTail(jsonOut, line => metricsWindow.accept(line));
+    let lastEmit = 0;
+    const flush = (final = false) => {
+      tail.read(final);
+      if (observer && (final || Date.now() - lastEmit >= 1000)) { lastEmit = Date.now(); observer.onProgress(metricsWindow.snapshot(lastEmit)); }
+    };
+    const ticker = setInterval(() => flush(), 250);
+    let exitCode: number | null;
+    observer?.onStep("spawn");
+    try { exitCode = await new Promise<number | null>((resolveExit, reject) => {
+      const child = spawn(k6Executable(), ["run", "--quiet", "--no-usage-report", "--out", `json=${jsonOut}`, script], {
         cwd: workspace, env: procEnv, stdio: ["ignore", "ignore", "ignore"], shell: false,
       });
       let force: ReturnType<typeof setTimeout> | undefined;
-      const stop = () => { child.kill("SIGINT"); force = setTimeout(() => child.kill("SIGKILL"), 3000); force.unref(); };
+      const stop = () => { if (force) return; child.kill("SIGINT"); force = setTimeout(() => child.kill("SIGKILL"), 3000); force.unref(); };
       const timeout = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
       const cleanup = () => { clearTimeout(timeout); if (force) clearTimeout(force); signal.removeEventListener("abort", stop); };
       signal.addEventListener("abort", stop, { once: true });
       if (signal.aborted) stop();
       child.once("error", error => { cleanup(); reject(error); });
       child.once("close", code => { cleanup(); resolveExit(code); });
-    });
+    }); } finally { clearInterval(ticker); try { flush(true); } finally { rmSync(liveDir, { recursive: true, force: true }); } }
+    observer?.onStep("parse-summary", { exitCode });
 
     // handleSummary 是唯一汇总文件写入方，兼容嵌套 values 与旧版平铺指标。
     const raw: Record<string, unknown> | undefined = existsSync(summary) ? (() => { try { return JSON.parse(readFileSync(summary, "utf8")); } catch { return undefined; } })() : undefined;
@@ -567,6 +586,7 @@ export async function runPerformance(
   }
   if (result.status !== "passed") result.thresholdsPassed = false;
   result.finishedAt = new Date().toISOString();
+  observer?.onStep("write-report", { status: result.status });
   writeFileSync(reportPath, JSON.stringify({
     ...result,
     scriptHash: createHash("sha256").update(plan.code).digest("hex"),

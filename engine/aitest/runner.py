@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .process_stream import run_streaming
 from .models import FailureType, Run, RunMode, RunResult
 
 _ID_RE = re.compile(r"\[(.+)\]$")
@@ -26,7 +27,7 @@ _ENV_PATTERNS = re.compile(
     r"|[Nn]o devices? (found|connected)|[Dd]evice .{0,40}not (found|connected)|device offline|[Aa]pp .{0,60}not installed"
     r"|[Uu]nable to launch app)")
 _SERVER_ERROR = re.compile(r"状态码 5\d\d")
-_AUTH_ERROR = re.compile(r"业务码 (?:401|403)|认证失败|未配置接口登录|没有接口凭据")
+_AUTH_ERROR = re.compile(r"(?:业务码|状态码|HTTP(?: status)?)\s*[:：]?\s*(?:401|403)\b|未授权|未登录|登录失效|认证失败|未配置接口登录|没有接口凭据|AUTH_REQUIRED", re.IGNORECASE)
 
 
 @dataclass
@@ -107,7 +108,12 @@ def run_pytest(suite_dir: str | Path, env: EnvConfig, project_id: str = "", env_
         # 桌面端捆绑的引擎也可被脚本子进程导入；无需改写已有脚本。
         proc_env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent.parent),
                                                               proc_env.get("PYTHONPATH", "")]))
-    proc = subprocess.run(cmd, cwd=str(suite_dir), env=proc_env, capture_output=True, text=True, timeout=timeout)
+    if proc_env.get("AITEST_PROGRESS") == "1":
+        cmd.extend(["-p", "aitest.pytest_progress"])
+        proc_env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent.parent), proc_env.get("PYTHONPATH", "")]))
+        proc = run_streaming(cmd, cwd=str(suite_dir), env=proc_env, timeout=timeout)
+    else:
+        proc = subprocess.run(cmd, cwd=str(suite_dir), env=proc_env, capture_output=True, text=True, timeout=timeout)
     if proc.returncode not in (0, 1):
         raise RuntimeError("接口脚本未能执行：" + (proc.stderr or proc.stdout)[-4000:])
     results = parse_junit(junit, run.id) if junit.exists() else []

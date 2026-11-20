@@ -1,3 +1,6 @@
+import { useAssistantPageContext } from "../assistant/AssistantContext";
+import { useTasks } from "../stores/taskStore";
+import { TaskProgressPanel } from "../components/TaskProgressPanel";
 import { CheckCircleOutlined, CloseCircleOutlined, DownOutlined, ExclamationCircleOutlined, StopOutlined, WarningOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Checkbox, Collapse, Descriptions, Empty, Form, Input, InputNumber, Radio, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from "antd";
 import { useEffect, useState } from "react";
@@ -30,10 +33,12 @@ function Status({ value }: { value: PerformanceResult["status"] }) {
 }
 
 export function PerformancePage({ project }: { project: Project }) {
-  return <div className="section-page performance-page">
+  return <div className="page-frame section-page performance-page">
     <PageHeader title="性能测试" description="从当前项目的接口列表选择测试目标，复用请求配置，仅补充负载与性能门槛。真实执行使用本地 k6，不调用模型。" />
+<div className="page-scroll-body">
     <PerformancePanel key={project.id} project={project} />
-  </div>;
+  </div>
+</div>;
 }
 
 function PerformancePanel({ project }: { project: Project }) {
@@ -62,6 +67,7 @@ function PerformancePanel({ project }: { project: Project }) {
   }, [definitions.data, selection]);
   const selected = definitions.data?.find(d => d.id === selection?.definition.id);
   const request = selection?.request;
+  useAssistantPageContext({ projectId: project.id, page: "performance", env: activeEnv, references: selected ? [{ kind: "definition", id: selected.id, label: selected.summary }] : [] });
   const stale = !!selection && (!selected || selected.revision !== selection.definition.revision || !!performanceDefinitionIssue(selected));
   const setRequest = (patch: Partial<ApiRequest>) => setSelection(s => s ? { ...s, request: { ...s.request, ...patch } } : s);
   const valid = !Object.values(invalid).some(Boolean);
@@ -74,6 +80,10 @@ function PerformancePanel({ project }: { project: Project }) {
   const [rampUp, setRampUp] = useState(10);
   const [rampDown, setRampDown] = useState(10);
   const history = useLoad(() => api().performanceHistory(project.id), [project.id]);
+  const latestTask = useTasks().find(task => task.source === "performance" && task.projectId === project.id);
+  useEffect(() => {
+    if (latestTask && ["completed", "failed", "stopped"].includes(latestTask.status)) void history.reload();
+  }, [latestTask?.id, latestTask?.status, history.reload]);
   const { busy, run } = useAction();
   const preview = !window.desktopHost;
   const total = seconds + (useRamp ? rampUp + rampDown : 0);
@@ -97,6 +107,7 @@ function PerformancePanel({ project }: { project: Project }) {
   }, "性能任务已结束");
 
   return <div className="perf-stack">
+    <TaskProgressPanel projectId={project.id} source="performance" env={activeEnv} />
     {preview && <Alert showIcon type="info" message="演示预览 · 数据均为合成样本，不是真实压测结果"
       description="可查看不同结果、展开详情、切换趋势和试设基线。不会运行 k6、发送请求或写入真实项目；刷新页面重置演示基线。" />}
     {!activeEnv && <Alert showIcon type="warning" message="请先在项目设置中添加非生产环境" />}

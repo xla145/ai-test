@@ -1,3 +1,9 @@
+import { isAssistantSenderUrl } from "./assistant/ipc.js";
+import { checkExecutors } from "./executors.js";
+import { createAssistant } from "./assistant/integration.js";
+import { createAssistantCompletion } from "./assistant/model.js";
+import { resolveSlot } from "./models.js";
+import { TaskApprovals } from "./taskApprovals.js";
 import { browserPanelBounds } from "../shared/browserPanel.js";
 import { validateRoleSessionLocation } from "./roleSession.js";
 import { execFile } from "node:child_process";
@@ -123,7 +129,9 @@ let codex: CodexAppServer | undefined;
 let executionOrchestrator: Orchestrator | undefined;
 let directStore: DirectStore | undefined;
 let secretStore: SecretStore;
-let approvalContext: ApprovalContext = { workspace: "", allowedHosts: [], productionHosts: [] };
+const taskApprovals = new TaskApprovals();
+const approvalThreads = new Map<string, string>();
+let codexStarting: Promise<CodexAppServer> | undefined;
 const pendingApprovals = new Map<string, (accept: boolean) => void>();
 
 const engineEnv = () => ({ PYTHONPATH: paths.enginePythonPath() });
@@ -169,33 +177,29 @@ function runtimeInfo(): RuntimeInfo {
   };
 }
 
-/** 运行 `<bin> --version` 检查可用性；能启动但不支持 --version 的程序也视为已安装 */
-function versionOf(bin: string): Promise<RuntimeCheck> {
-  return new Promise((done) => {
-    execFile(bin, ["--version"], { timeout: 15_000, windowsHide: true }, (err, stdout, stderr) => {
-      const out = `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? "";
-      if (!err) return done({ ok: true, detail: out });
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "EACCES") return done({ ok: false, detail: `找不到 ${bin}` });
-      done(out ? { ok: true, detail: `已安装（${out.slice(0, 80)}）` } : { ok: false, detail: err.message });
-    });
-  });
-}
-const engine = <T,>(args: string[], env: Record<string, string> = {}, opts?: { signal?: AbortSignal }) =>
-  runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env }, signal: opts?.signal });
+const engine = <T,>(args: string[], env: Record<string, string> = {}, opts?: { signal?: AbortSignal; onProgress?: (event: import("@ai-test/mcp-servers").EngineProgress) => void }) =>
+  runEngine<T>(args, { python: paths.python(), db: paths.db(), env: { ...engineEnv(), ...env }, signal: opts?.signal, onProgress: opts?.onProgress });
 
 /** 规则判定为 ask 时弹到界面由用户决定 */
-async function decide(kind: ApprovalRequest["kind"], verdict: Verdict, detail: unknown): Promise<Decision> {
+async function decide(kind: ApprovalRequest["kind"], verdict: Verdict, detail: unknown, threadId: string): Promise<Decision> {
   if (verdict.decision !== "ask") return verdict.decision;
   if (!mainWindow) return "decline";
   const id = randomUUID();
   const req: ApprovalRequest = { id, kind, reason: verdict.reason, detail };
   mainWindow.webContents.send(CHANNELS.approvalRequest, req);
+  approvalThreads.set(id, threadId);
   const accept = await new Promise<boolean>((r) => pendingApprovals.set(id, r));
+  approvalThreads.delete(id);
   return accept ? "accept" : "decline";
 }
 
 async function getCodex(): Promise<CodexAppServer> {
+  if (codexStarting) return codexStarting;
+  if (codex) return codex;
+  codexStarting = startCodex().catch(error => { codex = undefined; throw error; }).finally(() => { codexStarting = undefined; });
+  return codexStarting;
+}
+async function startCodex(): Promise<CodexAppServer> {
   if (codex) return codex;
   if (!broker) throw new Error("凭据代理未启动");
   const codexHome = paths.codexHome();
@@ -239,9 +243,9 @@ async function getCodex(): Promise<CodexAppServer> {
     env: { ...(modelKey("agent") ? { [AGENT_KEY_ENV]: modelKey("agent") } : {}),
       ...(visionKey !== undefined ? { MIDSCENE_MODEL_API_KEY: visionKey } : {}) },
     approvals: {
-      command: (p) => decide("command", evaluateCommand(p, approvalContext), p),
-      fileChange: (p) => decide("fileChange", evaluateFileChange(p, approvalContext), p),
-      mcpElicitation: (p) => decide("mcp", evaluateMcpElicitation(p, new Set(servers)), { 服务: p.serverName, 说明: p.message ?? p.url ?? "" }),
+      command: (p) => taskApprovals.get(p.threadId) ? decide("command", evaluateCommand(p, taskApprovals.get(p.threadId)!), p, p.threadId) : Promise.resolve("decline"),
+      fileChange: (p) => taskApprovals.get(p.threadId) ? decide("fileChange", evaluateFileChange(p, taskApprovals.get(p.threadId)!), p, p.threadId) : Promise.resolve("decline"),
+      mcpElicitation: (p) => taskApprovals.get(p.threadId) ? decide("mcp", evaluateMcpElicitation(p, new Set(servers)), { 服务: p.serverName, 说明: p.message ?? p.url ?? "" }, p.threadId) : Promise.resolve("decline"),
     },
   });
   codex.on("event", (evt) => {
@@ -461,7 +465,20 @@ async function saveAs(defaultName: string, filters: { name: string; extensions: 
 }
 
 function registerIpc(orch: Orchestrator, ds: DirectStore): void {
+  const assistant = createAssistant({ orchestrator: orch, store: ds, engine,
+    file: join(paths.data(), "assistant-conversations.json"),
+    complete: createAssistantCompletion({ engine, config: () => ({
+      ...resolveSlot(loadModelSettings().agent, "agent"), apiKey: modelKey("agent"), tokenLimit: taskTokenLimit().value,
+    }) }),
+  });
   const handlers: Record<string, (...a: any[]) => unknown> = {
+    assistantConversations: (...args: Parameters<typeof assistant.assistantConversations>) => assistant.assistantConversations(...args),
+    assistantCreateConversation: (...args: Parameters<typeof assistant.assistantCreateConversation>) => assistant.assistantCreateConversation(...args),
+    assistantConversation: (...args: Parameters<typeof assistant.assistantConversation>) => assistant.assistantConversation(...args),
+    assistantSend: (...args: Parameters<typeof assistant.assistantSend>) => assistant.assistantSend(...args),
+    assistantConfirm: (...args: Parameters<typeof assistant.assistantConfirm>) => assistant.assistantConfirm(...args),
+    assistantCancelOperation: (...args: Parameters<typeof assistant.assistantCancelOperation>) => assistant.assistantCancelOperation(...args),
+    assistantStop: (...args: Parameters<typeof assistant.assistantStop>) => assistant.assistantStop(...args),
     // ---- 直连 SQLite 的只读查询（不再 spawn Python 子进程） ----
     listProjects: () => rememberParents(ds.listProjects()),
     listCases: (p: string, filters: any) => ds.listCases(p, filters),
@@ -500,7 +517,7 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
       return out;
     },
     projectOverview: (g: string) => orch.projectOverview(g),
-    importExcel: (p: string, f: string) => orch.importExcel(p, f),
+    importExcel: (p: string, f: string, strictTemplate?: boolean) => orch.importExcel(p, f, strictTemplate ?? false),
     lint: (p: string) => orch.lint(p),
     updateCase: (c: string, patch, actor?: "human" | "agent") => orch.updateCase(c, patch, actor ?? "human"),
     applyFix: (c: string, field: string, value: unknown) => orch.applyFix(c, field, value),
@@ -515,18 +532,15 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     debugApiRequest: (p: string, env: string, request, opts) => orch.debugApiRequest(p, env, request, opts),
     listApiDebugHistory: (p: string) => orch.listApiDebugHistory(p),
     generateApiSuite: async (p: string, f: string, enrich: boolean) => {
-      await setApprovalContext(orch, p);
       return orch.generateApiSuite(p, f, enrich);
     },
     generateCases: async (p: string, f: string) => {
-      await setApprovalContext(orch, p);
       return orch.generateCases(p, f);
     },
     writeReviewedApiSuite: (p: string) => orch.writeReviewedApiSuite(p),
     listApiTestSets: (p: string) => orch.listApiTestSets(p),
     saveApiTestSet: (p: string, name: string, ids: string[]) => orch.saveApiTestSet(p, name, ids),
     runRegression: async (p: string, env: string, opts) => {
-      await setApprovalContext(orch, p);
       return orch.runRegression(p, env, opts);
     },
     setEnvSecret: (p: string, env: string, authToken: string, authHeader?: string) =>
@@ -633,19 +647,15 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
       return out;
     },
     exploreUiCase: async (p: string, env: string, caseId: string, opts?: { confirmProduction?: boolean; selectedRole?: string }) => {
-      await setApprovalContext(orch, p);
       return orch.exploreUiCase(p, env, caseId, opts);
     },
     runAppRegression: async (p: string, env: string, platform: "android" | "ios", opts?: { device?: string; confirmProduction?: boolean }) => {
-      await setApprovalContext(orch, p);
       return orch.runAppRegression(p, env, platform, opts ?? {});
     },
     exploreAppCase: async (p: string, env: string, platform: "android" | "ios", caseId: string, opts?: { confirmProduction?: boolean }) => {
-      await setApprovalContext(orch, p);
       return orch.exploreAppCase(p, env, platform, caseId, opts ?? {});
     },
     runUiRegression: async (p: string, env: string, headed: boolean, opts?: UiRunOptions) => {
-      await setApprovalContext(orch, p);
       return orch.runUiRegression(p, env, { ...opts, headed });
     },
     uiScriptStates: (p: string, env: string) => orch.uiScriptStates(p, env),
@@ -657,10 +667,17 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     uiDebugCommand: (command: UiDebugCommand) => orch.uiDebugCommand(command),
     uiDebugState: () => orch.uiDebugState(),
     uiTasks: () => orch.uiTasks(),
+    taskSnapshot: () => orch.taskSnapshot(),
+    taskProgress: (taskId: string) => orch.taskProgress(taskId),
+    exportDiagnostics: async (taskId?: string) => {
+      const out = await saveAs("task-diagnostics.json", [{ name: "JSON", extensions: ["json"] }]);
+      if (!out) return null;
+      writeFileSync(out, JSON.stringify(orch.tasks.diagnostics.export(taskId), null, 2), { mode: 0o600 });
+      return { path: out };
+    },
     stopExecutionTask: (id: string) => orch.stopExecutionTask(id),
     stopUiTask: (p: string, env: string) => orch.stopUiTask(p, env),
     reviseUiScript: async (p: string, env: string, id: string, feedback: string, opts?: { confirmProduction?: boolean }) => {
-      await setApprovalContext(orch, p);
       return orch.reviseUiScript(p, env, id, feedback, opts);
     },
     listProposals: (status?: string) => orch.listProposals(status),
@@ -691,12 +708,8 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
       if (!m) throw new Error("模型不存在，请先保存");
       return checkModel(m, usageOf(s, id), keyOf(id));
     },
-    checkRuntime: async () => {
-      const [py, cx, ma, pk] = await Promise.all([
-        versionOf(paths.python()), versionOf(paths.codexBin()), versionOf(maestroBin().path), versionOf(pinky().path),
-      ]);
-      return { python: py, codex: cx, maestro: ma, pinky: pk };
-    },
+    checkRuntime: () => checkExecutors({ python: paths.python(), codex: paths.codexBin(), maestro: maestroBin().path,
+      pinky: pinky().path, pinkyEnabled: pinky().enabled, pythonEnv: engineEnv() }),
     openDataDir: () => shell.openPath(paths.data()),
     getUserInfo: () => localUser(),
     getUpdateState: () => updater?.current,
@@ -750,6 +763,10 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
       const out = await saveAs(`${name}-用例.xlsx`, [{ name: "Excel", extensions: ["xlsx"] }]);
       return out ? orch.exportCasesExcel(p, out) : null;
     },
+    exportCaseTemplate: async () => {
+      const out = await saveAs("AIProbe-测试用例模板.xlsx", [{ name: "Excel", extensions: ["xlsx"] }]);
+      return out ? orch.exportCaseTemplate(out) : null;
+    },
     openPath: async (target: string) => {
       const p = await assertOpenable(orch, target);
       // Playwright 报告是目录，打开其中的 index.html
@@ -761,6 +778,11 @@ function registerIpc(orch: Orchestrator, ds: DirectStore): void {
     showInFolder: async (target: string) => shell.showItemInFolder(await assertOpenable(orch, target)),
   };
   ipcMain.handle(CHANNELS.invoke, async (_e, method: string, ...args: unknown[]) => {
+    if (typeof method !== "string") throw new Error("无效的 IPC 方法");
+    if (method.startsWith("assistant") && (!mainWindow || _e.sender !== mainWindow.webContents || _e.senderFrame !== mainWindow.webContents.mainFrame
+      || !isAssistantSenderUrl(_e.senderFrame?.url ?? "", join(here, "../renderer/index.html"), process.env.AITEST_DEV_SERVER))) {
+      throw new Error("助手请求只能来自主工作台");
+    }
     const fn = handlers[method];
     if (!fn) throw new Error(`未知方法：${method}`);
     return fn(...args);
@@ -844,27 +866,6 @@ function scheduleUpdateChecks(u: Updater): void {
   setInterval(() => auto() && void u.check(), 4 * 60 * 60_000);
 }
 
-function setApprovalContextFromDs(projectId: string): void {
-  const p = directStore?.getProject(projectId);
-  if (!p) return;
-  const hosts = (prod: boolean) =>
-    Object.values(p.environments as Record<string, any>)
-      .filter((e: any) => Boolean(e.production) === prod)
-      .map((e: any) => new URL(e.base_url).hostname);
-  approvalContext = { workspace: p.workspace_path, allowedHosts: hosts(false), productionHosts: hosts(true) };
-}
-
-async function setApprovalContext(orch: Orchestrator, projectId: string): Promise<void> {
-  // 优先直连 SQLite，仅在 DirectStore 未初始化时回退到 Python
-  if (directStore) { setApprovalContextFromDs(projectId); return; }
-  const p = await orch.project(projectId);
-  const hosts = (prod: boolean) =>
-    Object.values(p.environments)
-      .filter((e) => Boolean(e.production) === prod)
-      .map((e) => new URL(e.base_url).hostname);
-  approvalContext = { workspace: p.workspace_path, allowedHosts: hosts(false), productionHosts: hosts(true) };
-}
-
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock?.setIcon(appIcon);
   secretStore = new SecretStore(join(paths.data(), "secrets.json"), safeStorage);
@@ -891,6 +892,14 @@ app.whenReady().then(async () => {
       return taskTokenLimit().value;
     },
     taskFile: join(paths.data(), "execution-tasks.json"),
+    threadStarted: (threadId, project) => taskApprovals.bind(threadId, project),
+    threadFinished: (threadId) => {
+      taskApprovals.release(threadId);
+      for (const [id, thread] of approvalThreads) if (thread === threadId) {
+        pendingApprovals.get(id)?.(false); pendingApprovals.delete(id); approvalThreads.delete(id);
+        mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/approval-cancelled", params: { id } });
+      }
+    },
   });
   executionOrchestrator = orch;
   // 直连 SQLite 的只读查询层：替代高频读操作的 Python 子进程调用
@@ -904,10 +913,19 @@ app.whenReady().then(async () => {
     }
     mainWindow?.webContents.send(CHANNELS.event, { method: "aitest/progress", params: p });
   });
+  for (const type of ["task-records", "task-progress"]) orch.on(type, params => {
+    mainWindow?.webContents.send(CHANNELS.event, { method: `aitest/${type}`, params });
+  });
   registerIpc(orch, ds);
   createWindow();
   updater = createUpdater();
   scheduleUpdateChecks(updater);
+});
+
+app.on("before-quit", () => {
+  for (const task of executionOrchestrator?.uiTasks() ?? []) if (["queued", "running", "stopping"].includes(task.status)) {
+    try { executionOrchestrator?.stopExecutionTask(task.id); } catch { /* unsupported tasks must not block quit */ }
+  }
 });
 
 app.on("window-all-closed", () => {

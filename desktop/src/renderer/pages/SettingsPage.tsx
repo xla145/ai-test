@@ -1,3 +1,4 @@
+import { EXECUTORS, type RuntimeChecks } from "../../shared/executors";
 import {
   ApiOutlined,
   CheckCircleFilled,
@@ -56,8 +57,9 @@ export function SettingsPage() {
 
   const props = { view: view.data, presets: presets.data, save, busy };
   return (
-    <div className="settings-page section-page">
+    <div className="page-frame settings-page section-page">
       <PageHeader title="全局设置" description="对所有项目生效，不随项目保存。API key 存入系统钥匙串，只注入对应进程。" />
+<div className="page-scroll-body">
       <Tabs
         tabPosition="top"
         items={[
@@ -73,6 +75,7 @@ export function SettingsPage() {
         ]}
       />
     </div>
+</div>
   );
 }
 
@@ -299,7 +302,7 @@ function Runtime({ view, save, busy }: SectionProps) {
   const { settings, runtime } = view;
   const [form] = Form.useForm<{ pythonPath?: string; codexPath?: string; taskTokenLimit?: number | null;
     maestroPath?: string; pinkyEnabled?: boolean; pinkyPath?: string }>();
-  const [check, setCheck] = useState<{ python: RuntimeCheck; codex: RuntimeCheck; maestro: RuntimeCheck; pinky: RuntimeCheck }>();
+  const [check, setCheck] = useState<RuntimeChecks>();
   const [checking, setChecking] = useState(false);
   useEffect(() => form.setFieldsValue({ ...settings.general }), [settings.general, form]);
 
@@ -326,6 +329,10 @@ function Runtime({ view, save, busy }: SectionProps) {
   return (
     <Card size="small" extra={<Button size="small" icon={<ReloadOutlined />} loading={checking} onClick={runCheck}>重新检测</Button>}
       title="运行环境">
+      <Space direction="vertical" style={{ marginBottom: 20 }}>
+        {EXECUTORS.filter(item => !["python", "codex", "maestro", "pinky"].includes(item.id)).map(item =>
+          <div key={item.id}><Typography.Text strong>{item.name}：</Typography.Text>{status(check?.[item.id]) ?? <Typography.Text type="secondary">尚未检测</Typography.Text>}</div>)}
+      </Space>
       <Form form={form} layout="vertical" style={{ maxWidth: 640 }} onFinish={(v) => save({
         ...settings,
         general: {

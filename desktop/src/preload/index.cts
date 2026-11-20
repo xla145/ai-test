@@ -11,14 +11,15 @@ function subscribe<T>(channel: string, cb: (v: T) => void): () => void {
 }
 
 const methods = [
+  "assistantConversations", "assistantCreateConversation", "assistantConversation", "assistantSend", "assistantConfirm", "assistantCancelOperation", "assistantStop",
   "listApiDefinitions", "previewApiImport", "importApiDefinitions", "saveApiCase", "generateDefinitionCases", "previewApiParameterCases", "saveApiParameterCases", "debugApiRequest", "stopApiDebug", "listApiDebugHistory",
-  "listProjects", "createProject", "importExcel", "lint", "listCases", "updateCase", "applyFix",
+  "listProjects", "createProject", "importExcel", "exportCaseTemplate", "lint", "listCases", "updateCase", "applyFix",
   "generateApiSuite", "generateCases", "runRegression", "tokenUsage", "setEnvSecret", "openApiLogin", "saveApiLogin",
   "writeReviewedApiSuite", "listApiTestSets", "saveApiTestSet",
   "setProjectType",
   "pickFile", "pickDirectory", "openTestPage",
   "setRoleSecret", "listRoles", "setEnvironment", "exploreUiCase", "runUiRegression",
-  "stopExecutionTask", "uiTasks", "uiScriptStates", "uiCaseGroups", "deriveUiScripts", "confirmUiScript", "reviseUiScript", "uiScriptDetail", "dockTestView", "uiDebugStart", "uiDebugCommand", "uiDebugState", "stopUiTask", "openRoleLogin", "saveRoleLogin", "roleSessions",
+  "taskSnapshot", "taskProgress", "exportDiagnostics", "stopExecutionTask", "uiTasks", "uiScriptStates", "uiCaseGroups", "deriveUiScripts", "confirmUiScript", "reviseUiScript", "uiScriptDetail", "dockTestView", "uiDebugStart", "uiDebugCommand", "uiDebugState", "stopUiTask", "openRoleLogin", "saveRoleLogin", "roleSessions",
   "listProposals", "resolveProposal", "listReviews", "resolveReview",
   "usageReport", "checkBudget", "getSettings", "setSettings", "metrics", "coverage", "caseHistory", "runPerformance", "performanceHistory", "stability", "listAttributions",
   "perfCompile", "perfSetBaseline", "perfGetBaseline", "perfTrend",

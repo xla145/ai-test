@@ -97,7 +97,7 @@ describe("UI workbench orchestration", () => {
         default: return {};
       }
     }) as unknown as EngineCall;
-    const ui = { prepareEmbedded: vi.fn(async () => ({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } })),
+    const ui = { createDebugBrowser: vi.fn(() => ({ newRoleContext: vi.fn(async () => ({ loggedIn: true })), close: vi.fn(async () => {}) })), prepareEmbedded: vi.fn(async () => ({ cdpEndpoint: "http://127.0.0.1:9333", viewMarkers: { default: "marker" } })),
       checkData: vi.fn(async () => []), seedData: vi.fn(async () => []),
       runUiSuite: vi.fn(async () => ({ exitCode: 0, htmlReport: "report", reportJson: "", stderr: "", errors: [], results: [{ case_id: "tc_a", status: "passed", duration: 1, message: "", evidence_paths: [], reviews: [] }] })) };
     const agent = vi.fn();
@@ -168,7 +168,9 @@ describe("UI workbench orchestration", () => {
     expect(missing.scriptGenerated).toBe(false);
     expect(missing).toMatchObject({ status: "interrupted_budget", message: "我先打开登录页。" });
     runTurn.mockResolvedValueOnce({ status: "completed", message: "已生成", tokens: 9 });
-    expect(await orch.exploreUiCase("p", "test", "tc_a")).toMatchObject({ scriptGenerated: false, status: "failed" });
+    const repaired = await orch.exploreUiCase("p", "test", "tc_a");
+    expect(repaired).toMatchObject({ scriptGenerated: false, status: "interrupted_budget", tokens: 18 });
+    expect(repaired.message).toContain("结构修复未完成");
   });
   it("rejects foreign or blocked cases and production exploration before calling the model", async () => {
     const { orch, agent } = orchestration();
