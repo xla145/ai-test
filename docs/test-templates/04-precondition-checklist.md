@@ -71,6 +71,7 @@
 | UI-03 | Midscene 已配置（视觉定位时） | `checkExecutors().midscene.ok` + 视觉模型已设置 | 视觉定位功能不可用 |
 | UI-04 | 登录配置完整 | `environments[env].login` 包含 url/username/password/submit | 自动登录失败 |
 | UI-05 | `data_refs` 对应数据已播种 | `seedData` 返回 `seeded=true` | 用例降级到 `degraded` |
+| UI-05a | `data_refs` 只含真实数据 key，不含说明性文字 | `executableDataRefs()` 只放行两个固定占位符（`按本例前置条件准备`、`本例独立基线`），其余一律当真实 key 去检查/造数 | 探索前被拦截：「未启动 Agent：无法确认或准备数据 ...」，浪费一次人工排查但不浪费模型调用 |
 | UI-06 | 角色绑定的会话已建立 | CDP endpoint 中 viewMarkers 匹配 | AUTH_REQUIRED 错误 |
 | UI-07 | 共享浏览器资源无占用 | 无其他 UI 任务持有浏览器锁 | 排队等待或死锁 |
 | UI-08 | 脚本中不含硬编码的 URL/端口 | 代码审查 | 环境切换后失败 |
