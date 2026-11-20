@@ -145,43 +145,44 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
     info: dict[str, Any] = {}
     cases = importer.import_excel(a.file, a.project, column_map=column_map, sheet=a.sheet, info=info)
     if a.strict_template:
-        required = {field: label for label, field in importer.DEFAULT_COLUMN_MAP.items()}
+        required = {field: label for label, field in importer.TEMPLATE_COLUMN_MAP.items() if field not in {"owner", "data_refs"}}
         missing = [label for field, label in required.items() if field not in info.get("columns", {})]
         if missing:
             raise ValueError("测试用例模板缺少列：" + "、".join(missing))
         if not cases:
             raise ValueError("测试用例模板没有可导入的用例")
-        allowed = {"api", "ui", "app"}
+        allowed = {"api", "ui", "app", "performance"}
         modes = {"api", "ui", "app", "capture", "doc", "manual"}
-        statuses = {"draft", "reviewed", "deprecated"}
         errors: list[str] = []
         for case in cases:
             row = case.source_row or 0
             raw = getattr(case, "_raw", {})
-            if not case.title or not case.module_path or not case.preconditions or not case.steps or not case.expected:
+            case.status = "draft"
+            if not raw.get("execution_mode"):
+                case.execution_mode = case.type if case.type in {"ui", "app", "api"} else "manual"
+            if not raw.get("category"):
+                case.category = "功能测试"
+            if not case.title or not str(raw.get("module_path") or "").strip(" |") or not case.preconditions or not case.steps or not case.expected:
                 errors.append(f"第 {row} 行存在空的必填字段")
             if not all(re.match(r"^\[(ENV|AUTH|DATA|RUNTIME|STATE)\]\s+\S", p) for p in case.preconditions):
                 errors.append(f"第 {row} 行前置条件须逐条使用 [ENV]/[AUTH]/[DATA]/[RUNTIME]/[STATE] 前缀")
             if not any(p.startswith("[ENV]") for p in case.preconditions):
                 errors.append(f"第 {row} 行前置条件至少包含一条 [ENV]")
-            for field, label in (("type", "测试类型"), ("execution_mode", "执行方式"), ("status", "状态"),
-                                 ("priority", "用例等级"), ("category", "用例类型")):
+            for field, label in (("type", "测试目标"), ("priority", "用例等级")):
                 if not str(raw.get(field) or "").strip():
                     errors.append(f"第 {row} 行「{label}」不能为空")
             if str(raw.get("priority") or "").strip() not in ("P0", "P1", "P2", "P3"):
                 errors.append(f"第 {row} 行用例等级须为 P0～P3")
-            if str(raw.get("category") or "").strip() not in ("功能测试", "安全相关", "兼容性", "其它"):
+            if raw.get("category") and str(raw["category"]).strip() not in ("功能测试", "安全相关", "兼容性", "其它"):
                 errors.append(f"第 {row} 行用例类型无效")
             if str(raw.get("id") or "").strip():
                 errors.append(f"第 {row} 行用例ID请留空，由系统生成")
             if len(case.title) > 200:
                 errors.append(f"第 {row} 行标题超过 200 字符")
             if case.type not in allowed:
-                errors.append(f"第 {row} 行测试类型必须是 api、ui 或 app")
+                errors.append(f"第 {row} 行测试目标须为接口、UI、性能或移动端")
             if case.execution_mode not in modes:
                 errors.append(f"第 {row} 行执行方式无效：{case.execution_mode}")
-            if case.status not in statuses:
-                errors.append(f"第 {row} 行状态无效：{case.status}")
             if len(case.steps) != len(case.expected):
                 errors.append(f"第 {row} 行步骤与预期数量不一致")
             for field, label in (("steps", "步骤描述"), ("expected", "预期结果")):
@@ -190,12 +191,10 @@ def cmd_import_excel(store: Store, a: argparse.Namespace) -> Any:
                     errors.append(f"第 {row} 行「{label}」编号须从 1 连续递增")
             if any(not s.strip() for s in [*case.steps, *case.expected]):
                 errors.append(f"第 {row} 行步骤或预期有空项")
-            if case.type == "api" and not (case.api or case.api_flow or case.performance):
-                errors.append(f"第 {row} 行 API 用例必须填写接口配置(JSON)、接口流程(JSON)或性能配置(JSON)")
-            if case.type == "api" and case.execution_mode != "api":
-                errors.append(f"第 {row} 行 API 用例执行方式须为 api")
-            if case.type != "api" and (case.api or case.api_flow or case.performance):
-                errors.append(f"第 {row} 行非 API 用例不能填写接口或性能配置")
+            if (case.api or case.api_flow or case.api_cleanup) and case.type != "api":
+                errors.append(f"第 {row} 行接口配置仅适用于接口用例")
+            if case.performance is not None and case.type not in {"api", "performance"}:
+                errors.append(f"第 {row} 行性能配置仅适用于性能或旧版接口用例")
             if case.performance:
                 p = case.performance
                 if not (isinstance(p.get("path"), str) and p["path"].startswith("/") or isinstance(p.get("scenarioSteps"), list) and p["scenarioSteps"]):

@@ -35,8 +35,16 @@ DEFAULT_COLUMN_MAP: dict[str, str] = {
     "性能配置(JSON)": "performance",
 }
 
+TEMPLATE_COLUMN_MAP: dict[str, str] = {
+    "标题": "title", "测试目标": "type", "所属分组": "module_path", "用例等级": "priority",
+    "前置条件": "preconditions", "步骤描述": "steps", "预期结果": "expected",
+    "数据引用": "data_refs", "维护人": "owner",
+}
+TARGET_VALUES = {"接口": "api", "界面": "ui", "性能": "performance", "移动端": "app"}
+
 # 常见的列名写法（各测试平台导出格式不同）；列名先去掉「*」「(必填)」等标记再匹配
 COLUMN_ALIASES: dict[str, str] = {
+    "测试目标": "type",
     "id": "id", "用例编号": "id", "case id": "id",
     "用例标题": "title", "用例名称": "title", "名称": "title", "用例名": "title", "测试标题": "title", "case title": "title", "title": "title",
     "所属模块": "module_path", "模块": "module_path", "功能模块": "module_path", "模块路径": "module_path", "分组": "module_path", "目录": "module_path",
@@ -170,7 +178,7 @@ def row_to_case(row: dict[str, Any], project_id: str = "", source_row: int | Non
         id=str(row.get("id") or "").strip() or new_id("tc"),
         title=title,
         project_id=project_id,
-        type=str(row.get("type") or "ui").strip().lower(),
+        type=TARGET_VALUES.get(str(row.get("type") or "").strip(), str(row.get("type") or "ui").strip().lower()),
         execution_mode=str(row.get("execution_mode") or "").strip().lower(),
         status=str(row.get("status") or "draft").strip().lower(),
         module_path=module_path,
@@ -294,12 +302,12 @@ def export_excel(cases: list[TestCase], path: str | Path, column_map: dict[str, 
 
 
 def export_template(path: str | Path) -> Path:
-    """可填写的严格导入模板；第一张表是唯一导入数据源。"""
-    out = export_excel([], path)
+    """可填写的通用用例模板；第一张表是唯一导入数据源。"""
+    out = export_excel([], path, column_map=TEMPLATE_COLUMN_MAP)
     wb = load_workbook(out)
     ws = wb.worksheets[0]
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:Q1"
+    ws.auto_filter.ref = ws.dimensions
     from openpyxl.styles import Font, PatternFill, Alignment
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -309,18 +317,16 @@ def export_template(path: str | Path) -> Path:
     help_sheet = wb.create_sheet("填写说明")
     for line in [
         ["字段", "填写规则"],
-        ["用例ID", "留空，导入时自动生成；不要填写已有 ID"],
-        ["测试类型", "api / ui / app；性能用例填 api，并填写性能配置(JSON)"],
-        ["执行方式", "api / ui / app / capture / doc / manual；性能用例填 api"],
-        ["状态", "draft / reviewed / deprecated；建议先填 draft"],
+        ["标题", "必填，例如：订单-退款-已支付订单可申请退款。导入后自动生成 ID，状态为草稿。"],
+        ["测试目标", "接口 / UI / 性能 / 移动端"],
+        ["用例等级", "P0 阻断 / P1 核心 / P2 一般 / P3 低优"],
         ["所属分组", "用 | 分隔层级，例如 用户管理|创建用户"],
         ["前置条件", "每行一条，格式：[ENV] 描述、[AUTH] 描述、[DATA] 描述、[RUNTIME] 描述、[STATE] 描述；至少一条 ENV"],
         ["步骤描述 / 预期结果", "每行一条，一一对应；可用 1.、2. 编号"],
-        ["测试数据", "多个 key 用 | 分隔"],
-        ["接口配置(JSON)", "API 单接口必填，如 {\"method\":\"GET\",\"path\":\"/users\",\"expected_status\":[200]}"],
-        ["接口流程(JSON)", "API 多步骤时填 JSON 数组；与接口配置二选一"],
-        ["性能配置(JSON)", "性能用例填写 PerformanceOptions 对象：path、method、vus、seconds、p95Ms、maxFailureRate 等"],
-        ["参考", "完整字段定义见 docs/test-templates/00-common-meta.md、01-api-test-template.md、02-ui-test-template.md、03-performance-test-template.md"],
+        ["数据引用", "选填；只填需要环境提供的数据标识，如 member_account，多个用 | 分隔。临时输入的格式、数据准备说明写在前置条件，引用留空。"],
+        ["维护人", "选填"],
+        ["执行配置", "本模板不填写接口 JSON、UI 脚本或性能参数；待接口文档、页面配置或压测目标明确后，在对应配置页面补齐"],
+        ["参考", "通用字段见 docs/test-templates/00-common-meta.md；API/UI/性能配置分别见 01、02、03 模板"],
     ]:
         help_sheet.append(line)
     help_sheet.column_dimensions["A"].width = 26

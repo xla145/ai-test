@@ -102,7 +102,7 @@ export function ImportPage({ project }: { project: Project }) {
           { title: "修复阻断", description: "阻断级问题修复前不会生成脚本" },
           { title: "人工审核", description: "在用例库中审核后进入回归" },
         ]}
-        description="下载模板填写后导入；系统先校验全部用例，格式不符时整批拒绝。导入后自动检查规范。"
+        description="按通用模板填写测试场景、步骤和预期，整批校验通过后存为草稿。接口文档、UI 脚本和压测参数可后续配置。"
         extra={<>
           <Button icon={<ReloadOutlined />} loading={checking} disabled={busy} onClick={recheck}>重新检查</Button>
           <Button icon={<DownloadOutlined />} loading={busy} disabled={checking} onClick={downloadTemplate}>下载测试用例模板</Button>

@@ -92,13 +92,14 @@ def test_strict_template_rejects_before_writing(tmp_path, capsys):
                "接口流程(JSON)", "清理步骤(JSON)", "性能配置(JSON)"]
     path = tmp_path / "invalid.xlsx"
     wb = Workbook(); ws = wb.active; ws.append(headers)
+    ws.append(["", "用户-查询", "用户", "", "api", "api", "draft", "[ENV] 测试环境可达", "", "查询用户", "返回用户列表", "P1", "功能测试"])
     ws.append(["", "用户-创建", "用户", "", "ui", "ui", "draft", "未声明类型", "", "1. 打开", "1. 可见", "P1", "功能测试", "", "", "", ""])
     wb.save(path)
     db = str(tmp_path / "db.sqlite")
     assert main(["--db", db, "init-project", "--name", "p", "--workspace", str(tmp_path / "ws")]) == 0
     pid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["id"]
     assert main(["--db", db, "import-excel", "--project", pid, "--file", str(path), "--strict-template"]) == 1
-    capsys.readouterr()
+    assert "第 3 行前置条件" in capsys.readouterr().out
     assert main(["--db", db, "list-cases", "--project", pid]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"] == []
 
@@ -110,17 +111,21 @@ def test_exported_template_accepts_valid_case(tmp_path, capsys):
     from openpyxl import load_workbook
     path = export_template(tmp_path / "template.xlsx")
     wb = load_workbook(path)
-    assert wb.worksheets[0].auto_filter.ref == "A1:Q1"
     assert wb.sheetnames == ["用例", "填写说明"]
-    wb.worksheets[0].append(["", "用户-创建-正常", "用户|创建", "", "api", "api", "draft",
-                              "1. [ENV] 测试环境可达\n2. [AUTH] token 已配置", "", "1. 发送请求", "1. HTTP 200",
-                              "P1", "功能测试", json.dumps({"method": "GET", "path": "/users", "expected_status": [200]}), "", "", ""])
+    sheet = wb.worksheets[0]
+    assert [cell.value for cell in sheet[1]] == ["标题", "测试目标", "所属分组", "用例等级", "前置条件", "步骤描述", "预期结果", "数据引用", "维护人"]
+    for target in ["接口", "UI", "性能", "移动端"]:
+        sheet.append([f"用户-创建-{target}", target, "用户|创建", "P1", "[ENV] 测试环境可用", "提交用户资料", "用户列表显示新用户"])
     wb.save(path)
     db = str(tmp_path / "db.sqlite")
     assert main(["--db", db, "init-project", "--name", "p", "--workspace", str(tmp_path / "ws")]) == 0
     pid = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["id"]
     assert main(["--db", db, "import-excel", "--project", pid, "--file", str(path), "--strict-template"]) == 0
-    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["created"] == 1
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["data"]["created"] == 4
+    assert main(["--db", db, "list-cases", "--project", pid]) == 0
+    saved = json.loads(capsys.readouterr().out)["data"]
+    assert {case["type"] for case in saved} == {"api", "ui", "performance", "app"}
+    assert all(case["status"] == "draft" and not case["api"] and not case["performance"] for case in saved)
 
 
 def test_import_mapping(tmp_path):
@@ -221,3 +226,13 @@ def test_route_uses_actions_not_incidental_api_keys_or_mobile_labels():
     assert route(TestCase(title='渠道-批量选择', steps=['点击列表中的全选按钮'], expected=['全部选中'])) == 'ui'
     assert route(TestCase(title='渠道-接口查询', steps=['发送 GET /channels 请求'], expected=['状态码200'])) == 'api'
     assert route(TestCase(title='登录-Android端登录', steps=['在手机输入账号'], expected=['成功'])) == 'app'
+
+
+def test_legacy_ui_sheet_note_is_not_a_fixture_key():
+    from aitest.importer import row_to_case
+    from aitest.models import TestCase
+    note = "按本例前置条件准备"
+    row = {"type": "UI", "title": "注册", "preconditions": "准备唯一邮箱", "data_refs": note + "|已有会员"}
+    case = row_to_case(row, source_row=151)
+    assert case.preconditions == ["准备唯一邮箱"] and case.data_refs == ["已有会员"]
+    assert TestCase.from_dict({**case.to_dict(), "data_refs": [note, "已有会员"]}).data_refs == ["已有会员"]

@@ -141,6 +141,7 @@ export function CasesPage({ project }: { project: Project }) {
           { title: "等级", dataIndex: "priority", width: 80,
             render: (p: string) => <Tag color={PRIORITY_COLOR[p]} bordered={false}>{p}</Tag> },
           { title: "执行方式", dataIndex: "execution_mode", width: 110, render: (v: string) => <LabelTag map={MODE} value={v} /> },
+          { title: "测试目标", dataIndex: "type", width: 90, render: (target: string) => ({ api: "接口", ui: "UI", app: "移动端", performance: "性能" }[target] ?? target) },
           { title: "规范检查", dataIndex: "lint_status", width: 100, render: (v: string) => <LabelTag map={LINT} value={v} /> },
           { title: "状态", dataIndex: "status", width: 80, render: (v: string) => <LabelTag map={STATUS} value={v} /> },
           { title: "", width: 100, render: (_: unknown, r: TestCase) => r.status === "draft" && (

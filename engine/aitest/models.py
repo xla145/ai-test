@@ -14,6 +14,7 @@ def new_id(prefix: str) -> str:
 
 
 class CaseType(str, Enum):
+    PERFORMANCE = "performance"
     API = "api"
     UI = "ui"
     APP = "app"  # 移动端 App（Android / iOS）
@@ -154,6 +155,12 @@ class TestCase:
     performance: dict[str, Any] | None = None
     source_row: int | None = None
     id: str = field(default_factory=lambda: new_id("tc"))
+
+    def __post_init__(self) -> None:
+        # 旧版手工 UI 表用这句指向同一行的前置条件。导入和读取历史记录走同一路径，
+        # 不按语言或关键词猜测：中文数据标识和其他业务基线仍是有效引用。
+        if self.source_row and self.type == "ui":
+            self.data_refs = [key for key in self.data_refs if key != "按本例前置条件准备"]
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
