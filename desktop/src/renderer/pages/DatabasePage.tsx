@@ -137,9 +137,18 @@ function ConnectionModal({ project, env, production, initial, onClose, onSaved }
   const type: DbType = Form.useWatch("type", form) ?? initial.cfg?.type ?? "mysql";
   const [hasPassword, setHasPassword] = useState(false);
   const { busy, run } = useAction();
+  const { busy: pickingFile, run: runPickFile } = useAction();
   useEffect(() => {
     if (initial.name) void api().hasDbPassword(project.id, env, initial.name).then(setHasPassword);
   }, [initial.name, project.id, env]);
+
+  const pickDatabaseFile = () => runPickFile(async () => {
+    const path = await api().pickFile([
+      { name: "SQLite 数据库", extensions: ["db", "sqlite", "sqlite3", "db3"] },
+      { name: "所有文件", extensions: ["*"] },
+    ]);
+    if (path) form.setFields([{ name: "path", value: path, errors: [] }]);
+  });
 
   const submit = async () => {
     const { name, password, ...cfg } = await form.validateFields();
@@ -166,7 +175,10 @@ function ConnectionModal({ project, env, production, initial, onClose, onSaved }
           </Col>
         </Row>
         {type === "sqlite" ? (
-          <Form.Item name="path" label="数据库文件路径" rules={[{ required: true }]}><Input className="mono" placeholder="/path/to/app.db" /></Form.Item>
+          <Form.Item name="path" label="数据库文件" rules={[{ required: true, message: "请选择数据库文件" }]}>
+            <Input.Search readOnly className="mono" placeholder="请选择 SQLite 数据库文件"
+              enterButton="选择文件" loading={pickingFile} onSearch={() => { void pickDatabaseFile(); }} />
+          </Form.Item>
         ) : (
           <>
             <Row gutter={8}>
