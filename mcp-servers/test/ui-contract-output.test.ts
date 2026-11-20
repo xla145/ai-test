@@ -31,6 +31,15 @@ describe('contract output transport', () => {
     expect(() => decodeContractOutput({ value: { string: [false], boolean: [], number: [] } })).toThrow('只能');
     expect(() => decodeContractOutput({ target: { $optional: [1, 2] } })).toThrow('无效');
   });
+  it('roundtrips a complete transport plan through the canonical validator', () => {
+    const plan = { version: 1, status: 'ready', issues: [], preconditions: [], dataRefs: { $optional: [] }, preconditionChecks: { $optional: [] },
+      steps: [{ index: 1, source: '填写邮箱', expected: ['填写成功'], actions: [{ action: 'fill', instruction: '填写邮箱',
+        target: { $optional: [] }, targetHint: { $optional: ['邮箱输入框'] }, role: { $optional: [] },
+        value: { $optional: [{ string: ['test@example.com'], boolean: [], number: [] }] }, valueRef: { $optional: [] }, paramRefs: { $optional: [] } }] }] };
+    const decoded = executionContractSchema.parse(decodeContractOutput(plan));
+    expect(decoded.steps[0].actions[0]).toMatchObject({ value: 'test@example.com', targetHint: '邮箱输入框' });
+    expect(decoded.dataRefs).toBeUndefined();
+  });
   it('retries only syntax and structural validation errors', () => {
     expect(isContractStructureError(new SyntaxError('json'))).toBe(true);
     expect(isContractStructureError(executionContractSchema.safeParse({ version: 1, status: 'ready', issues: [], preconditions: [], steps: 'wrong' }).error)).toBe(true);
