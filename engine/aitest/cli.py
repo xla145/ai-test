@@ -573,6 +573,8 @@ def cmd_add_test_data(store: Store, a: argparse.Namespace) -> Any:
     d = store.get_test_data(a.project, a.key) or TestData(project_id=a.project, key=a.key)
     d.check_script = a.check_script or d.check_script
     d.seed_script = a.seed_script or d.seed_script
+    if getattr(a, "facts", None) is not None:
+        d.facts = json.loads(a.facts)
     store.add_test_data(d)
     return asdict(d)
 
@@ -979,7 +981,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("add-role", cmd_add_role, (("--project",), req), (("--role",), req), (("--credential-ref",), {}))
     add("list-roles", cmd_list_roles, (("--project",), req))
     add("add-test-data", cmd_add_test_data, (("--project",), req), (("--key",), req), (("--check-script",), {}),
-        (("--seed-script",), {}))
+        (("--seed-script",), {}), (("--facts",), {"help": "可验证事实描述的 JSON 字符串数组；不作为执行通过证据"}))
     add("list-test-data", cmd_list_test_data, (("--project",), req))
     add("register-script", cmd_register_script, (("--project",), req), (("--case",), req), (("--path",), req),
         (("--framework",), {"default": "playwright"}))

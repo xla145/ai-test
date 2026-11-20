@@ -52,3 +52,11 @@ it("separates unknown UI details from business blockers during conversion", () =
   expect(prompt).toContain("要求角色未配置");
   expect(prompt).not.toContain("交互动作必须有 target；");
 });
+
+it("states parameter binding locations, real runtime constraints and available capabilities", () => {
+  const prompt = uiContractPrompt({ capabilities: { database: false, dataApi: true } }, []);
+  expect(prompt).toContain('"database":false,"dataApi":true');
+  expect(prompt).toContain('paramRefs 只能出现在 method="database"');
+  expect(prompt).toContain('runtime 不能只写 valueRef');
+  expect(prompt).toContain('不要为没有连接的数据库臆造 SQL');
+});

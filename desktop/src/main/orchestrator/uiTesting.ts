@@ -3,7 +3,7 @@ import type {
   LoginRecipe,
   UiCaseResult
 } from "@ai-test/mcp-servers";
-import { caseHash, coverageIssues, sha256, uiRuntimeHash, writeUiScript } from "@ai-test/mcp-servers";
+import { caseHash, coverageIssues, isContractStructureError, sha256, uiRuntimeHash, writeUiScript } from "@ai-test/mcp-servers";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,8 +22,22 @@ import { UiWorkflow, type WorkflowReview } from "../uiWorkflow.js";
 import type { AgentTasksModule } from "./agentTasks.js";
 import type { ProjectManagementModule } from "./projectManagement.js";
 import { TaskManager } from "./taskManager.js";
-import { CaseRow, EnvironmentInfo, OrchestratorDeps, parseTriage, ProductionConfirmRequired, RunSummary, TriageItem, UiCaseFull, UiDeps, UiFailure } from "./types.js";
+import { executableDataRefs, CaseRow, EnvironmentInfo, OrchestratorDeps, parseTriage, ProductionConfirmRequired, RunSummary, TriageItem, UiCaseFull, UiDeps, UiFailure } from "./types.js";
 import { UiDebugModule } from "./uiDebugging.js";
+
+type DataRecipe = { key: string; check_script?: string; seed_script?: string; facts?: string[] };
+const dataCatalog = (records: DataRecipe[], refs: string[] = []) => [...records]
+  .sort((a, b) => a.key.localeCompare(b.key))
+  .map(({ key, check_script, seed_script, facts }) => ({ key, bound: refs.includes(key), canCheck: Boolean(check_script), canSeed: Boolean(seed_script), facts: facts ?? [] }));
+// Only a digest participates in cache identity; recipe source is never sent to the model.
+const dataFingerprint = (records: DataRecipe[]) => sha256(JSON.stringify([...records]
+  .sort((a, b) => a.key.localeCompare(b.key))
+  .map(({ key, check_script, seed_script, facts }) => [key, check_script ?? "", seed_script ?? "", ...(facts ?? [])])));
+const verificationCapabilities = (environment?: EnvironmentInfo) => ({
+  database: Boolean(environment?.databases && Object.keys(environment.databases).length),
+  dataApi: Boolean(environment?.data_api?.check),
+});
+
 export class UiTestingModule {
   constructor(private deps: OrchestratorDeps, private tasks: TaskManager, private services: { healUi: UiTestingModule["healUi"]; project: ProjectManagementModule["project"]; agentTask: AgentTasksModule["agentTask"]; listCases: ProjectManagementModule["listCases"]; recordAttributions: ProjectManagementModule["recordAttributions"] }) { this.data = new DataManagementModule(deps, { project: (...args) => this.services.project(...args) }); this.debug = new UiDebugModule(this.deps, this.tasks, { project: (...args) => this.services.project(...args), uiTaskActive: () => this.uiTaskActive, requireUi: () => this.requireUi(), uiCase: (...args) => this.uiCase(...args), uiScriptStates: (...args) => this.uiScriptStates(...args) }); }
   private emit(_event: string, payload: Record<string, any>) { this.tasks.progress(payload); }
@@ -80,8 +94,11 @@ export class UiTestingModule {
   async exploreUiCase(projectId: string, env: string, caseId: string, opts: { confirmProduction?: boolean; selectedRole?: string } = {}) {
     return this.withUiTask(projectId, env, async (signal) => {
       const row = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
-      const brief: ExploreCaseBrief = { title: row.title, steps: row.steps, expected: row.expected, preconditions: row.preconditions, data_refs: row.data_refs };
+      const availableData = await this.deps.engine<DataRecipe[]>(["list-test-data", "--project", projectId]);
       const p = await this.services.project(projectId);
+      const envConfig = p.environments[env];
+      const brief: ExploreCaseBrief = { title: row.title, steps: row.steps, expected: row.expected, preconditions: row.preconditions, data_refs: row.data_refs,
+        available_data: dataCatalog(availableData, row.data_refs), capabilities: verificationCapabilities(envConfig) };
       const roles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map((r) => r.role_name);
       if (opts.selectedRole && !roles.includes(opts.selectedRole)) throw new Error(`所选角色「${opts.selectedRole}」未配置，请重新选择登录态`);
       const empty = { threadId: "", turnId: "", status: "completed", tokens: 0 };
@@ -90,7 +107,7 @@ export class UiTestingModule {
         message: "用例缺少步骤或预期，请先补充；未调用 AI。", needsClarification: true
       };
       await this.requireExistingLogin(projectId, env, this.loginRoles(brief.preconditions, roles, opts.selectedRole), p.environments[env]);
-      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env], opts.selectedRole);
+      const contracts = new UiExecutionContracts(p.workspace_path, projectId, env, caseId, brief, roles, p.environments[env], opts.selectedRole, dataFingerprint(availableData));
       const workflow = new UiWorkflow(p.workspace_path);
       const existing = (await this.uiScriptStates(projectId, env))[caseId];
       const binding = (state: UiScriptState | undefined) => {
@@ -101,34 +118,100 @@ export class UiTestingModule {
       const before = binding(existing);
       const cached = contracts.read();
       const covered = (path: string, plan: NonNullable<typeof cached>["contract"]) => !coverageIssues(workflow.stepsFile(path).steps, { ...brief, preconditionChecks: plan.preconditionChecks }).length;
-      if (cached?.contract.status === "ready" && before && covered(before.path, cached.contract) && JSON.stringify(cached.script) === JSON.stringify(before)) {
-        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；请按现有流程试跑和确认。\n中间计划：${contracts.artifactPath}`, scriptGenerated: true, reused: true };
-      }
       let contract = cached?.contract;
+      const dataRefs = executableDataRefs(row.data_refs);
+      if (contract?.status !== "needs_clarification" && dataRefs.length) {
+        const { missing } = await this.prepareData(projectId, env, [{ ...row, data_refs: dataRefs }], signal);
+        signal.throwIfAborted();
+        if (missing.length) return {
+          ...empty, scriptGenerated: false, needsClarification: true,
+          message: `用例「${row.title}」未启动 Agent：无法确认或准备数据 ${missing.join("、")}。请在项目测试数据中核对对应检查、造数脚本或环境数据接口。`
+        };
+      }
       let converted: TurnResult | undefined;
       if (!contract) {
         converted = await this.services.agentTask(projectId, "ui_contract", uiContractPrompt(brief, roles, opts.selectedRole), signal);
         signal.throwIfAborted();
         if (converted.status !== "completed") return { ...converted, scriptGenerated: false };
+        let conversionError: unknown;
+        let originalArtifact: string | undefined;
         try { contract = contracts.parse(converted.message); }
-        catch (e) { return { ...converted, status: "failed", scriptGenerated: false, message: `执行用例转换未通过校验，未启动浏览器：${(e as Error).message}` }; }
-        contracts.save(contract);
+        catch (e) {
+          conversionError = e;
+          originalArtifact = contracts.saveFailure(converted.message, e);
+          if (!isContractStructureError(e)) {
+            return { ...converted, status: "failed", scriptGenerated: false,
+              message: `执行用例转换未通过语义校验，未启动浏览器。完整失败产物：${originalArtifact}\n${(e as Error).message}` };
+          }
+        }
+        if (!contract && conversionError) {
+          const repairPrompt = [
+            "这是一次受限的结构修复，只修复上一轮 JSON/字段结构错误。不要改变原始前置条件、步骤、预期、dataRefs、业务语义、角色或验证方法；不要补充新业务条件。只返回符合任务契约的完整 JSON。",
+            `上一轮输出：${converted.message}`,
+            `校验错误：${(conversionError as Error).message}`,
+            uiContractPrompt(brief, roles, opts.selectedRole),
+          ].join("\n");
+          const repaired = await this.services.agentTask(projectId, "ui_contract_repair", repairPrompt, signal, converted.tokens);
+          signal.throwIfAborted();
+          if (repaired.status === "completed") {
+            try { contract = contracts.parseRepair(converted.message, conversionError, repaired.message); converted = { ...repaired, tokens: converted.tokens + repaired.tokens }; }
+            catch (e) {
+              const artifact = contracts.saveFailure(repaired.message, e);
+              return { ...repaired, tokens: converted.tokens + repaired.tokens, status: "failed", scriptGenerated: false,
+                message: `结构修复后仍未通过校验，未启动浏览器。首次失败产物：${originalArtifact}\n完整失败产物：${artifact}\n${(e as Error).message}` };
+            }
+          } else {
+            return { ...repaired, tokens: converted.tokens + repaired.tokens, scriptGenerated: false,
+              message: `结构修复未完成，未启动浏览器。完整失败产物：${originalArtifact}\n原始校验错误：${(conversionError as Error).message}` };
+          }
+        }
       }
-      if (contract.status !== "ready") return {
-        ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
-        contractReused: Boolean(cached), message: `待澄清，未启动 UI 探索：${contract.issues.join("；")}`
-      };
+      if (!contract) throw new Error("执行计划转换未返回有效契约");
+      const selectedDataRefs = contract.dataRefs ?? [];
+      const unknownData = selectedDataRefs.filter(key => !availableData.some(record => record.key === key));
+      if (unknownData.length) return { ...(converted ?? empty), status: "failed", scriptGenerated: false,
+        message: `执行计划引用了未配置的数据配方：${unknownData.join("、")}；未启动 UI 探索。` };
+      if (contract.status !== "ready") {
+        contracts.save(contract);
+        return {
+          ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
+          contractReused: Boolean(cached), message: `待澄清，未启动 UI 探索：${contract.issues.join("；")}`
+        };
+      }
+      if (!brief.capabilities?.database && (contract.preconditionChecks?.some(check => check.method === "database")
+        || contract.steps.some(step => step.actions.some(action => action.action === "database")))) {
+        const reason = "执行计划要求数据库验证，但当前环境未配置数据库连接；请配置连接或提供能证明同一事实的验证方式后重新生成。数据配方检查通过不能替代该证据。";
+        const artifact = contracts.saveFailure(JSON.stringify(contract), reason);
+        return { ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
+          message: `${reason}未启动 UI 探索。\n完整失败产物：${artifact}` };
+      }
+      const additionalRefs = selectedDataRefs.filter(key => !dataRefs.includes(key));
+      if (additionalRefs.length) {
+        const { missing } = await this.prepareData(projectId, env, [{ ...row, data_refs: additionalRefs }], signal);
+        signal.throwIfAborted();
+        if (missing.length) return { ...(converted ?? empty), scriptGenerated: false, needsClarification: true,
+          message: `执行计划的数据配方无法确认或准备：${missing.join("、")}；未启动 UI 探索。` };
+      }
+      if (cached?.contract.status === "ready" && before && covered(before.path, cached.contract) && JSON.stringify(cached.script) === JSON.stringify(before)) {
+        return { ...empty, message: `已复用执行用例与脚本：${before.path}。未调用 AI；未启动 UI 探索。\n中间计划：${contracts.artifactPath}`, scriptGenerated: true, reused: true };
+      }
+      const executionBrief = { ...brief, data_refs: [...new Set([...dataRefs, ...selectedDataRefs])] };
       const stillCurrent = async () => {
         const latest = await this.uiCase(projectId, env, caseId, opts.confirmProduction) as UiCaseFull;
         const latestProject = await this.services.project(projectId);
         const latestRoles = (await this.deps.engine<{ role_name: string }[]>(["list-roles", "--project", projectId])).map(r => r.role_name);
-        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId, latest, latestRoles, latestProject.environments[env], opts.selectedRole).fingerprint;
+        const latestData = await this.deps.engine<DataRecipe[]>(["list-test-data", "--project", projectId]);
+        return contracts.fingerprint === new UiExecutionContracts(p.workspace_path, projectId, env, caseId,
+          { ...latest, available_data: dataCatalog(latestData, latest.data_refs), capabilities: verificationCapabilities(latestProject.environments[env]) }, latestRoles, latestProject.environments[env], opts.selectedRole, dataFingerprint(latestData)).fingerprint;
       };
-      if (!await stillCurrent()) return { ...(converted ?? empty), scriptGenerated: false, message: "转换期间用例或环境已变化，请重新生成；未启动 UI 探索。" };
+      if (converted && !await stillCurrent()) return { ...(converted ?? empty), scriptGenerated: false, message: "转换期间用例或环境已变化，请重新生成；未启动 UI 探索。" };
       // Activate a historical cache entry for the browser process without another AI conversion.
       contracts.save(contract);
-      const result = await this.services.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, brief, this.deps.uiLocateStrategy, contract, opts.selectedRole), signal, converted?.tokens ?? 0);
+      const result = await this.services.agentTask(projectId, "explore", explorePrompt(projectId, env, caseId, roles, executionBrief, this.deps.uiLocateStrategy, contract, opts.selectedRole), signal, converted?.tokens ?? 0);
       signal.throwIfAborted();
+      if (result.status === "interrupted_precondition") return {
+        ...result, tokens: result.tokens + (converted?.tokens ?? 0), scriptGenerated: false, contractReused: Boolean(cached),
+      };
       // 保存发生在浏览器工具中，只有本次生成、内容仍匹配的脚本才能绑定缓存。
       const after = binding((await this.uiScriptStates(projectId, env))[caseId]);
       const unchanged = await stillCurrent();
@@ -243,7 +326,7 @@ export class UiTestingModule {
       if (!out.results.some(r => r.case_id === c.id)) out.results.push({
         case_id: c.id,
         status: degraded.includes(c.id) ? "skipped" : "error", duration: 0,
-        message: degraded.includes(c.id) ? `PRECONDITION_MISSING: ${missing.join("、")}` : `执行器没有返回用例结果：${out.errors?.join("；") || out.stderr}`,
+        message: degraded.includes(c.id) ? `PRECONDITION_MISSING: ${c.data_refs.filter(key => missing.includes(key)).join("、")}` : `执行器没有返回用例结果：${out.errors?.join("；") || out.stderr}`,
         acceptance_status: degraded.includes(c.id) ? "blocked" : "incomplete", reason_code: degraded.includes(c.id) ? "precondition_missing" : "incomplete", evidence_paths: [], reviews: []
       });
     }

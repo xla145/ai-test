@@ -12,6 +12,19 @@ import { UiReadiness } from '../src/ui/readiness.js';
 const checks: PreconditionCheck[] = ['first', 'second'].map((text, i) => ({ id: `P1.${i + 1}`, sourceIndices: [1], sourceQuotes: [text], statement: text, expected: text, method: 'ui', dependsOn: i ? ['P1.1'] : [] }));
 const evidence = (id: string): UiStep => ({ action: 'expectVisible', target: { kind: 'testid', value: id }, preconditionIndices: [1], preconditionCheckIds: [id] });
 
+it('requires database evidence to use the planned runtime parameter references', () => {
+  const check: PreconditionCheck = { ...checks[0], method: 'database', paramRefs: { name: 'username' } };
+  const gate = new ExecutionGuard('c', [check]);
+  const step: UiStep = { action: 'expectDb', check: { sql: 'select id from users where name=:name', paramRefs: { name: 'username' } }, preconditionCheckIds: [check.id], preconditionIndices: [1] };
+  expect(gate.passed(check.id, [step])).toBe(true);
+  expect(gate.passed(check.id, [evidence(check.id)])).toBe(false);
+  const wrong: UiStep = { ...step, check: { ...step.check, paramRefs: { name: 'email' } } };
+  expect(gate.passed(check.id, [wrong])).toBe(false);
+  const literal: UiStep = { ...step, check: { ...step.check, params: { name: 'fixed' } } };
+  expect(gate.passed(check.id, [literal])).toBe(false);
+  expect(coverageIssues([wrong], { preconditions: ['first'], preconditionChecks: [check], expected: ['result'] }).join()).toContain('数据库参数引用与计划不匹配');
+});
+
 it('waits without repeating the action and only recovers transient readiness blocks', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'guard-wait-'));
   const source = { preconditions: [], steps: ['open'], expected: ['visible'] };
@@ -51,11 +64,13 @@ it('requires atomic evidence, enforces dependencies and revokes evidence after u
   expect(() => gate.select(['P1.2'], [])).toThrow('DEPENDENCY');
   expect(() => gate.assertReady(steps)).toThrow('P1.2');
   steps.push(evidence('P1.2'));
-  expect(() => gate.assertReady(steps)).not.toThrow();
+  expect(() => gate.assertReady(steps)).toThrow('PRECONDITION_BLOCKED');
+  const fresh = new ExecutionGuard('c', checks);
+  expect(() => fresh.assertReady(steps)).not.toThrow();
   steps.pop();
-  expect(() => gate.assertReady(steps)).toThrow('P1.2');
-  gate.failChecks(['P1.2'], 'data missing');
-  expect(() => gate.assertReady([...steps, evidence('P1.2')])).toThrow('data missing');
+  expect(() => fresh.assertReady(steps)).toThrow('P1.2');
+  fresh.failChecks(['P1.2'], 'data missing');
+  expect(() => fresh.assertReady([...steps, evidence('P1.2')])).toThrow('data missing');
 });
 
 it('rejects checks recorded after body steps and persists the blocked result', () => {
@@ -92,7 +107,6 @@ it('binds the plan through tools, consumes coverage once and blocks case steps u
   const call = (name: string, input = {}): Promise<any> => tools.find(t => t.name === name)!.handler(input);
   try {
     await call('open_project', { project_id: 'p', env: 'test', case_id: 'c' });
-    await expect(call('case_step', { index: 1 })).rejects.toThrow('P1.1');
     await (await session.page()).setContent('<div data-testid="ready">ready</div>');
     const ref = (await session.findText('ready', { exact: true }))[0].ref;
     for (const id of ['P1.1', 'P1.2']) {
@@ -103,8 +117,10 @@ it('binds the plan through tools, consumes coverage once and blocks case steps u
     await expect(call('case_step', { index: 1 })).resolves.toMatchObject({ case_step: 1 });
     await call('undo', { n: 1 });
     await expect(call('case_step', { index: 1 })).rejects.toThrow('P1.2');
-    await call('precondition_status', { check_id: 'P1.2', reason: 'cannot verify' });
-    await expect(call('click', { ref })).rejects.toThrow('cannot verify');
+    for (const name of ['click', 'snapshot', 'assertion_coverage', 'visual_check', 'undo']) {
+      await expect(call(name, { ref, expected: [] })).rejects.toThrow('PRECONDITION_BLOCKED');
+    }
+    expect((await call('precondition_status')).blocked).toContain('P1.2');
     await expect(call('open_project', { project_id: 'p', env: 'test', case_id: 'c' })).rejects.toThrow('不能重置');
   } finally { await session.close(); rmSync(workspace, { recursive: true, force: true }); }
 }, 20000);

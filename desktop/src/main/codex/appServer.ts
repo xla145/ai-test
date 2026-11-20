@@ -56,6 +56,7 @@ export class CodexAppServer extends EventEmitter {
   private transport?: Transport;
   private readonly tokens = new Map<string, number>();
   private readonly messages = new Map<string, string>();
+  private readonly turnErrors = new Map<string, string>();
   private readonly turnWaiters = new Map<string, (status: string) => void>();
   /** turn/completed 可能先于 turn/start 的返回被处理，先暂存 */
   private readonly completedTurns = new Map<string, string>();
@@ -95,11 +96,13 @@ export class CodexAppServer extends EventEmitter {
   }
 
   /** 发送一轮输入并等待完成；tokenLimit 为单次任务上限，超出则中断 */
-  async runTurn(threadId: string, text: string, opts: { tokenLimit?: number; signal?: AbortSignal } = {}): Promise<TurnResult> {
+  async runTurn(threadId: string, text: string, opts: { tokenLimit?: number; signal?: AbortSignal; stopOnUiBlock?: boolean; outputSchema?: Record<string, unknown> } = {}): Promise<TurnResult> {
     opts.signal?.throwIfAborted();
     const startTokens = this.tokens.get(threadId) ?? 0;
     this.messages.set(threadId, "");
-    const res = await this.rpc().request(Methods.turnStart, { threadId, input: [{ type: "text", text }] }, 0);
+    this.turnErrors.delete(threadId);
+    const res = await this.rpc().request(Methods.turnStart, { threadId, input: [{ type: "text", text }],
+      ...(opts.outputSchema ? { outputSchema: opts.outputSchema } : {}) }, 0);
     const turnId = turnIdOf(res);
     const done = new Promise<string>((resolve) => {
       const early = this.completedTurns.get(turnId);
@@ -112,6 +115,7 @@ export class CodexAppServer extends EventEmitter {
     });
 
     let interrupted = false;
+    let blockedReason: string | undefined;
     const onUsage = (tid: string, total: number) => {
       if (tid === threadId && opts.tokenLimit && !interrupted && total - startTokens > opts.tokenLimit) {
         interrupted = true;
@@ -122,21 +126,35 @@ export class CodexAppServer extends EventEmitter {
     const onAbort = () => {
       void this.rpc().request(Methods.turnInterrupt, { threadId, turnId }).catch((error) => this.emit("log", `停止任务失败：${String(error)}`));
     };
+    const onEvent = (event: { method: string; params?: any }) => {
+      const item = event.params?.item;
+      if (interrupted || event.params?.threadId !== threadId || event.params?.turnId !== turnId || event.method !== Notifications.itemCompleted
+        || item?.type !== "mcpToolCall" || item.server !== "browser") return;
+      const details = [item.error?.message, ...(Array.isArray(item.result?.content) ? item.result.content.map((part: { text?: string }) => part?.text) : [])];
+      const reason = details.find(value => typeof value === "string" && /^(PRECONDITION_BLOCKED|UI_ENVIRONMENT_BLOCKED|AUTH_REQUIRED):/.test(value));
+      if (!reason) return;
+      blockedReason = reason.slice(0, 500);
+      interrupted = true;
+      void this.rpc().request(Methods.turnInterrupt, { threadId, turnId }).catch(() => undefined);
+    };
     opts.signal?.addEventListener("abort", onAbort, { once: true });
     if (opts.signal?.aborted) onAbort();
     this.on("tokens", onUsage);
+    if (opts.stopOnUiBlock) this.on("event", onEvent);
     try {
       const status = await done;
       return {
         threadId,
         turnId,
-        status: opts.signal?.aborted ? "interrupted_user" : interrupted ? "interrupted_budget" : status,
-        message: this.messages.get(threadId) ?? "",
+        status: opts.signal?.aborted ? "interrupted_user" : blockedReason ? "interrupted_precondition" : interrupted ? "interrupted_budget" : status,
+        message: blockedReason ?? (status === "failed" ? this.turnErrors.get(threadId) : undefined) ?? this.messages.get(threadId) ?? "",
         tokens: (this.tokens.get(threadId) ?? 0) - startTokens,
       };
     } finally {
       this.off("tokens", onUsage);
+      this.off("event", onEvent);
       opts.signal?.removeEventListener("abort", onAbort);
+      this.turnErrors.delete(threadId);
     }
   }
 
@@ -153,6 +171,10 @@ export class CodexAppServer extends EventEmitter {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const p = (params ?? {}) as any;
     switch (method) {
+      case "error": {
+        if (p.threadId && typeof p.error?.message === "string") this.turnErrors.set(p.threadId, p.error.message);
+        break;
+      }
       case Notifications.agentMessageDelta: {
         const tid = p.threadId as string | undefined;
         if (tid) this.messages.set(tid, (this.messages.get(tid) ?? "") + (p.delta ?? ""));
@@ -174,6 +196,7 @@ export class CodexAppServer extends EventEmitter {
         break;
       }
       case Notifications.turnCompleted: {
+        if (p.threadId && typeof p.turn?.error?.message === "string") this.turnErrors.set(p.threadId, p.turn.error.message);
         const turnId = p.turn?.id ?? p.turnId;
         const status = p.turn?.status ?? p.status ?? "completed";
         const waiter = turnId && this.turnWaiters.get(turnId);

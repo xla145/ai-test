@@ -76,3 +76,37 @@ async function checkCollection(locator, rule) {
 }
 module.exports.validateCollectionRule = validateCollectionRule;
 module.exports.checkCollection = checkCollection;
+
+// Created once per case attempt; recordings store field names only.
+module.exports.createUiInputs = function createUiInputs() {
+  const { randomBytes } = require('node:crypto');
+  const id = randomBytes(8).toString('hex');
+  return { username: `ui_${id}`, email: `ui_${id}@example.com`,
+    password: `Aa1${randomBytes(8).toString('hex')}`, other_password: `Bb2${randomBytes(8).toString('hex')}` };
+};
+
+module.exports.assertRuntimeInput = function assertRuntimeInput(inputs, rule) {
+  if (rule.minLength === undefined && rule.maxLength === undefined
+    && rule.maxUtf8Bytes === undefined && rule.differentFrom === undefined) {
+    throw new Error('VALUE_INVALID: runtime requires an explicit constraint');
+  }
+  const value = inputs[rule.valueRef];
+  if (typeof value !== 'string' || !value.length) throw new Error('VALUE_INVALID: unknown runtime input');
+  if ((rule.minLength !== undefined && value.length < rule.minLength)
+    || (rule.maxLength !== undefined && value.length > rule.maxLength)
+    || (rule.maxUtf8Bytes !== undefined && Buffer.byteLength(value, 'utf8') > rule.maxUtf8Bytes)
+    || (rule.differentFrom !== undefined && (typeof inputs[rule.differentFrom] !== 'string' || value === inputs[rule.differentFrom]))) {
+    throw new Error('ASSERTION_FAILED: runtime input constraints failed');
+  }
+};
+
+module.exports.resolveInputParams = function resolveInputParams(check, inputs) {
+  const { paramRefs, ...literal } = check;
+  const params = { ...check.params };
+  for (const [key, ref] of Object.entries(paramRefs || {})) {
+    if (Object.prototype.hasOwnProperty.call(params, key)) throw new Error('VALUE_INVALID: duplicate literal and runtime parameter');
+    if (!Object.prototype.hasOwnProperty.call(inputs, ref)) throw new Error('VALUE_INVALID: unknown runtime input');
+    params[key] = inputs[ref];
+  }
+  return paramRefs ? { ...literal, params } : literal;
+};

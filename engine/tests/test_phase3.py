@@ -193,7 +193,7 @@ def test_export_import_roundtrip(make_cli, tmp_path):
     (tmp_path / "ws" / "scripts" / "ui" / f"{cid}.spec.ts").write_text("// s\n", encoding="utf-8")
     cli("register-script", "--project", pid, "--case", cid, "--path", f"scripts/ui/{cid}.spec.ts")
     cli("add-role", "--project", pid, "--role", "admin")
-    cli("add-test-data", "--project", pid, "--key", "DEM-1", "--seed-script", "./seed DEM-1")
+    cli("add-test-data", "--project", pid, "--key", "DEM-1", "--seed-script", "./seed DEM-1", "--facts", '["需求记录存在"]')
     cli("set-setting", "--project", pid, "--key", "monthly_token_budget", "--value", "5000")
     out = cli("export-workspace", "--project", pid, "--commit")
     assert out["cases"] == 1 and out["scripts"] == 1 and len(out["version"]) == 40
@@ -209,6 +209,7 @@ def test_export_import_roundtrip(make_cli, tmp_path):
     assert other("get-case", "--case", cid)["data_refs"] == ["DEM-1"]
     assert other("list-roles", "--project", pid)[0]["role_name"] == "admin"
     assert other("list-test-data", "--project", pid)[0]["seed_script"] == "./seed DEM-1"
+    assert other("list-test-data", "--project", pid)[0]["facts"] == ["需求记录存在"]
     assert other("get-settings", "--project", pid) == {"monthly_token_budget": 5000}
     assert other("import-workspace", "--workspace", str(tmp_path / "ws"))["cases"] == 1  # 幂等
     assert len(other("list-roles", "--project", pid)) == 1

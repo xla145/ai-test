@@ -20,6 +20,7 @@ export interface TestDataRecord {
   key: string;
   check_script?: string;
   seed_script?: string;
+  facts?: string[];
 }
 
 export interface DataStatus {

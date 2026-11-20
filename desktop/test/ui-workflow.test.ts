@@ -168,7 +168,9 @@ describe("UI workbench orchestration", () => {
     expect(missing.scriptGenerated).toBe(false);
     expect(missing).toMatchObject({ status: "interrupted_budget", message: "我先打开登录页。" });
     runTurn.mockResolvedValueOnce({ status: "completed", message: "已生成", tokens: 9 });
-    expect(await orch.exploreUiCase("p", "test", "tc_a")).toMatchObject({ scriptGenerated: false, status: "failed" });
+    const repaired = await orch.exploreUiCase("p", "test", "tc_a");
+    expect(repaired).toMatchObject({ scriptGenerated: false, status: "interrupted_budget", tokens: 18 });
+    expect(repaired.message).toContain("结构修复未完成");
   });
   it("rejects foreign or blocked cases and production exploration before calling the model", async () => {
     const { orch, agent } = orchestration();

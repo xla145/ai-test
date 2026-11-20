@@ -121,6 +121,31 @@ describe("UI regression orchestration", () => {
     expect(checked).toHaveBeenCalledWith("admin", expect.objectContaining({ requireLogin: true }));
     expect(agent).not.toHaveBeenCalled();
   });
+
+  it("prepares a seed-only binding when no check is configured", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const fixtures = (async (args: string[]) => args[0] === "list-test-data"
+      ? [{ key: "DEM-1002", seed_script: "create-fixture" }] : engine(args)) as EngineCall;
+    vi.mocked(ui.checkData).mockResolvedValue([{ key: "DEM-1002", exists: null, via: "none" }]);
+    const orch = new Orchestrator({ engine: fixtures, ui, secretEnv, agent: vi.fn() });
+    expect(await orch.prepareData("p1", "test", [cases[1]])).toEqual({ missing: [], degraded: [] });
+    expect(ui.seedData).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks unresolved data references before creating the conversion agent", async () => {
+    const { engine, ui, secretEnv } = setup([]);
+    const withSteps = (async (args: string[], env?: Record<string, string>) => args[0] === "list-cases"
+      ? [{ ...cases[1], preconditions: ["[ENV] 测试环境可用"], steps: ["打开用户页面"], expected: ["页面可见"] }]
+      : engine(args, env)) as EngineCall;
+    const agent = vi.fn();
+    const orch = new Orchestrator({ engine: withSteps, ui, secretEnv, agent });
+    vi.mocked(ui.checkData).mockResolvedValue([{ key: "DEM-1002", exists: null, via: "api" }]);
+    const out = await orch.exploreUiCase("p1", "test", "tc_b");
+    expect(ui.seedData).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ scriptGenerated: false, needsClarification: true, tokens: 0 });
+    expect(out.message).toContain("DEM-1002");
+    expect(agent).not.toHaveBeenCalled();
+  });
 });
 
 describe("reports", () => {

@@ -127,6 +127,9 @@ class Store:
                 self.conn.execute(f"ALTER TABLE run_result ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
         if "execution_context" not in result_cols:
             self.conn.execute("ALTER TABLE run_result ADD COLUMN execution_context TEXT NOT NULL DEFAULT '{}'")
+        data_cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(test_data)")}
+        if "facts" not in data_cols:
+            self.conn.execute("ALTER TABLE test_data ADD COLUMN facts TEXT NOT NULL DEFAULT '[]'")
         self.conn.commit()
 
     def close(self) -> None:
@@ -331,13 +334,16 @@ class Store:
 
     # ---- 其它实体 ----
     def add_test_data(self, d: TestData) -> None:
-        self.conn.execute("INSERT OR REPLACE INTO test_data VALUES (?,?,?,?,?)",
-                          (d.id, d.project_id, d.key, d.check_script, d.seed_script))
+        if (not isinstance(d.facts, list) or len(d.facts) > 100
+                or any(not isinstance(fact, str) or not fact.strip() or len(fact) > 4000 for fact in d.facts)):
+            raise ValueError("facts 必须为最多 100 条非空事实描述的字符串数组，每条最多 4000 字符")
+        self.conn.execute("INSERT OR REPLACE INTO test_data (id,project_id,key,check_script,seed_script,facts) VALUES (?,?,?,?,?,?)",
+                          (d.id, d.project_id, d.key, d.check_script, d.seed_script, json.dumps(d.facts, ensure_ascii=False)))
         self.conn.commit()
 
     def get_test_data(self, project_id: str, key: str) -> TestData | None:
         r = self.conn.execute("SELECT * FROM test_data WHERE project_id=? AND key=?", (project_id, key)).fetchone()
-        return TestData(**dict(r)) if r else None
+        return TestData(**{**dict(r), "facts": json.loads(r["facts"])}) if r else None
 
     def add_role_account(self, a: RoleAccount) -> None:
         self.conn.execute("INSERT OR REPLACE INTO role_account VALUES (?,?,?,?,?)",
@@ -366,7 +372,7 @@ class Store:
 
     def list_test_data(self, project_id: str) -> list[TestData]:
         rows = self.conn.execute("SELECT * FROM test_data WHERE project_id=?", (project_id,)).fetchall()
-        return [TestData(**dict(r)) for r in rows]
+        return [TestData(**{**dict(r), "facts": json.loads(r["facts"])}) for r in rows]
 
     def list_role_accounts(self, project_id: str) -> list[RoleAccount]:
         rows = self.conn.execute("SELECT * FROM role_account WHERE project_id=? ORDER BY role_name", (project_id,)).fetchall()

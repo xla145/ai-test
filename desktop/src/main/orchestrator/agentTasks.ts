@@ -3,11 +3,13 @@ import { uiContractThreadConfig } from "../codex/config.js";
 import type { ProjectManagementModule } from "./projectManagement.js";
 import { TaskManager } from "./taskManager.js";
 import { BudgetExceededError, OrchestratorDeps } from "./types.js";
+import { executionContractOutputSchema } from "@ai-test/mcp-servers";
 export class AgentTasksModule {
   constructor(private deps: OrchestratorDeps, private tasks: TaskManager, private services: { project: ProjectManagementModule["project"] }) { }
   private emit(_event: string, payload: Record<string, any>) { this.tasks.progress(payload); }
   async agentTask(projectId: string, purpose: string, prompt: string, signal?: AbortSignal, spentTokens = 0, metadata: { env?: string; caseIds?: string[]; runId?: string } = {}): Promise<TurnResult> {
-    return this.tasks.enqueue(`agent:${projectId}`, { projectId, env: metadata.env ?? this.tasks.current()?.task.env ?? "", caseIds: metadata.caseIds ?? this.tasks.current()?.task.caseIds ?? [], runId: metadata.runId, purpose, kind: ({ case_gen: "生成测试用例", api_script: "生成接口脚本", triage: "分析失败原因", ui_contract: "整理 UI 执行计划", explore: "探索 UI 用例", revise: "修正脚本", heal: "修正失败脚本", app_explore: "探索 App 用例" } as Record<string, string>)[purpose] ?? purpose, source: "agent" }, async ({ task, signal: taskSignal }) => {
+    const contractTask = purpose === "ui_contract" || purpose === "ui_contract_repair";
+    return this.tasks.enqueue(`agent:${projectId}`, { projectId, env: metadata.env ?? this.tasks.current()?.task.env ?? "", caseIds: metadata.caseIds ?? this.tasks.current()?.task.caseIds ?? [], runId: metadata.runId, purpose, kind: ({ case_gen: "生成测试用例", api_script: "生成接口脚本", triage: "分析失败原因", ui_contract: "整理 UI 执行计划", ui_contract_repair: "修复执行计划结构", explore: "探索 UI 用例", revise: "修正脚本", heal: "修正失败脚本", app_explore: "探索 App 用例" } as Record<string, string>)[purpose] ?? purpose, source: "agent" }, async ({ task, signal: taskSignal }) => {
       const project = await this.services.project(projectId);
       const budget = await this.deps.engine<{ allowed: boolean; month_used: number; monthly_budget: number | null; per_task_limit: number | null }>(
         ["check-budget", "--project", projectId],
@@ -28,8 +30,8 @@ export class AgentTasksModule {
         const threadId = await agent.startThread({
           cwd: project.workspace_path,
           approvalPolicy: "on-request",
-          sandbox: purpose === "ui_contract" ? "read-only" : "workspace-write",
-          ...(purpose === "ui_contract" ? { config: uiContractThreadConfig() } : {}),
+          sandbox: contractTask ? "read-only" : "workspace-write",
+          ...(contractTask ? { config: uiContractThreadConfig() } : {}),
         });
         task.threadId = threadId;
         this.deps.threadStarted?.(threadId, project, task.id);
@@ -42,7 +44,9 @@ export class AgentTasksModule {
         ]);
         this.emit("progress", { projectId, env: "", stage: purpose, taskId: task.id, threadId });
         taskSignal.throwIfAborted();
-        const result = await agent.runTurn(threadId, prompt, { tokenLimit, signal: taskSignal });
+        const result = await agent.runTurn(threadId, prompt, { tokenLimit, signal: taskSignal,
+          ...(contractTask ? { outputSchema: executionContractOutputSchema } : {}),
+          ...(purpose === "explore" ? { stopOnUiBlock: true } : {}) });
         task.tokens = result.tokens;
         task.detail = result.message?.slice(0, 2000);
         await this.deps.engine(["add-tokens", "--session", session.id, "--tokens", String(result.tokens)]);

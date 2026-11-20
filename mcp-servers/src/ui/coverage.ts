@@ -1,4 +1,5 @@
 import type { UiStep } from './codegen.js';
+import { matchesPreconditionEvidence } from './executionGuard.js';
 export interface CoverageSource { steps?: string[]; expected?: string[]; preconditions?: string[]; preconditionChecks?: import('./executionGuard.js').PreconditionCheck[] }
 /** Explicit coverage is required. Assertion counts cannot prove that expectations are covered. */
 export function coverageIssues(steps: UiStep[], source: CoverageSource): string[] {
@@ -41,7 +42,15 @@ export function coverageIssues(steps: UiStep[], source: CoverageSource): string[
   if (source.preconditionChecks) {
     const bodyStart = steps.findIndex(s => s.caseStep !== undefined);
     for (const check of source.preconditionChecks) {
-      const evidence = steps.findIndex(s => s.action.startsWith('expect') && s.preconditionCheckIds?.includes(check.id));
+      const mapped = steps.filter(s => s.preconditionCheckIds?.includes(check.id));
+      if (check.paramRefs && mapped.some(s => !matchesPreconditionEvidence(check, s))) {
+        issues.push(`原子前置检查 ${check.id} 的数据库参数引用与计划不匹配`);
+      }
+      if (mapped.some(s => (s.action === 'expectRuntimeInput') !== (check.method === 'runtime')
+        || (s.action === 'expectRuntimeInput' && JSON.stringify(s.rule) !== JSON.stringify(check.runtime)))) {
+        issues.push(`原子前置检查 ${check.id} 的运行时证据与计划不匹配`);
+      }
+      const evidence = steps.findIndex(s => matchesPreconditionEvidence(check, s));
       if (evidence < 0 || (bodyStart >= 0 && evidence >= bodyStart)) issues.push(`原子前置检查 ${check.id} 未在正文前验证`);
       for (const dep of check.dependsOn) {
         const prior = steps.findIndex(s => s.action.startsWith('expect') && s.preconditionCheckIds?.includes(dep));
@@ -54,6 +63,6 @@ export function coverageIssues(steps: UiStep[], source: CoverageSource): string[
   }
   if (!source.expected?.length) issues.push('用例没有预期结果');
   const seen = new Set<string>();
-  for (const step of steps) { const role = step.role ?? 'default'; if (!seen.has(role) && step.action !== 'goto') issues.push(`角色「${role}」缺少独立回放入口，请先录制导航`); seen.add(role); }
+  for (const step of steps.filter(s => !["expectDb", "expectRuntimeInput"].includes(s.action))) { const role = step.role ?? 'default'; if (!seen.has(role) && step.action !== 'goto') issues.push(`角色「${role}」缺少独立回放入口，请先录制导航`); seen.add(role); }
   return [...new Set(issues)];
 }

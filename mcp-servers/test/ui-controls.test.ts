@@ -50,3 +50,22 @@ it("resolves a switch label to its checkbox and records a state-setting action",
   await session.runStep(session.recording().at(-1)!);
   expect(await page.locator("input").isChecked()).toBe(true);
 }, 20_000);
+
+
+it("reuses generated registration inputs within a case and refreshes them for replay", async () => {
+  const page = await session.page();
+  await page.setContent('<input aria-label="邮箱" />');
+  const ref = (await session.snapshot()).elements.find(e => e.role === "textbox")!.ref;
+  await session.type(ref, "", { generated: "email" });
+  const first = await page.locator("input").inputValue();
+  const steps = session.recording();
+  expect(first).toMatch(/^ui_\w+@example\.com$/);
+  expect(JSON.stringify(steps)).not.toContain(first);
+  expect(generateSpec({ caseId: "tc_register", title: "注册", steps })).toContain('inputs["email"]');
+  session.resetRecording(); // saving an intermediate recording keeps the case inputs
+  await session.runStep(steps[0]);
+  expect(await page.locator("input").inputValue()).toBe(first);
+  session.resetRecording(true);
+  await session.runStep(steps[0]);
+  expect(await page.locator("input").inputValue()).not.toBe(first);
+});

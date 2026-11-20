@@ -402,7 +402,7 @@ def export_workspace(store: Store, project_id: str) -> dict[str, Any]:
         "environments": _strip_secrets(hierarchy.effective_environments(store, p)),
         "roles": sorted({r.role_name for pid in ([p.parent_id] if p.parent_id else []) + [project_id]
                          for r in store.list_role_accounts(pid)}),
-        "test_data": [{"key": d.key, "check_script": d.check_script, "seed_script": d.seed_script}
+        "test_data": [{"key": d.key, "check_script": d.check_script, "seed_script": d.seed_script, "facts": d.facts}
                       for d in store.list_test_data(project_id)],
         "settings": get_settings(store, project_id),
     }
@@ -446,7 +446,7 @@ def import_workspace(store: Store, workspace: str | Path, name: str | None = Non
     for d in meta.get("test_data", []):
         old = store.get_test_data(project.id, d["key"])
         store.add_test_data(TestData(project_id=project.id, key=d["key"], check_script=d.get("check_script", ""),
-                                     seed_script=d.get("seed_script", ""), **({"id": old.id} if old else {})))
+                                     seed_script=d.get("seed_script", ""), facts=d.get("facts", []), **({"id": old.id} if old else {})))
     for key, value in (meta.get("settings") or {}).items():
         if key in SETTING_KEYS:
             set_setting(store, project.id, key, str(value))

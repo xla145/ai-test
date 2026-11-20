@@ -17,5 +17,6 @@ export {
 } from "./app/maestro.js";
 export { initCi, runCi, toJunit, toSummary, workflowTemplate, type CiCaseResult, type CiReport } from "./ci.js";
 export { validateExecutionContract, type ExecutionContract } from "./ui/contract.js";
+export { executionContractOutputSchema, decodeContractOutput, isContractStructureError } from "./ui/contractOutput.js";
 
 export type { EngineProgress } from "./engineProgress.js";

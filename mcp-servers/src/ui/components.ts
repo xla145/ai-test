@@ -10,7 +10,14 @@ export function validateObservedExpectation(options: { name?: string; expected?:
   }
 }
 export interface CollectionRule { selector: string; minCount?: number; maxCount?: number; contains?: string; equals?: string }
-export const { numericEqual, readValue, equalValue, validateCollectionRule, checkCollection } = createRequire(import.meta.url)('../../templates/ui/aitest-values.cjs') as {
+export type UiInput = "username" | "email" | "password" | "other_password";
+export type RuntimeRule = import('zod').infer<typeof import('./contract.js').runtimeRuleSchema>;
+export const { assertRuntimeInput, resolveInputParams } = createRequire(import.meta.url)('../../templates/ui/aitest-values.cjs') as {
+  assertRuntimeInput(inputs: Record<UiInput, string>, rule: RuntimeRule): void;
+  resolveInputParams(check: import('./codegen.js').DbCheck, inputs: Record<UiInput, string>): import('./codegen.js').DbCheck;
+};
+export const { createUiInputs, numericEqual, readValue, equalValue, validateCollectionRule, checkCollection } = createRequire(import.meta.url)('../../templates/ui/aitest-values.cjs') as {
+  createUiInputs(): Record<UiInput, string>;
   validateCollectionRule(rule: CollectionRule): void;
   checkCollection(locator: Locator, rule: CollectionRule): Promise<{ matched: boolean; count: number }>;
   numericEqual(a: unknown, b: string | number, tolerance?: string | number): boolean;

@@ -22,7 +22,7 @@ export type EngineCall = <T = unknown>(args: string[], env?: Record<string, stri
 
 export interface AgentEngine {
   startThread(params: ThreadStartParams): Promise<string>;
-  runTurn(threadId: string, text: string, opts?: { tokenLimit?: number; signal?: AbortSignal }): Promise<TurnResult>;
+  runTurn(threadId: string, text: string, opts?: { tokenLimit?: number; signal?: AbortSignal; stopOnUiBlock?: boolean; outputSchema?: Record<string, unknown> }): Promise<TurnResult>;
 }
 
 export interface DatabaseInfo {
@@ -170,3 +170,6 @@ export function parseTriage(message: string): TriageItem[] {
     return [];
   }
 }
+
+export const executableDataRefs = (values: string[] | undefined): string[] =>
+  [...new Set((values ?? []).map(v => v.trim()).filter(v => v && v !== "按本例前置条件准备" && v !== "本例独立基线"))];

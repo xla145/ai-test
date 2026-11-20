@@ -21,6 +21,22 @@ describe("execution contract coverage gate", () => {
     expect(() => validateExecutionContract({ ...value, preconditionChecks: [{ ...value.preconditionChecks![0], sourceIndices: [2] }] }, source, ["admin"])).toThrow("不存在");
     expect(() => validateExecutionContract({ ...value, preconditionChecks: [{ ...value.preconditionChecks![0], dependsOn: ["P1.1"] }] }, source, ["admin"])).toThrow("无效");
   });
+  it("accepts database parameter bindings only at database checks/actions", () => {
+    const value: any = { ...plan(), preconditionChecks: [{ id: "P1.1", sourceIndices: [1], sourceQuotes: ["已有指定模型"], statement: "指定模型存在", expected: "存在", method: "database", paramRefs: { model: "username" }, dependsOn: [] }] };
+    expect(validateExecutionContract(value, source, ["admin"]).preconditionChecks?.[0].paramRefs).toEqual({ model: "username" });
+    const databaseAction = { action: "database", instruction: "核对本例数据", paramRefs: { model: "username" } };
+    expect(validateExecutionContract({ ...value, steps: [{ ...value.steps[0], actions: [databaseAction] }] }, source, []).steps[0].actions[0].paramRefs).toEqual({ model: "username" });
+    expect(() => validateExecutionContract({ ...value, steps: [{ ...value.steps[0], actions: [{ ...databaseAction, paramRefs: { model: "unknown" } }] }] }, source, [])).toThrow();
+    value.preconditionChecks[0].method = "ui";
+    expect(() => validateExecutionContract(value, source, [])).toThrow("paramRefs");
+    value.preconditionChecks[0].method = "database";
+    value.steps[0].actions[0].paramRefs = { model: "username" };
+    expect(() => validateExecutionContract(value, source, [])).toThrow("paramRefs");
+  });
+  it("rejects runtime checks with no actual constraint", () => {
+    const value: any = { ...plan(), preconditionChecks: [{ id: "P1.1", sourceIndices: [1], sourceQuotes: ["已有指定模型"], statement: "输入存在", expected: "存在", method: "runtime", runtime: { valueRef: "password" }, dependsOn: [] }] };
+    expect(() => validateExecutionContract(value, source, [])).toThrow("实际约束");
+  });
   it("rejects fuzzy role substitution and unspecified toggle state", () => {
     expect(() => validateExecutionContract(plan(), source, ["administrator"])).toThrow("未配置角色");
     const value: any = plan(); delete value.steps[0].actions[0].value;

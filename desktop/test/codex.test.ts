@@ -37,6 +37,43 @@ describe("JsonRpcPeer", () => {
 });
 
 describe("CodexAppServer", () => {
+  it.each([false, true])("preserves provider errors when completion arrives early=%s", async (early) => {
+    const message = 'Invalid json schema: field anyOf';
+    const transport = fakeCodex(srv => srv.onRequest(async (method) => {
+      if (method === "initialize") return {};
+      if (method === "turn/start") {
+        const complete = () => {
+          srv.notify("error", { threadId: "th", turnId: "tu", error: { message }, willRetry: false });
+          srv.notify("turn/completed", { threadId: "th", turn: { id: "tu", status: "failed", error: { message } } });
+        };
+        if (early) complete(); else setImmediate(complete);
+        return { turn: { id: "tu" } };
+      }
+      throw new Error(method);
+    }));
+    const codex = new CodexAppServer({ binary: "codex", codexHome: "/tmp", approvals: { command: async () => "accept", fileChange: async () => "accept" } });
+    await codex.start(transport);
+    expect(await codex.runTurn("th", "convert")).toMatchObject({ status: "failed", message, tokens: 0 });
+  });
+  it("forwards outputSchema only when requested", async () => {
+    const starts: any[] = [];
+    const transport = fakeCodex(srv => srv.onRequest(async (method, params: any) => {
+      if (method === "initialize") return {};
+      if (method === "turn/start") {
+        starts.push(params);
+        setImmediate(() => srv.notify("turn/completed", { threadId: "th", turn: { id: "tu", status: "completed" } }));
+        return { turn: { id: "tu" } };
+      }
+      throw new Error(method);
+    }));
+    const codex = new CodexAppServer({ binary: "codex", codexHome: "/tmp", approvals: { command: async () => "accept", fileChange: async () => "accept" } });
+    await codex.start(transport);
+    const schema = { type: "object", properties: {} };
+    await codex.runTurn("th", "convert", { outputSchema: schema });
+    await codex.runTurn("th", "explore");
+    expect(starts[0].outputSchema).toEqual(schema);
+    expect(starts[1]).not.toHaveProperty("outputSchema");
+  });
   it("runs a turn, streams the message, tracks tokens and answers approvals", async () => {
     const approvals = { command: vi.fn(async () => "accept" as const), fileChange: vi.fn(async () => "decline" as const),
       mcpElicitation: vi.fn(async (p: { serverName: string }) => (p.serverName === "case-store" ? "accept" as const : "decline" as const)) };
@@ -93,6 +130,36 @@ describe("CodexAppServer", () => {
     const result = await codex.runTurn(await codex.startThread({ cwd: "/ws" }), "x", { tokenLimit: 1000 });
     expect(result.status).toBe("interrupted_budget");
     expect(interrupts).toEqual([{ threadId: "th", turnId: "tu" }]);
+  });
+
+  it("interrupts an agent turn after a hard UI precondition failure", async () => {
+    const interrupts: unknown[] = [];
+    const transport = fakeCodex((srv) => {
+      srv.onRequest(async (method, params: any) => {
+        if (method === "initialize") return {};
+        if (method === "thread/start") return { thread: { id: "th" } };
+        if (method === "turn/start") {
+          setImmediate(() => {
+            const completed = (text: string) => srv.notify("item/completed", { threadId: "th", turnId: "tu", item: {
+              type: "mcpToolCall", server: "browser", arguments: { query: "PRECONDITION_BLOCKED: example" }, result: { content: [{ type: "text", text }] } } });
+            completed('{"snapshot":"PRECONDITION_BLOCKED: example"}');
+            completed("PRECONDITION_BLOCKED: P1.1");
+          });
+          return { turn: { id: "tu" } };
+        }
+        if (method === "turn/interrupt") {
+          interrupts.push(params);
+          srv.notify("turn/completed", { threadId: "th", turn: { id: "tu", status: "interrupted" } });
+          return {};
+        }
+        throw new Error(method);
+      });
+    });
+    const codex = new CodexAppServer({ binary: "codex", codexHome: "/tmp", approvals: { command: async () => "decline", fileChange: async () => "decline" } });
+    await codex.start(transport);
+    await codex.startThread({ cwd: "/ws" });
+    await expect(codex.runTurn("th", "探索 UI", { stopOnUiBlock: true })).resolves.toMatchObject({ status: "interrupted_precondition", message: "PRECONDITION_BLOCKED: P1.1" });
+    expect(interrupts).toHaveLength(1);
   });
 });
 

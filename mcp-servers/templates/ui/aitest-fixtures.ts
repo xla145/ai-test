@@ -7,6 +7,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+export const createUiInputs = valueTools.createUiInputs;
+export const assertRuntimeInput = valueTools.assertRuntimeInput;
+export const resolveInputParams = valueTools.resolveInputParams;
+
 /** 角色登录态（global-setup 生成） */
 export function storageStateFor(role: string): string | undefined {
   if (role === "default" && process.env.AITEST_DEFAULT_ROLE) role = process.env.AITEST_DEFAULT_ROLE;

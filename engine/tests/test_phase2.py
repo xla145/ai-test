@@ -50,6 +50,34 @@ def test_roles_test_data_and_env(cli, tmp_path):
     assert set(env["environments"]) == {"test", "staging"}
 
 
+def test_recipe_facts_update_preserve_clear_and_validate(cli, tmp_path):
+    pid = _project(cli, tmp_path)["id"]
+    facts = ["会员账号存在"]
+    row = cli("add-test-data", "--project", pid, "--key", "member", "--facts", json.dumps(facts))
+    assert row["facts"] == facts
+    assert cli("add-test-data", "--project", pid, "--key", "member", "--check-script", "check.py")["facts"] == facts
+    assert cli("list-test-data", "--project", pid)[0]["facts"] == facts
+    assert cli("add-test-data", "--project", pid, "--key", "member", "--facts", "[]")["facts"] == []
+    for invalid in ['{}', '[""]', '[1]']:
+        assert "facts" in cli("add-test-data", "--project", pid, "--key", "member", "--facts", invalid, ok=False)
+
+
+def test_recipe_facts_migrate_legacy_database(tmp_path):
+    import sqlite3
+    from aitest.store import Store
+
+    path = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE test_data (id TEXT PRIMARY KEY, project_id TEXT, key TEXT, check_script TEXT, seed_script TEXT, UNIQUE(project_id,key))")
+        conn.execute("INSERT INTO test_data VALUES ('d','p','member','check.py','')")
+    store = Store(path)
+    try:
+        row = store.get_test_data("p", "member")
+        assert row.facts == [] and row.check_script == "check.py"
+    finally:
+        store.close()
+
+
 def test_register_script_and_heal_flow(cli, tmp_path):
     pid = _project(cli, tmp_path)["id"]
     case = _case(cli, pid)

@@ -203,6 +203,8 @@ class TestData:
     key: str
     check_script: str = ""
     seed_script: str = ""
+    # Declared check capabilities; these are not evidence of a successful check.
+    facts: list[str] = field(default_factory=list)
     id: str = field(default_factory=lambda: new_id("td"))
 
 
