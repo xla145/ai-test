@@ -122,7 +122,7 @@ export function App() {
   const [projectSettingsOpen, setProjectSettingsOpen] = useState<false | { addEnv?: boolean }>(false);
   const { data: user } = useLoad(() => api().getUserInfo(), []);
   const update = useUpdateState();
-  const { notification } = AntApp.useApp();
+  const { notification, modal, message } = AntApp.useApp();
   // 新版本下载完成：提示一次，可直接重启更新
   useEffect(() => {
     if (update?.status !== "downloaded" || !update.version) return;
@@ -135,6 +135,24 @@ export function App() {
     });
   }, [update?.status, update?.version, notification]);
   const current = projects.find((p) => p.id === currentId) ?? projects.find((p) => !isGroup(p)) ?? projects[0];
+  const confirmDelete = (project: Project) => modal.confirm({
+    title: `删除项目「${project.name}」？`,
+    content: isGroup(project) ? "将删除该大项目的共享配置和凭据。" :
+      <>将删除客户端中的用例、执行记录和项目凭据。工作目录 <Typography.Text code>{project.workspace_path}</Typography.Text> 及其中的文件会保留。</>,
+    okText: "删除项目", okButtonProps: { danger: true }, cancelText: "取消", autoFocusButton: "cancel",
+    onOk: async () => {
+      try {
+        await api().deleteProject(project.id);
+      } catch (error) {
+        message.error((error as Error).message);
+        throw error;
+      }
+      setProjectSettingsOpen(false);
+      await reload();
+      setCurrentId(project.parent_id || undefined);
+      message.success(`已删除项目「${project.name}」`);
+    },
+  });
   // 内嵌浏览器打开时界面只有半屏：侧栏收成图标，把宽度留给内容
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const compact = viewVisible || navigationCollapsed;
@@ -261,7 +279,7 @@ export function App() {
               <Flex align="center" gap={12} style={{ minWidth: 0, flex: 1 }}>
                 <div className="header-project-switcher">
                   <ProjectSwitcher projects={projects} current={current} compact={false}
-                    onSelect={openProject} onCreate={setCreating} />
+                    onSelect={openProject} onCreate={setCreating} onDelete={confirmDelete} />
                 </div>
                 {(showSettings || (current && nav !== "home")) && <>
                   <span className="header-path-divider" aria-hidden="true">/</span>
@@ -396,7 +414,7 @@ export function App() {
 
       {current && (
         <ProjectSettings project={current} open={!!projectSettingsOpen} addEnv={projectSettingsOpen ? projectSettingsOpen.addEnv : false} onClose={() => setProjectSettingsOpen(false)}
-          onDeleted={() => setCurrentId(undefined)} />
+          onDelete={confirmDelete} />
       )}
 
       <NewProjectModal open={!!creating} preset={creating || NO_PRESET} groups={projects.filter(isGroup)} onClose={() => setCreating(false)} onCreated={async (p) => { await reload(); openProject(p.id); }} />

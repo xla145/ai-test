@@ -1,5 +1,5 @@
 import { DeleteOutlined, EditOutlined, PlusOutlined, RollbackOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Button, Card, Drawer, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import { createContext, useContext, useEffect, useState } from "react";
 import { api, isGroup, type Project } from "../api";
 import { useAction } from "../hooks";
@@ -157,17 +157,16 @@ export function EnvTable({ project, autoAdd, onAutoAddDone }: {
   );
 }
 
-export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
+export function ProjectSettings({ project, open, addEnv, onClose, onDelete }: {
   project: Project;
   open: boolean;
   /** 打开时直接弹出「添加环境」（从空状态、快速开始进入） */
   addEnv?: boolean;
   onClose: () => void;
-  onDeleted: () => void;
+  onDelete: (project: Project) => void;
 }) {
   const { reload, projects } = useProjects();
   const { busy, run } = useAction();
-  const { modal } = App.useApp();
   const [nameForm] = Form.useForm<{ name: string; projectType: ProjectType }>();
   useEffect(() => {
     if (open) nameForm.setFieldsValue({ name: project.name, projectType: project.project_type ?? "multi" });
@@ -176,28 +175,6 @@ export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
   const groups = projects.filter(isGroup);
   const childCount = project.children?.length ?? 0;
 
-  const remove = () => modal.confirm({
-    title: `从客户端移除「${project.name}」？`,
-    content: group ? (
-      <Typography.Paragraph style={{ marginBottom: 0 }}>将删除大项目的共享环境、角色账号、设置，以及钥匙串中的 token 与账号密码。</Typography.Paragraph>
-    ) : (
-      <>
-        <Typography.Paragraph>将删除该项目在客户端中的记录：用例库、执行记录、归因、修改建议与复核，以及钥匙串中的环境 token 和角色账号。</Typography.Paragraph>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-          workspace 目录 <Typography.Text code>{project.workspace_path}</Typography.Text> 不会删除。先在「工程化 → 团队共享」导出，之后可以重新导入。
-        </Typography.Paragraph>
-      </>
-    ),
-    okText: "移除",
-    okButtonProps: { danger: true },
-    cancelText: "取消",
-    onOk: () => run(async () => {
-      await api().deleteProject(project.id);
-      await reload();
-      onClose();
-      onDeleted();
-    }, "项目已移除"),
-  });
 
   return (
     <Drawer open={open} onClose={onClose} width={640} title={group ? "大项目设置" : "项目设置"} destroyOnHidden>
@@ -252,7 +229,7 @@ export function ProjectSettings({ project, open, addEnv, onClose, onDeleted }: {
               ? "只删除大项目的共享配置与凭据。"
               : "只删除客户端中的记录与凭据，workspace 目录与其中的 git 历史保留。"} />
           )}
-          <Button danger loading={busy} disabled={group && childCount > 0} onClick={remove}>从客户端移除</Button>
+          <Button danger loading={busy} disabled={group && childCount > 0} onClick={() => onDelete(project)}>删除项目</Button>
         </Space>
       </Card>
     </Drawer>

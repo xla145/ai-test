@@ -1,15 +1,16 @@
-import { CheckOutlined, ClusterOutlined, FolderOpenOutlined, PlusOutlined, DownOutlined } from "@ant-design/icons";
+import { CheckOutlined, ClusterOutlined, DeleteOutlined, FolderOpenOutlined, PlusOutlined, DownOutlined } from "@ant-design/icons";
 import { Dropdown, Tooltip, theme, type MenuProps } from "antd";
 import { isGroup, type Project } from "../api";
 
 /**
  * 项目切换器：项目列表收进下拉菜单，可用于顶部工具栏或紧凑入口。
  */
-export function ProjectSwitcher({ projects, current, compact, onSelect, onCreate }: {
+export function ProjectSwitcher({ projects, current, compact, onSelect, onCreate, onDelete }: {
   projects: Project[];
   current?: Project;
   compact: boolean;
   onSelect: (id: string) => void;
+  onDelete: (project: Project) => void;
   onCreate: (preset: { parent?: string; kind?: "project" | "group" }) => void;
 }) {
   const { token } = theme.useToken();
@@ -24,6 +25,7 @@ export function ProjectSwitcher({ projects, current, compact, onSelect, onCreate
     label: <span className="switcher-item"><span className="switcher-item-name" title={p.name}>{p.name}</span>{check(p.id)}</span>,
   });
   const currentGroup = current && isGroup(current) ? current : parent;
+  const hasChildren = !!current && projects.some(project => project.parent_id === current.id);
   const items: MenuProps["items"] = [
     ...groups.flatMap((g, index) => [
       ...(index ? [{ type: "divider" as const }] : []),
@@ -38,9 +40,13 @@ export function ProjectSwitcher({ projects, current, compact, onSelect, onCreate
       ...(currentGroup ? [{ key: `new:${currentGroup.id}`, label: `子项目 · ${currentGroup.name}` }] : []),
       { key: "create:group", label: "大项目" },
     ] },
+    ...(current ? [{ key: "delete-current", icon: <DeleteOutlined />, danger: true,
+      label: "删除当前项目", disabled: hasChildren,
+      title: hasChildren ? "请先移出或删除子项目" : current.name }] : []),
   ];
 
   const onClick: MenuProps["onClick"] = ({ key }) => {
+    if (key === "delete-current" && current) return onDelete(current);
     if (key.startsWith("new:")) return onCreate({ parent: key.slice(4) });
     if (key === "create:project") return onCreate({});
     if (key === "create:group") return onCreate({ kind: "group" });
